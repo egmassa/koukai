@@ -1,0 +1,4110 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV電気代按分システム</title>
+    <!--
+        EV電気代按分システム
+        v4.1-drive : Google Drive連携追加 (2026-05-03)
+          - Google Drive連携UI追加（energy_unified_*.json 統合ファイル形式）
+          - Drive読込時に光熱費データから電気費用・使用量を自動同期
+          - maxEfficiency空配列対策（-Infinity防止）
+          - ランキングテーブルのnull安全化
+          - CSVエクスポートのundefined対策
+    -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+    <script>
+    // ─── Google Drive Manager (共通) ──────────────────────────────────────────
+    const driveManager = {
+        clientId: '', folderId: '', accessToken: null, tokenClient: null,
+        gapiReady: false, gisReady: false,
+        _loadScript(src) {
+            return new Promise((resolve, reject) => {
+                if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+                const s = document.createElement('script');
+                s.src = src; s.onload = resolve; s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        },
+        async setup(clientId, folderId) {
+            this.clientId = clientId;
+            // folders/ プレフィックスを自動除去
+            this.folderId = folderId.replace(/^(folders\/|https:\/\/drive\.google\.com\/.*\/folders\/)/, '').trim();
+            await this._loadScript('https://apis.google.com/js/api.js');
+            await new Promise(resolve => gapi.load('client', resolve));
+            await gapi.client.init({ discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+            this.gapiReady = true;
+            await this._loadScript('https://accounts.google.com/gsi/client');
+            this.tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: clientId, scope: 'https://www.googleapis.com/auth/drive', callback: () => {}
+            });
+            this.gisReady = true;
+        },
+        getToken(silent = true) {
+            return new Promise((resolve, reject) => {
+                let timer = silent ? setTimeout(() => reject(new Error('silent_timeout')), 5000) : null;
+                this.tokenClient.callback = (resp) => {
+                    if (timer) clearTimeout(timer);
+                    if (resp.error) { reject(new Error(resp.error)); return; }
+                    this.accessToken = resp.access_token;
+                    gapi.client.setToken(resp);
+                    resolve(resp.access_token);
+                };
+                this.tokenClient.requestAccessToken({ prompt: silent ? 'none' : '' });
+            });
+        },
+        async ensureToken() { if (!this.accessToken) await this.getToken(false); },
+        async findLatestJson(prefix) {
+            await this.ensureToken();
+            const resp = await gapi.client.drive.files.list({
+                q: `'${this.folderId}' in parents and name contains '${prefix}' and name contains '.json' and trashed=false`,
+                orderBy: 'name desc', pageSize: 5, fields: 'files(id,name,modifiedTime)'
+            });
+            const files = resp.result.files || [];
+            return files.length > 0 ? files[0] : null;
+        },
+        async downloadJson(fileId) {
+            const resp = await gapi.client.drive.files.get({ fileId, alt: 'media' });
+            return JSON.parse(resp.body);
+        },
+        async _checkExists(filename) {
+            const resp = await gapi.client.drive.files.list({
+                q: `'${this.folderId}' in parents and name='${filename}' and trashed=false`,
+                fields: 'files(id)'
+            });
+            const files = resp.result.files || [];
+            return files.length > 0 ? files[0].id : null;
+        },
+        async uploadJson(filename, data) {
+            await this.ensureToken();
+            const content = JSON.stringify(data, null, 2);
+            const existingId = await this._checkExists(filename);
+            if (existingId) {
+                await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+                    body: content
+                });
+            } else {
+                const meta = { name: filename, mimeType: 'application/json', parents: [this.folderId] };
+                const form = new FormData();
+                form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+                form.append('file', new Blob([content], { type: 'application/json' }));
+                await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${this.accessToken}` }, body: form
+                });
+            }
+        }
+    };
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root,
+        [data-theme="light"] {
+            --bg-body: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            --bg-card: #ffffff;
+            --bg-header: #ffffff;
+            --text-color: #4b5563;
+            --text-color-dark: #1f2937;
+            --header-text: #4c51bf;
+            --border-color: #e5e7eb;
+            --edit-indicator-bg: #fef3c7;
+            --edit-indicator-border: #fbbf24;
+            --edit-indicator-text: #92400e;
+            --table-row-hover-bg: #f9fafb;
+            --info-box-bg: #dbeafe;
+            --info-box-border: #93c5fd;
+            --info-box-text: #1e40af;
+            --info-box-list: #2563eb;
+            --error-box-bg: #fee2e2;
+            --error-box-border: #fca5a5;
+            --error-box-text: #991b1b;
+            --chart-color: #4b5563;
+            --chart-border: #e5e7eb;
+            --chart-p1-color: #ef4444;
+            --chart-p2-color: #3b82f6;
+            --chart-p1-colors: #ef4444, #f87171, #fca5a5;
+            --chart-p2-colors: #3b82f6, #60a5fa, #93c5fd;
+            --input-bg: #ffffff;
+            --input-disabled-bg: #f3f4f6;
+            --input-disabled-text: #9ca3af;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+            --bg-card: #374151;
+            --bg-header: #1f2937;
+            --text-color: #d1d5db;
+            --text-color-dark: #ffffff;
+            --header-text: #a5b4fc;
+            --border-color: #4b5563;
+            --edit-indicator-bg: #42350a;
+            --edit-indicator-border: #785a08;
+            --edit-indicator-text: #fde047;
+            --table-row-hover-bg: #4b5563;
+            --info-box-bg: #1e3a8a;
+            --info-box-border: #3b82f6;
+            --info-box-text: #dbeafe;
+            --info-box-list: #93c5fd;
+            --error-box-bg: #7f1d1d;
+            --error-box-border: #ef4444;
+            --error-box-text: #fecaca;
+            --chart-color: #d1d5db;
+            --chart-border: #4b5563;
+            --chart-p1-color: #f87171;
+            --chart-p2-color: #60a5fa;
+            --chart-p1-colors: #f87171, #ef4444, #b91c1c;
+            --chart-p2-colors: #60a5fa, #3b82f6, #1d4ed8;
+            --input-bg: #374151;
+            --input-disabled-bg: #1f2937;
+            --input-disabled-text: #6b7280;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-body);
+            min-height: 100vh;
+            padding: 20px;
+            color: var(--text-color);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: var(--bg-header);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s;
+        }
+
+        .header h1 {
+            color: var(--header-text);
+            font-size: 2em;
+            margin-bottom: 5px;
+            transition: color 0.3s;
+        }
+
+        .header p {
+            color: var(--text-color);
+            transition: color 0.3s;
+        }
+
+        .theme-switch-wrapper {
+            display: flex;
+            align-items: center;
+        }
+
+        .theme-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .theme-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4b5563;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "🌙";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        input:checked+.slider {
+            background-color: #a5b4fc;
+        }
+
+        input:checked+.slider:before {
+            content: "☀️";
+            transform: translateX(26px);
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-primary {
+            background: #4c51bf;
+            color: white;
+        }
+
+        .btn-primary.active {
+            background: #3730a3;
+            box-shadow: 0 4px 12px rgba(76, 81, 191, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--header-text);
+            border: 2px solid var(--border-color);
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+            margin-left: auto;
+        }
+
+        .btn-purple {
+            background: #7c3aed;
+            color: white;
+        }
+
+        .content-area {
+            display: none;
+        }
+
+        .content-area.active {
+            display: block;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background 0.3s;
+            margin-bottom: 20px;
+            min-height: 300px;
+            /* 最小高さを確保 */
+        }
+
+        .card.list-card {
+            /* list-cardに特化 */
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            /* 親（input-view）内で利用可能なスペースを埋める */
+            min-height: 60vh;
+            /* 画面高さの最小高を設定 */
+        }
+
+        .card h2 {
+            color: var(--text-color-dark);
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            transition: color 0.3s;
+        }
+
+        .form-content-scrollable {
+            flex: auto;
+            overflow-y: visible;
+        }
+
+        .form-actions {
+            flex-shrink: 0;
+            padding-top: 20px;
+            margin-top: 15px;
+            border-top: 2px solid var(--border-color);
+            transition: border-color 0.3s;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 8px;
+            font-size: 14px;
+            transition: color 0.3s;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border 0.3s, background 0.3s, color 0.3s;
+            background: var(--input-bg);
+            color: var(--text-color-dark);
+        }
+
+        /* ★ バリデーションエラー時のスタイル */
+        .form-group input.error,
+        .form-group input.error:focus {
+            border-color: var(--error-box-border);
+            box-shadow: 0 0 0 1px var(--error-box-border);
+        }
+
+        .form-group input:disabled {
+            background: var(--input-disabled-bg);
+            color: var(--input-disabled-text);
+            cursor: not-allowed;
+        }
+
+        .form-group input:focus:not(:disabled),
+        .form-group select:focus {
+            outline: none;
+            border-color: #4c51bf;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .month-nav-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .btn-nav {
+            padding: 10px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            background: var(--bg-card);
+            color: var(--header-text);
+        }
+
+        .btn-nav:hover {
+            border-color: #4c51bf;
+        }
+
+        .form-input-grid-ev {
+            display: grid;
+            grid-template-columns: auto 1fr auto 1fr auto 1fr;
+            gap: 12px;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .grid-label {
+            font-weight: 600;
+            color: var(--text-color-dark);
+            font-size: 14px;
+            text-align: right;
+            padding-right: 10px;
+            transition: color 0.3s;
+        }
+
+        .edit-indicator {
+            background: var(--edit-indicator-bg);
+            border: 2px solid var(--edit-indicator-border);
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            color: var(--edit-indicator-text);
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table thead {
+            background: var(--table-row-hover-bg);
+            position: sticky;
+            top: 0;
+            transition: background 0.3s;
+            z-index: 10;
+        }
+
+        /* 行の高さを低くする */
+        .data-table th,
+        .data-table td {
+            padding: 4px 6px;
+            /* 元は12px */
+            font-size: 15px;
+            /* 少し小さめ */
+        }
+
+        /* 選択行のハイライト */
+        .data-table tr.selected {
+            background-color: rgba(59, 130, 246, 0.2) !important;
+            /* 青系 */
+        }
+
+        .data-table td {
+            padding: 8px;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-color);
+            transition: border-color 0.3s, color 0.3s;
+        }
+
+        .data-table tbody tr:hover {
+            background: var(--table-row-hover-bg);
+        }
+
+        .data-table tbody tr.selected-row {
+            background-color: rgba(76, 81, 191, 0.2) !important;
+        }
+
+        .percentage-change {
+            font-weight: 600;
+            font-size: 12px;
+            display: inline-block;
+            margin-left: 5px;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .increase {
+            color: #ef4444;
+            background-color: rgba(239, 68, 68, 0.1);
+        }
+
+        .decrease {
+            color: #10b981;
+            background-color: rgba(16, 185, 129, 0.1);
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        @media (min-width: 769px) {
+            #tableContainer {
+                max-height: 65vh;
+                /* 画面の高さの65%を最大高に */
+                overflow-y: auto;
+                /* 垂直スクロールを有効に */
+                flex: 1;
+                /* 親の.table-scroll-wrapper内で利用可能なスペースを埋める */
+            }
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .btn-delete {
+            color: #ef4444;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 18px;
+        }
+
+        .btn-delete:hover {
+            color: #dc2626;
+        }
+
+        .analysis-section {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background 0.3s;
+        }
+
+        .analysis-section h2 {
+            color: var(--text-color-dark);
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            transition: color 0.3s;
+        }
+
+        .analysis-section h3 {
+            color: var(--text-color-dark);
+            margin-bottom: 15px;
+            transition: color 0.3s;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            /* ★★★ 修正点: 上下の間隔を40pxに ★★★ */
+            gap: 40px 20px;
+            margin-bottom: 20px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 700px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            transition: background 0.3s;
+        }
+
+        .modal-content h2 {
+            color: var(--text-color-dark);
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            transition: color 0.3s;
+        }
+
+        .modal-section {
+            margin-bottom: 25px;
+        }
+
+        .modal-section h3 {
+            color: var(--text-color);
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            transition: color 0.3s;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            resize: vertical;
+            background: var(--bg-card);
+            color: var(--text-color-dark);
+            transition: border-color 0.3s, background 0.3s, color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #7c3aed;
+        }
+
+        .info-box {
+            background: var(--info-box-bg);
+            border: 2px solid var(--info-box-border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            transition: background 0.3s, border-color 0.3s;
+        }
+
+        .info-box p {
+            color: var(--info-box-text);
+            font-size: 13px;
+            margin-bottom: 8px;
+            transition: color 0.3s;
+        }
+
+        .info-box ul {
+            color: var(--info-box-list);
+            font-size: 13px;
+            margin-left: 20px;
+            transition: color 0.3s;
+        }
+
+        .error-box {
+            background: var(--error-box-bg);
+            border: 2px solid var(--error-box-border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            transition: background 0.3s, border-color 0.3s;
+        }
+
+        .error-box p {
+            color: var(--error-box-text);
+            font-size: 13px;
+            transition: color 0.3s;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .sortable:hover {
+            background-color: var(--table-row-hover-bg);
+        }
+
+        .sort-icon {
+            display: inline-block;
+            width: 1em;
+            text-align: right;
+            color: var(--text-color);
+            transition: color 0.3s;
+            margin-left: 4px;
+        }
+
+        .column-input {
+            background-color: rgba(76, 81, 191, 0.1);
+        }
+
+        .column-calculated {
+            background-color: rgba(16, 185, 129, 0.1);
+        }
+
+        .table-scroll-top {
+            overflow-x: auto;
+            overflow-y: hidden;
+            height: 12px;
+            /* 高さを少し大きく */
+            margin-bottom: 6px;
+        }
+
+        .table-scroll-top::-webkit-scrollbar {
+            height: 12px;
+            /* スクロールバー自体の高さ */
+        }
+
+        .table-scroll-top::-webkit-scrollbar-thumb {
+            background: #a5b4fc;
+            border-radius: 6px;
+            border: 2px solid var(--bg-card);
+            /* 背景色で縁取り */
+        }
+
+        /* 固定列 */
+        .fixed-columns th.sticky-col,
+        .fixed-columns td.sticky-col {
+            position: sticky;
+            background: var(--bg-card);
+            z-index: 2;
+        }
+
+        .fixed-columns th.sticky-col:first-child,
+        .fixed-columns td.sticky-col:first-child {
+            border-right: 1px solid var(--border-color);
+        }
+
+        /* ★ 分析画面の固定帯の修正 */
+        .analysis-sticky-nav {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 10px 15px;
+            /* パディングを小さくして高さを調整 */
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            position: sticky;
+            top: 10px;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nav-buttons {
+                flex-direction: column;
+            }
+
+            .btn-success {
+                margin-left: 0;
+            }
+
+            .form-input-grid-ev {
+                grid-template-columns: auto 1fr;
+                gap: 10px;
+            }
+
+            .grid-label {
+                grid-column: 1 / 2;
+                text-align: right;
+                padding-right: 10px;
+                font-size: 14px;
+                margin-top: 0;
+            }
+
+            #evTotalCost,
+            #evTotalUsage,
+            #evCumulativeKwh,
+            #evCarUsage,
+            #evBaseFee {
+                grid-column: 2 / 3;
+            }
+
+            .form-content-scrollable {
+                overflow-y: visible;
+                flex: auto;
+            }
+
+            .table-scroll-wrapper {
+                position: relative;
+                width: 100%;
+            }
+
+            #tableContainer {
+                overflow-x: auto;
+                overflow-y: visible;
+            }
+
+            #tableContainer::-webkit-scrollbar {
+                height: 8px;
+            }
+
+            #tableContainer::-webkit-scrollbar-thumb {
+                background: #a5b4fc;
+                border-radius: 4px;
+            }
+
+        }
+
+        /* ★★★ (新規追加) 自動コメント表示ボックス ★★★ */
+        .analysis-comment-box {
+            background: var(--info-box-bg);
+            border: 1px solid var(--info-box-border);
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-top: 15px;
+            /* グラフとの隙間を詰めるのをやめた */
+            margin-bottom: 15px;
+            font-size: 13px;
+            color: var(--info-box-text);
+        }
+
+        .analysis-comment-box ul {
+            margin-left: 20px;
+            color: var(--info-box-list);
+        }
+
+        .analysis-comment-box li {
+            margin-bottom: 4px;
+        }
+
+        /* ツールチップスタイル */
+        .column-tooltip {
+            position: absolute;
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 10000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease-in-out;
+            min-width: 250px;
+            max-width: 350px;
+        }
+
+        .column-tooltip.visible {
+            opacity: 1;
+        }
+
+        .column-tooltip .tooltip-title {
+            font-weight: 600;
+            color: var(--header-text);
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+
+        .column-tooltip .tooltip-formula {
+            color: var(--text-color);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            background: var(--input-bg);
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        /* ツールチップのある列にホバーインジケーターを追加 */
+        th.sortable:hover {
+            background-color: var(--table-row-hover-bg);
+            cursor: help;
+        }
+
+        /* 列設定モーダル */
+        .column-list {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            background: var(--input-bg);
+        }
+
+        .column-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: move;
+            transition: all 0.2s ease;
+        }
+
+        .column-item:hover {
+            border-color: var(--header-text);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .column-item.dragging {
+            opacity: 0.5;
+            border-style: dashed;
+        }
+
+        .drag-handle {
+            font-size: 18px;
+            color: var(--text-color);
+            cursor: grab;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .column-label {
+            flex: 1;
+            font-weight: 600;
+            color: var(--text-color-dark);
+        }
+
+        .column-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .column-badge.input {
+            background-color: rgba(76, 81, 191, 0.2);
+            color: #4c51bf;
+        }
+
+        .column-badge.calculated {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .btn-column-config {
+            background: none;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 4px;
+            margin-left: 4px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .btn-column-config:hover {
+            opacity: 1;
+        }
+
+        .validation-error-message {
+            color: var(--error-box-text);
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .validation-error-message.active {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>🚗 EV電気代按分システム</h1>
+                <p>電気自動車の充電代按分と分析</p>
+            </div>
+            <div class="theme-switch-wrapper">
+                <label class="theme-switch" for="themeToggle">
+                    <input type="checkbox" id="themeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="nav-buttons">
+            <button class="btn btn-primary active" onclick="switchView(event, 'input')">➕ データ入力・一覧</button>
+            <button class="btn btn-secondary" onclick="switchView(event, 'analysis')">📊 分析レポート</button>
+
+
+            <!-- Google Drive連携 -->
+            <div id="drivePanel" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px;margin:8px 0;">
+                <h4 style="margin:0 0 8px 0;color:#0369a1;font-size:0.85em;">☁️ Google Drive連携</h4>
+                <div style="margin-bottom:6px;">
+                    <span id="driveStatusBadge" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:12px;font-size:0.72em;background:#fee2e2;color:#dc3545;">● 未接続</span>
+                    <span id="driveLastFileInfo" style="font-size:0.7em;color:#666;margin-left:8px;"></span>
+                </div>
+                <div style="margin-bottom:5px;">
+                    <label style="font-size:0.72em;font-weight:bold;display:block;margin-bottom:2px;">OAuth Client ID</label>
+                    <input type="text" id="driveClientIdInput" placeholder="xxxxxxxx.apps.googleusercontent.com"
+                        style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.72em;box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:6px;">
+                    <label style="font-size:0.72em;font-weight:bold;display:block;margin-bottom:2px;">保存フォルダID</label>
+                    <input type="text" id="driveFolderIdInput" placeholder="1aBcDeFgHiJk..."
+                        style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.72em;box-sizing:border-box;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
+                    <button onclick="saveDriveSettings()" style="background:#6c757d;color:white;border:none;padding:5px;border-radius:4px;font-size:0.72em;cursor:pointer;">💾 設定保存</button>
+                    <button onclick="connectDrive()" style="background:#4285F4;color:white;border:none;padding:5px;border-radius:4px;font-size:0.72em;cursor:pointer;">🔗 Googleで接続</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                    <button onclick="loadFromDrive()" style="background:#34a853;color:white;border:none;padding:5px;border-radius:4px;font-size:0.72em;cursor:pointer;">☁️ 最新読込</button>
+                    <button onclick="saveToDrive()" style="background:#667eea;color:white;border:none;padding:5px;border-radius:4px;font-size:0.72em;cursor:pointer;">💾 Drive保存</button>
+                </div>
+            </div>
+
+            <button class="btn btn-purple" onclick="openImportModal()">⬆️ CSVインポート</button>
+
+            <button class="btn btn-purple" style="background-color: #0d9488;"
+                onclick="document.getElementById('jsonFileImport').click()">⬆️ JSONインポート</button>
+            <input type="file" id="jsonFileImport" accept=".json" style="display: none;"
+                onchange="handleJSONImport(event)">
+
+            <button class="btn btn-success" onclick="exportData()">⬇️ CSVエクスポート</button>
+            <button class="btn btn-success" style="background-color: #0f766e;" onclick="exportDataJSON()">⬇️
+                JSONエクスポート（設定含む）</button>
+        </div>
+
+        <div id="input-view" class="content-area active" style="display: flex; flex-direction: column; flex: 1;">
+            <div class="card">
+                <div class="form-content-scrollable">
+                    <h2>EV電気代按分 入力</h2>
+                    <div id="editIndicator" class="edit-indicator" style="display: none;">📝 編集モード:既存データを更新します</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>年</label>
+                            <input type="number" id="year" value="" onchange="onYearMonthChange()">
+                        </div>
+                        <div class="form-group">
+                            <label>月</label>
+                            <select id="month" onchange="onYearMonthChange()">
+                                <option value="1">1月</option>
+                                <option value="2">2月</option>
+                                <option value="3">3月</option>
+                                <option value="4">4月</option>
+                                <option value="5">5月</option>
+                                <option value="6">6月</option>
+                                <option value="7">7月</option>
+                                <option value="8">8月</option>
+                                <option value="9">9月</option>
+                                <option value="10">10月</option>
+                                <option value="11">11月</option>
+                                <option value="12">12月</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="month-nav-container">
+                        <button class="btn-nav" onclick="navigateMonth(-1)">＜ 前の月へ</button>
+                        <button class="btn-nav" onclick="navigateMonth(1)">次の月へ ＞</button>
+                    </div>
+
+                    <div class="form-input-grid-ev">
+                        <label for="evTotalCost" class="grid-label">💰 総電気料金 (円)</label>
+                        <input type="number" step="0.01" id="evTotalCost" placeholder="請求書待ちなら空欄OK"
+                            oninput="clearValidationError('evTotalCost')">
+                        <div id="error-evTotalCost" class="validation-error-message">マイナスの値は入力できません。</div>
+
+                        <label for="evTotalUsage" class="grid-label">⚡ 総使用電力量 (kWh)</label>
+                        <input type="number" step="0.1" id="evTotalUsage" placeholder="請求書待ちなら空欄OK"
+                            oninput="clearValidationError('evTotalUsage')">
+                        <div id="error-evTotalUsage" class="validation-error-message">マイナスの値は入力できません。</div>
+
+                        <label for="evBaseFee" class="grid-label">🏠 基本料金 (円)</label>
+                        <input type="number" step="0.01" id="evBaseFee" placeholder="請求書待ちなら空欄OK"
+                            oninput="clearValidationError('evBaseFee')">
+                        <div id="error-evBaseFee" class="validation-error-message">マイナスの値は入力できません。</div>
+                        <label for="evCumulativeKwh" class="grid-label">📊 累計EV充電量 (kWh)</label>
+                        <input type="number" step="0.1" id="evCumulativeKwh" placeholder="例: 12345.6"
+                            oninput="handleCumulativeKwhInput()">
+
+                        <label for="evCarUsage" class="grid-label">🚗 当月EV充電量 (kWh)</label>
+                        <input type="number" step="0.1" id="evCarUsage" placeholder="自動計算" disabled
+                            oninput="calculateEfficiency()">
+
+                        <label for="evCumulativeDistance" class="grid-label">🛣️ 累計走行距離 (km)</label>
+                        <input type="number" step="0.1" id="evCumulativeDistance" placeholder="例: 98765.4"
+                            oninput="handleCumulativeDistanceInput()">
+
+                        <label for="evMonthlyDistance" class="grid-label">📏 当月走行距離 (km)</label>
+                        <input type="number" step="0.1" id="evMonthlyDistance" placeholder="自動計算" disabled>
+
+                        <label for="evEfficiency" class="grid-label">⚙️ 電費 (km/kWh)</label>
+                        <input type="number" step="0.01" id="evEfficiency" placeholder="自動計算" disabled>
+
+                        <div style="grid-column: 4 / -1;"></div>
+                    </div>
+
+                    <div class="info-box" style="font-size: 13px; margin-top: 15px;">
+                        💡 「累計EV充電量」を入力すると、前月との差分から「当月EV充電量」が自動計算されます。<br>
+                        💡 「累計走行距離」を入力すると、前月との差分から「当月走行距離」と「電費(km/kWh)」が自動計算されます。
+                    </div>
+                    <div id="generalError" class="error-box" style="display: none; margin-top: 15px;">
+                        <p id="generalErrorText" style="font-weight: 600;"></p>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-primary" style="width: 100%;" onclick="addData()">
+                        <span id="submitButtonText">登録</span>
+                    </button>
+                    <button id="cancelEditButton" class="btn btn-secondary"
+                        style="width: 100%; margin-top: 10px; display: none;" onclick="cancelEdit()">キャンセル</button>
+                </div>
+            </div>
+
+            <div class="card list-card" style="flex: 1; display: flex; flex-direction: column;">
+                <h2>EV按分データ一覧</h2>
+
+                <div class="table-scroll-wrapper">
+                    <div class="table-scroll-top"></div>
+                    <div class="table-container" id="tableContainer">
+                        <table class="data-table fixed-columns">
+                            <thead>
+                                <tr>
+                                    <th class="sticky-col text-center" style="left:0; z-index:3; width: 80px;">操作</th>
+                                    <th class="sticky-col sortable" style="left:45px; z-index:3;"
+                                        onclick="requestSort('yearMonth')">
+                                        <span>年月</span><span id="sortIcon-yearMonth" class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-input" onclick="requestSort('evTotalCost')">
+                                        <span>総電気料金</span><span id="sortIcon-evTotalCost" class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('person1Cost')"><span>按分額（EVなし）</span><span
+                                            id="sortIcon-person1Cost" class="sort-icon"></span></th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('person2Cost')"><span>按分額（EV使用者）</span><span
+                                            id="sortIcon-person2Cost" class="sort-icon"></span></th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('carElectricCost')">
+                                        <span>当月EV電気代</span><span id="sortIcon-carElectricCost"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-input" onclick="requestSort('evTotalUsage')">
+                                        <span>総使用電力量(kWh)</span><span id="sortIcon-evTotalUsage"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-input"
+                                        onclick="requestSort('evCumulativeKwh')">
+                                        <span>累計EV充電量(kWh)</span><span id="sortIcon-evCumulativeKwh"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('evCarUsage')">
+                                        <span>当月EV充電量(kWh)</span><span id="sortIcon-evCarUsage"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-input"
+                                        onclick="requestSort('evCumulativeDistance')">
+                                        <span>累計走行距離(km)</span><span id="sortIcon-evCumulativeDistance"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('evMonthlyDistance')">
+                                        <span>当月走行距離(km)</span><span id="sortIcon-evMonthlyDistance"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('evEfficiency')">
+                                        <span>電費(km/kWh)</span><span id="sortIcon-evEfficiency"
+                                            class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-input" onclick="requestSort('evBaseFee')">
+                                        <span>基本料金</span><span id="sortIcon-evBaseFee" class="sort-icon"></span>
+                                    </th>
+                                    <th class="text-right sortable column-calculated"
+                                        onclick="requestSort('kwhUnitPrice')">
+                                        <span>電力量単価(円/kWh)</span><span id="sortIcon-kwhUnitPrice"
+                                            class="sort-icon"></span>
+                                    </th>
+
+                                </tr>
+                            </thead>
+                            <tbody id="dataTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div id="analysis-view" class="content-area">
+            <!-- ★ 修正: analysis-sticky-nav クラスを適用し、不要なマージンを削除 -->
+            <div class="analysis-sticky-nav">
+                <label style="font-weight: 600; margin-right: 10px;">集計モード:</label>
+                <button id="btn-mode-timeseries" class="btn btn-primary"
+                    onclick="setAggregationMode('timeseries')">時系列</button>
+                <button id="btn-mode-yearly" class="btn btn-secondary"
+                    onclick="setAggregationMode('yearly')">年別集計</button>
+                <button id="btn-mode-monthly_compare" class="btn btn-secondary"
+                    onclick="setAggregationMode('monthly_compare')">月別比較</button>
+            </div>
+            <div id="newAnalysisContent"></div>
+
+            <div id="analysisContent">
+                <div class="analysis-section">
+                    <h2>📊 基本レポート (月別推移)</h2>
+                    <div class="chart-grid">
+                        <div>
+                            <div class="chart-container"><canvas id="chart1"></canvas></div>
+                            <div class="analysis-comment-box" id="comment-box-chart1"></div>
+                        </div>
+                        <div>
+                            <div class="chart-container"><canvas id="chart2"></canvas></div>
+                            <div class="analysis-comment-box" id="comment-box-chart2"></div>
+                        </div>
+                        <div>
+                            <div class="chart-container"><canvas id="chart3"></canvas></div>
+                            <div class="analysis-comment-box" id="comment-box-chart3"></div>
+                        </div>
+                        <div>
+                            <div class="chart-container"><canvas id="chart4"></canvas></div>
+                        </div>
+                        <div>
+                            <div class="chart-container"><canvas id="chart5"></canvas></div>
+                            <div class="analysis-comment-box" id="comment-box-chart5"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <div id="importModal" class="modal">
+        <div class="modal-content">
+            <h2>📥 データインポート (EV按分)</h2>
+
+            <div class="modal-section">
+                <h3>📁 CSVファイルをアップロード</h3>
+                <input type="file" accept=".csv" id="fileInput"
+                    style="width: 100%; padding: 10px; border: 2px solid var(--border-color); border-radius: 8px;">
+            </div>
+
+            <div class="modal-section" style="border-top: 2px solid var(--border-color); padding-top: 25px;">
+                <h3>📝 テキストで貼り付け</h3>
+                <textarea id="importText" rows="8" placeholder="CSVデータをここに貼り付けてください..."></textarea>
+                <button class="btn btn-purple" style="margin-top: 12px;"
+                    onclick="handleTextImport()">テキストをインポート</button>
+            </div>
+
+            <div id="importError" class="error-box" style="display: none;">
+                <p style="font-weight: 600; margin-bottom: 5px;">エラー</p>
+                <p id="importErrorText"></p>
+            </div>
+
+            <div class="info-box">
+                <p style="font-weight: 600; margin-bottom: 8px;">📋 インポート形式 (EV按分)</p>
+                <p>以下のカラムを含むCSVを使用できます (自動認識):</p>
+                <ul style="margin-top: 8px;">
+                    <li><b>必須:</b> 年月 (または 年, 月), 総電気料金, 総使用電力量, 基本料金</li>
+                    <li><b>どちらか必須:</b> 当月EV充電量 <b>または</b> 累計EV充電量 (自動で当月分を計算)</li>
+                    <li><b>任意:</b> 累計走行距離(km) (自動で当月分と電費を計算)</li>
+                </ul>
+                <p style="margin-top: 8px;">※「年月」は "2023/12" の形式に対応しています。</p>
+                <p style="margin-top: 8px;">※既存の同じ年月のデータは上書きされます</p>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeImportModal()">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function syncScrollbars() {
+            const topScroll = document.querySelector('.table-scroll-top');
+            const bottomScroll = document.getElementById('tableContainer');
+            if (!topScroll || !bottomScroll) return;
+
+            const table = bottomScroll.querySelector('.data-table');
+            if (!table) return;
+
+            const tableWidth = table.offsetWidth;
+
+            let dummy = topScroll.querySelector('div');
+            if (!dummy) {
+                dummy = document.createElement('div');
+                dummy.style.height = '1px';
+                topScroll.appendChild(dummy);
+            }
+            dummy.style.width = `${table.scrollWidth + 20}px`; // 余白を追加
+
+
+            const onTopScroll = () => { bottomScroll.scrollLeft = topScroll.scrollLeft; };
+            const onBottomScroll = () => { topScroll.scrollLeft = bottomScroll.scrollLeft; };
+
+            topScroll.removeEventListener('scroll', onTopScroll);
+            bottomScroll.removeEventListener('scroll', onBottomScroll);
+            topScroll.addEventListener('scroll', onTopScroll);
+            bottomScroll.addEventListener('scroll', onBottomScroll);
+        }
+
+        let appData = [];
+        let driveClientId = localStorage.getItem('energyDriveClientId') || '';
+        let driveFolderId = localStorage.getItem('energyDriveFolderId') || '';
+        let driveStatus = 'disconnected';
+        let driveLastFile = null;
+        const DRIVE_FILE_PREFIX = 'energy_unified_';
+        let editingId = null;
+        let isInitialized = false;
+        // ★ 提案5: ソート設定をローカルストレージから読み込むように変更
+        let sortConfig = { key: 'yearMonth', direction: 'desc' };
+
+        // ★ 列順序の管理 (前回の修正を適用)
+        let columnOrder = [
+            'yearMonth',
+            'evCumulativeKwh',        // 累計EV充電量(kWh)
+            'evCarUsage',             // 当月EV充電量(kWh)
+            'kwhUnitPrice',           // 電力量単価(円/kWh)
+            'carElectricCost',        // 当月EV電気代
+            'evTotalCost',            // 総電気料金
+            'evTotalUsage',           // 総使用電力量(kWh)
+            'evCumulativeDistance',   // 累計走行距離(km)
+            'person1Cost',            // 按分額(EVなし)
+            'person2Cost',            // 按分額(EV使用者)
+            'evMonthlyDistance',      // 当月走行距離(km)
+            'evEfficiency',           // 電費(km/kWh)
+            'evBaseFee',              // 基本料金
+        ];
+
+        // ★★★ (追加) 集計モードとグラフインスタンスのグローバル変数 ★★★
+        let currentAggregationMode = 'timeseries';
+        let chartInstances = {}; // グラフインスタンスを保持
+
+        // 列の表示名と設定
+        const columnConfig = {
+            'yearMonth': { label: '年月', sticky: true, sortable: true },
+            'evTotalCost': { label: '総電気料金', sticky: false, sortable: true, className: 'column-input' },
+            'person1Cost': { label: '按分額(EVなし)', sticky: false, sortable: true, className: 'column-calculated' },
+            'person2Cost': { label: '按分額(EV使用者)', sticky: false, sortable: true, className: 'column-calculated' },
+            'carElectricCost': { label: '当月EV電気代', sticky: false, sortable: true, className: 'column-calculated' },
+            'evTotalUsage': { label: '総使用電力量(kWh)', sticky: false, sortable: true, className: 'column-input' },
+            'evCumulativeKwh': { label: '累計EV充電量(kWh)', sticky: false, sortable: true, className: 'column-input' },
+            'evCarUsage': { label: '当月EV充電量(kWh)', sticky: false, sortable: true, className: 'column-calculated' },
+            'evCumulativeDistance': { label: '累計走行距離(km)', sticky: false, sortable: true, className: 'column-input' },
+            'evMonthlyDistance': { label: '当月走行距離(km)', sticky: false, sortable: true, className: 'column-calculated' },
+            'evEfficiency': { label: '電費(km/kWh)', sticky: false, sortable: true, className: 'column-calculated' },
+            'evBaseFee': { label: '基本料金', sticky: false, sortable: true, className: 'column-input' },
+            'kwhUnitPrice': { label: '電力量単価(円/kWh)', sticky: false, sortable: true, className: 'column-calculated' }
+        };
+
+        function toggleTheme() {
+            const isChecked = document.getElementById('themeToggle').checked;
+            const theme = isChecked ? 'light' : 'dark';
+            document.documentElement.dataset.theme = theme;
+            localStorage.setItem('theme', theme);
+            setChartTheme(theme);
+
+            // ★ (修正) グラフ再描画
+            if (document.getElementById('analysis-view').classList.contains('active')) {
+                updateAnalysisView();
+            }
+        }
+
+        function setChartTheme(theme) {
+            const color = getComputedStyle(document.documentElement).getPropertyValue('--chart-color').trim();
+            const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--chart-border').trim();
+            Chart.defaults.color = color;
+            Chart.defaults.borderColor = borderColor;
+        }
+
+        function onYearMonthChange() {
+            editingId = null;
+            document.getElementById('editIndicator').style.display = 'none';
+            document.getElementById('cancelEditButton').style.display = 'none';
+            document.getElementById('submitButtonText').textContent = '登録';
+            loadExistingData();
+            updateDriveStatusUI();
+            if (driveClientId && driveFolderId) autoConnectDrive();
+        }
+
+        // ★ 提案2: 最新データの次の月に初期設定する関数を追加
+        function setNextMonthForInput() {
+            if (appData.length === 0) {
+                const now = new Date();
+                document.getElementById('year').value = now.getFullYear();
+                document.getElementById('month').value = now.getMonth() + 1;
+                return;
+            }
+
+            // 最新の年/月を取得
+            const latest = appData.reduce((prev, current) => {
+                const prevDate = prev.year * 100 + prev.month;
+                const currentDate = current.year * 100 + current.month;
+                return (currentDate > prevDate) ? current : prev;
+            }, { year: 0, month: 0 });
+
+            let nextYear = latest.year;
+            let nextMonth = latest.month + 1;
+
+            if (nextMonth > 12) {
+                nextMonth = 1;
+                nextYear += 1;
+            }
+
+            // フォームに設定
+            document.getElementById('year').value = nextYear;
+            document.getElementById('month').value = nextMonth;
+        }
+
+
+        // ─── Drive連携関数 ────────────────────────────────────
+        function saveDriveSettings() {
+            const cid = document.getElementById('driveClientIdInput')?.value.trim();
+            const fid = document.getElementById('driveFolderIdInput')?.value.trim();
+            if (!cid || !fid) { alert('Client IDとフォルダIDを入力してください'); return; }
+            driveClientId = cid; driveFolderId = fid;
+            localStorage.setItem('energyDriveClientId', cid);
+            localStorage.setItem('energyDriveFolderId', fid);
+            alert('設定を保存しました');
+        }
+
+        function updateDriveStatusUI() {
+            const badge = document.getElementById('driveStatusBadge');
+            const info = document.getElementById('driveLastFileInfo');
+            if (!badge) return;
+            const map = {
+                'disconnected': { text: '● 未接続', bg: '#fee2e2', fg: '#dc3545' },
+                'connecting':   { text: '● 接続中…', bg: '#fff3cd', fg: '#856404' },
+                'connected':    { text: '● 接続済み', bg: '#d1fae5', fg: '#065f46' },
+                'error':        { text: '● エラー', bg: '#fee2e2', fg: '#dc3545' }
+            };
+            const s = map[driveStatus] || map['disconnected'];
+            badge.style.background = s.bg; badge.style.color = s.fg; badge.textContent = s.text;
+            if (info && driveLastFile) info.textContent = `最終読込: ${driveLastFile.name}`;
+            const cidEl = document.getElementById('driveClientIdInput');
+            const fidEl = document.getElementById('driveFolderIdInput');
+            if (cidEl && !cidEl.value) cidEl.value = driveClientId;
+            if (fidEl && !fidEl.value) fidEl.value = driveFolderId;
+        }
+
+        async function connectDrive() {
+            const cid = document.getElementById('driveClientIdInput')?.value.trim() || driveClientId;
+            const fid = document.getElementById('driveFolderIdInput')?.value.trim() || driveFolderId;
+            if (!cid || !fid) { alert('Client IDとフォルダIDを入力してください'); return; }
+            // folders/ プレフィックスを自動除去
+            const fidClean = fid.replace(/^(folders\/|https:\/\/drive\.google\.com\/.*\/folders\/)/, '').trim();
+            driveClientId = cid; driveFolderId = fidClean;
+            localStorage.setItem('energyDriveClientId', cid);
+            localStorage.setItem('energyDriveFolderId', fidClean);
+            try {
+                driveStatus = 'connecting'; updateDriveStatusUI();
+                await driveManager.setup(cid, fidClean);
+                await driveManager.getToken(false);
+                driveStatus = 'connected'; updateDriveStatusUI();
+                await loadFromDrive();
+            } catch(e) {
+                driveStatus = 'error'; updateDriveStatusUI();
+                alert('Drive接続失敗: ' + e.message);
+            }
+        }
+
+        async function loadFromDrive() {
+            if (driveStatus !== 'connected') { alert('先にDriveに接続してください'); return; }
+            try {
+                const file = await driveManager.findLatestJson(DRIVE_FILE_PREFIX);
+                if (!file) { alert('Driveにデータファイルが見つかりません\n\nenergy_unified_*.json をDriveのdataフォルダにアップロードしてください'); return; }
+                const data = await driveManager.downloadJson(file.id);
+                driveLastFile = file;
+                if (data.ev && data.ev.data) {
+                    appData = data.ev.data;
+                    if (data.ev.settings) {
+                        if (data.ev.settings.columnOrder) columnOrder = data.ev.settings.columnOrder;
+                        if (data.ev.settings.sortConfig) sortConfig = data.ev.settings.sortConfig;
+                    }
+                    // 光熱費データから電気データを同期
+                    if (data.utility && data.utility.data) {
+                        syncElectricityFromUtility(data.utility.data);
+                    }
+                    recalculateAndSaveData();
+                    loadExistingData();
+                    updateDriveStatusUI();
+                    alert(`✅ ${file.name} を読み込みました`);
+                }
+            } catch(e) { alert('Drive読込失敗: ' + e.message); }
+        }
+
+        function syncElectricityFromUtility(utilityData) {
+            // 光熱費データの電気使用量・費用をEVデータに同期
+            utilityData.forEach(u => {
+                const ev = appData.find(e => e.year === u.year && e.month === u.month);
+                if (ev) {
+                    ev.evTotalCost = u.electricCost || ev.evTotalCost;
+                    ev.evTotalUsage = u.electricUsage || ev.evTotalUsage;
+                }
+            });
+        }
+
+        async function saveToDrive() {
+            if (driveStatus !== 'connected') { alert('先にDriveに接続してください'); return; }
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            const filename = `${DRIVE_FILE_PREFIX}${dateStr}.json`;
+            try {
+                // 既存の統合データを取得して更新
+                let unified = { version: '1.0', ev: { data: appData, settings: { columnOrder, sortConfig } }, utility: { data: [] } };
+                const existing = await driveManager.findLatestJson(DRIVE_FILE_PREFIX);
+                if (existing) {
+                    const existingData = await driveManager.downloadJson(existing.id);
+                    if (existingData.utility) unified.utility = existingData.utility;
+                }
+                unified.ev = { data: appData, settings: { columnOrder, sortConfig } };
+                await driveManager.uploadJson(filename, unified);
+                alert(`✅ ${filename} をDriveに保存しました`);
+            } catch(e) { alert('Drive保存失敗: ' + e.message); }
+        }
+
+        async function autoConnectDrive() {
+            if (!driveClientId || !driveFolderId) return;
+            try {
+                driveStatus = 'connecting'; updateDriveStatusUI();
+                await driveManager.setup(driveClientId, driveFolderId);
+                await driveManager.getToken(true);
+                driveStatus = 'connected'; updateDriveStatusUI();
+                await loadFromDrive();
+            } catch(e) {
+                driveStatus = 'disconnected'; updateDriveStatusUI();
+            }
+        }
+
+        function initializeApp() {
+            if (isInitialized) return;
+            isInitialized = true;
+
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.dataset.theme = savedTheme;
+            document.getElementById('themeToggle').checked = (savedTheme === 'light');
+            document.getElementById('themeToggle').addEventListener('change', toggleTheme);
+            setTimeout(() => setChartTheme(savedTheme), 10);
+
+            // ★ 提案2: 初期化時の年月設定を調整
+            loadInitialData();
+            recalculateAndSaveData();
+            setNextMonthForInput();
+
+            document.getElementById('year').addEventListener('change', onYearMonthChange);
+            document.getElementById('month').addEventListener('change', onYearMonthChange);
+            document.getElementById('evCumulativeKwh').addEventListener('input', handleCumulativeKwhInput);
+            document.getElementById('evCumulativeDistance').addEventListener('input', handleCumulativeDistanceInput);
+            document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+
+            // ★ 提案1: 主要な入力フィールドにバリデーションイベントを設定
+            ['evTotalCost', 'evTotalUsage', 'evBaseFee'].forEach(id => {
+                document.getElementById(id).addEventListener('input', () => validateFormInputs(false));
+            });
+
+            loadExistingData();
+            updateDataTable();
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeApp);
+
+        function recalculateAndSaveData() {
+            // データを年/月順にソート (差分計算のため)
+            appData.sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
+
+            // 差分計算と yearMonth 補完
+            let prevCumulativeKwh = null;
+            let prevCumulativeDistance = null;
+
+            appData = appData.map(item => {
+                // 当月使用量は、まず累計の差から計算し、できなければインポートされた当月使用量を参照する
+                const carUsageRaw = (prevCumulativeKwh !== null && item.evCumulativeKwh !== undefined && isFinite(item.evCumulativeKwh))
+                    ? Math.max(0, item.evCumulativeKwh - prevCumulativeKwh)
+                    : item.evCarUsageFromImport ?? 0;
+                const carUsage = parseFloat(carUsageRaw.toFixed(4));
+
+                const monthlyDistanceRaw = (prevCumulativeDistance !== null && item.evCumulativeDistance !== undefined && isFinite(item.evCumulativeDistance))
+                    ? Math.max(0, item.evCumulativeDistance - prevCumulativeDistance)
+                    : item.evMonthlyDistanceFromImport ?? 0;
+                const monthlyDistance = parseFloat(monthlyDistanceRaw.toFixed(4));
+
+                const efficiency = (carUsage > 0 && monthlyDistance > 0)
+                    ? monthlyDistance / carUsage
+                    : (carUsage > 0 && monthlyDistance === 0) ? 0 : null; // 走行距離ゼロなら電費ゼロ。分母ゼロならnull
+
+                // 単価とEV電気代
+                const variableCost = (item.evTotalCost || 0) - (item.evBaseFee || 0);
+                const kwhUnitPrice = (item.evTotalUsage > 0 && variableCost > 0)
+                    ? variableCost / item.evTotalUsage
+                    : (item.evTotalUsage === 0 && variableCost > 0) ? null : 0; // 分母ゼロで料金ありならnull。どちらもゼロなら0
+
+                const carElectricCost = (kwhUnitPrice !== null) ? carUsage * kwhUnitPrice : 0;
+
+                // 按分計算
+                const nonCarCost = (item.evTotalCost || 0) - carElectricCost;
+                const person1Cost = nonCarCost / 2;
+                const person2Cost = person1Cost + carElectricCost;
+
+                // yearMonth 補完
+                const yearMonth = item.yearMonth || `${item.year}/${item.month}`;
+
+                // 前月値更新 (nullや非有限値の場合は更新しない)
+                if (item.evCumulativeKwh !== undefined && isFinite(item.evCumulativeKwh)) {
+                    prevCumulativeKwh = item.evCumulativeKwh;
+                } else {
+                    // prevCumulativeKwh = null;
+                }
+                if (item.evCumulativeDistance !== undefined && isFinite(item.evCumulativeDistance)) {
+                    prevCumulativeDistance = item.evCumulativeDistance;
+                } else {
+                    // prevCumulativeDistance = null;
+                }
+
+
+                return {
+                    ...item,
+                    yearMonth,
+                    evCarUsage: carUsage,
+                    evMonthlyDistance: monthlyDistance,
+                    evEfficiency: efficiency,
+                    kwhUnitPrice,
+                    carElectricCost,
+                    person1Cost,
+                    person2Cost
+                };
+            });
+
+            saveData();
+        }
+
+        function loadInitialData() {
+            const storedEv = localStorage.getItem('appData');
+            if (storedEv) {
+                try {
+                    appData = JSON.parse(storedEv);
+                } catch (e) {
+                    console.error("データの読み込みに失敗しました", e);
+                    appData = [];
+                }
+            } else {
+                appData = [];
+            }
+
+            // ★ 提案5: ソート設定の読み込み
+            const storedSortConfig = localStorage.getItem('sortConfig');
+            if (storedSortConfig) {
+                try {
+                    sortConfig = JSON.parse(storedSortConfig);
+                } catch (e) {
+                    console.error("ソート設定の読み込みに失敗しました", e);
+                }
+            }
+
+            // ★ 列順序の読み込み
+            const savedColumnOrder = localStorage.getItem('columnOrder');
+            if (savedColumnOrder) {
+                try {
+                    columnOrder = JSON.parse(savedColumnOrder);
+                } catch (e) {
+                    console.error("列順序の読み込みに失敗しました", e);
+                }
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('appData', JSON.stringify(appData));
+            // ★ 列順序も保存
+            localStorage.setItem('columnOrder', JSON.stringify(columnOrder));
+            // ★ 提案5: ソート設定を保存
+            localStorage.setItem('sortConfig', JSON.stringify(sortConfig));
+        }
+
+        function waitForCanvas(id, callback) {
+            const el = document.getElementById(id);
+            if (el) {
+                callback();
+            } else {
+                setTimeout(() => waitForCanvas(id, callback), 30);
+            }
+        }
+
+
+        // EV車使用履歴v4_Improved.html 内の <script> タグ
+
+        // ★★★ (修正) switchView: analysis切り替え時の表示制御を強化 ★★★
+        function switchView(event, view) {
+            // ★ ツールチップを閉じる
+            hideAllTooltips();
+
+            const clickedButton = event.currentTarget;
+            const inputView = document.getElementById('input-view');
+            const analysisView = document.getElementById('analysis-view');
+
+            // 1. 全てのビューを非アクティブにし、displayプロパティを初期化（またはnoneに設定）
+            document.querySelectorAll('.content-area').forEach(el => {
+                el.classList.remove('active');
+                // input-viewはflexを持つため、analysisで上書きする
+                if (el.id !== 'input-view') {
+                    el.style.display = 'none';
+                }
+            });
+            // input-viewのインラインdisplayスタイルを初期化
+            inputView.style.display = '';
+            analysisView.style.display = '';
+
+            document.querySelectorAll('.nav-buttons .btn').forEach(el => {
+                el.classList.remove('active');
+                el.classList.add('btn-secondary');
+                el.classList.remove('btn-primary');
+            });
+
+            clickedButton.classList.add('active');
+            clickedButton.classList.remove('btn-secondary');
+            clickedButton.classList.add('btn-primary');
+
+            if (view === 'input') {
+                // データ入力・一覧画面をアクティブに
+                inputView.classList.add('active');
+                // ★ input-viewはCSSで display: block; (または display: flex) が適用される
+                inputView.style.display = 'flex'; // インラインスタイルで上書きを確実にする
+                analysisView.classList.remove('active');
+                analysisView.style.display = 'none'; // analysisViewを明示的に非表示
+
+                loadExistingData();
+                updateDataTable();
+            } else if (view === 'analysis') {
+                // 分析画面をアクティブに
+                analysisView.classList.add('active');
+                analysisView.style.display = 'block'; // analysisViewを明示的に表示
+
+                // ★ 修正点: input-view を明示的に非表示にする
+                inputView.classList.remove('active');
+                inputView.style.display = 'none';
+
+                waitForCanvas('chart1', () => {
+                    updateAnalysisView();
+                });
+            }
+        }
+
+
+        function navigateMonth(direction) {
+            let yearEl = document.getElementById('year');
+            let monthEl = document.getElementById('month');
+            let year = parseInt(yearEl.value);
+            let month = parseInt(monthEl.value);
+
+            if (!year || !month) {
+                const now = new Date();
+                year = now.getFullYear();
+                month = now.getMonth() + 1;
+            }
+
+            month += direction;
+
+            if (month > 12) {
+                month = 1;
+                year += 1;
+            } else if (month < 1) {
+                month = 12;
+                year -= 1;
+            }
+
+            yearEl.value = year;
+            monthEl.value = month;
+
+            // 編集モードを完全にリセット
+            editingId = null;
+            document.getElementById('editIndicator').style.display = 'none';
+            document.getElementById('cancelEditButton').style.display = 'none';
+            document.getElementById('submitButtonText').textContent = '登録';
+
+            // ★ バリデーションエラーをクリア
+            clearAllValidationErrors();
+
+            loadExistingData();
+        }
+
+        function handleCumulativeKwhInput() {
+            const cumulativeKwh = parseFloat(document.getElementById('evCumulativeKwh').value);
+            const carUsageInput = document.getElementById('evCarUsage');
+
+            if (isFinite(cumulativeKwh) && cumulativeKwh >= 0) {
+                const year = parseInt(document.getElementById('year').value);
+                const month = parseInt(document.getElementById('month').value);
+                const prevMonthData = findPreviousMonthData(year, month);
+
+                if (prevMonthData && prevMonthData.evCumulativeKwh !== undefined && isFinite(prevMonthData.evCumulativeKwh)) {
+                    const calculatedUsage = cumulativeKwh - prevMonthData.evCumulativeKwh;
+                    carUsageInput.value = calculatedUsage.toFixed(1);
+                    carUsageInput.disabled = true;
+                } else {
+                    carUsageInput.value = '';
+                    carUsageInput.disabled = true;
+                }
+            } else {
+                carUsageInput.value = '';
+                carUsageInput.disabled = false;
+            }
+
+            calculateEfficiency();
+        }
+
+        function handleCumulativeDistanceInput() {
+            const cumulativeDistance = parseFloat(document.getElementById('evCumulativeDistance').value);
+            const monthlyDistanceInput = document.getElementById('evMonthlyDistance');
+
+            if (isFinite(cumulativeDistance) && cumulativeDistance >= 0) {
+                const year = parseInt(document.getElementById('year').value);
+                const month = parseInt(document.getElementById('month').value);
+                const prevMonthData = findPreviousMonthData(year, month);
+
+                if (prevMonthData && prevMonthData.evCumulativeDistance !== undefined && isFinite(prevMonthData.evCumulativeDistance)) {
+                    const calculatedDistance = cumulativeDistance - prevMonthData.evCumulativeDistance;
+                    monthlyDistanceInput.value = calculatedDistance.toFixed(1);
+                } else {
+                    monthlyDistanceInput.value = '';
+                }
+            } else {
+                monthlyDistanceInput.value = '';
+            }
+
+            calculateEfficiency();
+        }
+
+        function calculateEfficiency() {
+            const carUsage = parseFloat(document.getElementById('evCarUsage').value) || 0;
+            const monthlyDistance = parseFloat(document.getElementById('evMonthlyDistance').value) || 0;
+            const efficiencyInput = document.getElementById('evEfficiency');
+
+            if (isFinite(carUsage) && isFinite(monthlyDistance) && carUsage > 0) {
+                const efficiency = monthlyDistance / carUsage;
+                efficiencyInput.value = efficiency.toFixed(2);
+            } else {
+                efficiencyInput.value = '';
+            }
+        }
+
+        function findPreviousMonthData(year, month) {
+            let prevYear = year;
+            let prevMonth = month - 1;
+
+            if (prevMonth < 1) {
+                prevMonth = 12;
+                prevYear -= 1;
+            }
+
+            return appData.find(item => item.year === prevYear && item.month === prevMonth);
+        }
+
+        function loadExistingData() {
+            const year = parseInt(document.getElementById('year').value);
+            const month = parseInt(document.getElementById('month').value);
+
+            if (!year || !month) return;
+
+            const indicator = document.getElementById('editIndicator');
+            const cancelBtn = document.getElementById('cancelEditButton');
+            const submitText = document.getElementById('submitButtonText');
+            const formInputs = ['evTotalCost', 'evTotalUsage', 'evCumulativeKwh', 'evCarUsage', 'evBaseFee', 'evCumulativeDistance', 'evMonthlyDistance', 'evEfficiency'];
+            const carUsageInput = document.getElementById('evCarUsage');
+            const monthlyDistanceInput = document.getElementById('evMonthlyDistance');
+            const efficiencyInput = document.getElementById('evEfficiency');
+
+            const existing = appData.find(item => item.year === year && item.month === month);
+
+            if (existing && editingId === null) {
+                formInputs.forEach(key => {
+                    const value = existing[key];
+                    document.getElementById(key).value = (value !== undefined && value !== null && isFinite(value)) ? value : '';
+                });
+
+                if (existing.evCumulativeKwh !== undefined && isFinite(existing.evCumulativeKwh)) {
+                    carUsageInput.disabled = true;
+                } else {
+                    carUsageInput.disabled = false;
+                }
+
+                monthlyDistanceInput.disabled = true;
+                efficiencyInput.disabled = true;
+
+                editingId = existing.id;
+                indicator.style.display = 'block';
+                cancelBtn.style.display = 'block';
+                submitText.textContent = '更新';
+            } else if (editingId === null) {
+                formInputs.forEach(key => {
+                    document.getElementById(key).value = '';
+                });
+
+                carUsageInput.disabled = false;
+                monthlyDistanceInput.disabled = true;
+                efficiencyInput.disabled = true;
+
+                editingId = null;
+                indicator.style.display = 'none';
+                cancelBtn.style.display = 'none';
+                submitText.textContent = '登録';
+            }
+        }
+
+        function calculatePercentageChange(current, previous) {
+            if (!isFinite(current) || !isFinite(previous) || previous === 0) {
+                return '<span style="color: var(--text-color);">--</span>';
+            }
+            const change = ((current - previous) / previous) * 100;
+            if (change === 0) {
+                return '<span style="color: var(--text-color);">±0%</span>';
+            }
+            const className = (change > 0) ? 'increase' : 'decrease';
+            const sign = (change > 0) ? '▲ +' : '▼ ';
+            return `<span class="percentage-change ${className}">${sign}${change.toFixed(1)}%</span>`;
+        }
+
+        // ★ 提案5: ソート設定の保存を追加
+        function requestSort(key) {
+            if (sortConfig.key === key) {
+                sortConfig.direction = (sortConfig.direction === 'asc') ? 'desc' : 'asc';
+            } else {
+                sortConfig.key = key;
+                sortConfig.direction = 'desc';
+            }
+            saveData(); // ソート設定を保存
+            updateDataTable();
+        }
+
+        function updateSortIcons() {
+            document.querySelectorAll('#input-view .sort-icon').forEach(span => {
+                span.textContent = '';
+                span.style.color = 'var(--text-color)';
+            });
+
+            const activeIcon = document.getElementById(`sortIcon-${sortConfig.key}`);
+            if (activeIcon) {
+                activeIcon.textContent = (sortConfig.direction === 'asc') ? ' ▲' : ' ▼';
+                activeIcon.style.color = 'var(--header-text)';
+            }
+        }
+
+        // 【修正】 calculateEvShare 関数を丸ごと書き換えてください
+
+        function calculateEvShare(totalCost, totalUsage, carUsage, baseFee) {
+            // 必須データが欠けている場合は計算結果をすべて null にする
+            if (totalCost === null || totalUsage === null || baseFee === null) {
+                return {
+                    kwhUnitPrice: null,
+                    carElectricCost: null,
+                    person1Cost: null,
+                    person2Cost: null
+                };
+            }
+
+            // 以下は既存ロジックと同じ（数値がある場合の計算）
+            totalCost = totalCost || 0;
+            totalUsage = totalUsage || 0;
+            carUsage = carUsage || 0;
+            baseFee = baseFee || 0;
+
+            const variableCost = totalCost - baseFee;
+
+            const kwhUnitPrice = (totalUsage > 0 && variableCost > 0)
+                ? variableCost / totalUsage
+                : (totalUsage === 0 && variableCost > 0) ? null : 0;
+
+            const carElectricCost = (kwhUnitPrice !== null) ? carUsage * kwhUnitPrice : 0;
+
+            const nonCarCost = totalCost - carElectricCost;
+            const person1Cost = nonCarCost / 2;
+            const person2Cost = person1Cost + carElectricCost;
+
+            return { kwhUnitPrice, carElectricCost, person1Cost, person2Cost };
+        }
+
+        // 【修正】 validateFormInputs 関数を丸ごと書き換えてください
+
+        function validateFormInputs(showAlert = true) {
+            let isValid = true;
+            let generalError = '';
+
+            // チェック対象のフィールドID
+            const fieldsToCheck = ['evTotalCost', 'evTotalUsage', 'evBaseFee'];
+
+            fieldsToCheck.forEach(id => {
+                const input = document.getElementById(id);
+                const valStr = input.value;
+
+                // 空欄はOKとするのでスキップ
+                if (valStr === '') {
+                    input.classList.remove('error');
+                    document.getElementById(`error-${id}`).classList.remove('active');
+                    return;
+                }
+
+                const value = parseFloat(valStr);
+
+                // 数値でない、またはマイナスの場合はエラー
+                if (!isFinite(value) || value < 0) {
+                    input.classList.add('error');
+                    document.getElementById(`error-${id}`).classList.add('active');
+                    isValid = false;
+                } else {
+                    input.classList.remove('error');
+                    document.getElementById(`error-${id}`).classList.remove('active');
+                }
+            });
+
+            // 論理チェック: 総使用量 vs EV充電量（両方入力されている場合のみチェック）
+            const evTotalUsageStr = document.getElementById('evTotalUsage').value;
+            const evCarUsage = parseFloat(document.getElementById('evCarUsage').value) || 0;
+
+            if (isValid && evTotalUsageStr !== '') {
+                const evTotalUsage = parseFloat(evTotalUsageStr);
+                if (evTotalUsage > 0 && evCarUsage > evTotalUsage) {
+                    document.getElementById('evTotalUsage').classList.add('error');
+                    generalError = 'エラー: 当月EV充電量 (kWh) が総使用電力量 (kWh) を超えています。値を確認してください。';
+                    isValid = false;
+                }
+            }
+
+            if (!isValid) {
+                if (generalError) {
+                    document.getElementById('generalErrorText').textContent = generalError;
+                } else {
+                    document.getElementById('generalErrorText').textContent = '入力値にエラーがあります（マイナス値など）。赤枠を修正してください。';
+                }
+                document.getElementById('generalError').style.display = 'block';
+
+                if (showAlert) {
+                    alert(document.getElementById('generalErrorText').textContent);
+                }
+            } else {
+                document.getElementById('generalError').style.display = 'none';
+            }
+
+            return isValid;
+        }
+
+        function clearValidationError(id) {
+            document.getElementById(id).classList.remove('error');
+            document.getElementById(`error-${id}`).classList.remove('active');
+            // 全体のエラーメッセージを再評価
+            validateFormInputs(false);
+        }
+
+        function clearAllValidationErrors() {
+            ['evTotalCost', 'evTotalUsage', 'evBaseFee'].forEach(id => {
+                document.getElementById(id).classList.remove('error');
+                document.getElementById(`error-${id}`).classList.remove('active');
+            });
+            document.getElementById('generalError').style.display = 'none';
+        }
+
+
+        function addData() {
+            // ★ 提案1: バリデーションを実行
+            if (!validateFormInputs(true)) {
+                return;
+            }
+
+            const year = parseInt(document.getElementById('year').value);
+            const month = parseInt(document.getElementById('month').value);
+            // ★★★ 修正箇所ここから ★★★
+            // 空文字の場合は null、それ以外は数値に変換
+            const getNullableFloat = (id) => {
+                const val = document.getElementById(id).value;
+                return (val === '') ? null : parseFloat(val);
+            };
+
+            const evTotalCost = getNullableFloat('evTotalCost');
+            const evTotalUsage = getNullableFloat('evTotalUsage');
+            const evBaseFee = getNullableFloat('evBaseFee');
+            // ★★★ 修正箇所ここまで ★★★
+
+            const cumulativeKwhInput = document.getElementById('evCumulativeKwh').value;
+            const evCumulativeKwh = (cumulativeKwhInput && isFinite(parseFloat(cumulativeKwhInput))) ? parseFloat(cumulativeKwhInput) : undefined;
+
+            const cumulativeDistanceInput = document.getElementById('evCumulativeDistance').value;
+            const evCumulativeDistance = (cumulativeDistanceInput && isFinite(parseFloat(cumulativeDistanceInput))) ? parseFloat(cumulativeDistanceInput) : undefined;
+
+            let evCarUsage = parseFloat(document.getElementById('evCarUsage').value) || 0;
+            let evMonthlyDistance = parseFloat(document.getElementById('evMonthlyDistance').value) || 0;
+            let evEfficiency = parseFloat(document.getElementById('evEfficiency').value) || 0;
+
+            if (!year || !month) {
+                alert('年と月は必須です');
+                return;
+            }
+
+            // 累計値からの再計算 (確定)
+            if (evCumulativeKwh !== undefined) {
+                const prevMonthData = findPreviousMonthData(year, month);
+                if (prevMonthData && prevMonthData.evCumulativeKwh !== undefined && isFinite(prevMonthData.evCumulativeKwh)) {
+                    evCarUsage = Math.max(0, evCumulativeKwh - prevMonthData.evCumulativeKwh);
+                } else {
+                    evCarUsage = 0;
+                }
+            }
+
+            if (evCumulativeDistance !== undefined) {
+                const prevMonthData = findPreviousMonthData(year, month);
+                if (prevMonthData && prevMonthData.evCumulativeDistance !== undefined && isFinite(prevMonthData.evCumulativeDistance)) {
+                    evMonthlyDistance = Math.max(0, evCumulativeDistance - prevMonthData.evCumulativeDistance);
+                } else {
+                    evMonthlyDistance = 0;
+                }
+            }
+
+            // 電費の再計算
+            const efficiency = (evCarUsage > 0 && evMonthlyDistance > 0)
+                ? evMonthlyDistance / evCarUsage
+                : (evCarUsage > 0 && evMonthlyDistance === 0) ? 0 : null; // 分母ゼロならnull
+
+            const calculations = calculateEvShare(evTotalCost, evTotalUsage, evCarUsage, evBaseFee);
+
+            const entry = {
+                id: editingId || Date.now(),
+                year,
+                month,
+                yearMonth: `${year}/${month}`,
+                evTotalCost,
+                evTotalUsage,
+                evCumulativeKwh,
+                evCarUsage,
+                evCumulativeDistance,
+                evMonthlyDistance,
+                evEfficiency: efficiency, // 計算結果を代入
+                evBaseFee,
+                ...calculations // kwhUnitPrice, carElectricCost などがここに含まれる
+            };
+
+            if (editingId !== null) {
+                const index = appData.findIndex(item => item.id === editingId);
+                if (index !== -1) {
+                    appData[index] = entry;
+                }
+                editingId = null;
+                document.getElementById('editIndicator').style.display = 'none';
+                document.getElementById('cancelEditButton').style.display = 'none';
+                document.getElementById('submitButtonText').textContent = '登録';
+            } else {
+                appData.push(entry);
+            }
+
+            recalculateAndSaveData();
+            updateDataTable();
+
+            // ★ 提案2: 次の月に移動する
+            setNextMonthForInput();
+            loadExistingData(); // 次の月のデータを確認/フォームをリセット
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function editData(id) {
+            const item = appData.find(d => d.id === id);
+            if (!item) return;
+
+            // Handle row highlighting
+            document.querySelectorAll('#dataTableBody tr').forEach(row => row.classList.remove('selected-row'));
+            const rowElement = document.getElementById(`row-${id}`);
+            if (rowElement) {
+                rowElement.classList.add('selected-row');
+            }
+
+            // ★ バリデーションエラーをクリア
+            clearAllValidationErrors();
+
+            editingId = id;
+            document.getElementById('year').value = item.year;
+            document.getElementById('month').value = item.month;
+            document.getElementById('evTotalCost').value = item.evTotalCost;
+            document.getElementById('evTotalUsage').value = item.evTotalUsage;
+            document.getElementById('evBaseFee').value = item.evBaseFee;
+
+            // null/undefined の場合は空文字列を設定
+            const setVal = (key, defaultVal = '') => (item[key] !== undefined && item[key] !== null && isFinite(item[key])) ? item[key] : defaultVal;
+
+            if (item.evCumulativeKwh !== undefined && isFinite(item.evCumulativeKwh)) {
+                document.getElementById('evCumulativeKwh').value = setVal('evCumulativeKwh');
+                document.getElementById('evCarUsage').value = setVal('evCarUsage');
+                document.getElementById('evCarUsage').disabled = true;
+            } else {
+                document.getElementById('evCumulativeKwh').value = '';
+                document.getElementById('evCarUsage').value = setVal('evCarUsage');
+                document.getElementById('evCarUsage').disabled = false;
+            }
+
+            if (item.evCumulativeDistance !== undefined && isFinite(item.evCumulativeDistance)) {
+                document.getElementById('evCumulativeDistance').value = setVal('evCumulativeDistance');
+            } else {
+                document.getElementById('evCumulativeDistance').value = '';
+            }
+
+            document.getElementById('evMonthlyDistance').value = setVal('evMonthlyDistance');
+            document.getElementById('evEfficiency').value = setVal('evEfficiency');
+
+            document.getElementById('editIndicator').style.display = 'block';
+            document.getElementById('cancelEditButton').style.display = 'block';
+            document.getElementById('submitButtonText').textContent = '更新';
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('editIndicator').style.display = 'none';
+            document.getElementById('cancelEditButton').style.display = 'none';
+            document.getElementById('submitButtonText').textContent = '登録';
+
+            document.querySelectorAll('#dataTableBody tr').forEach(row => row.classList.remove('selected-row'));
+
+            clearForm();
+            // ★ バリデーションエラーをクリア
+            clearAllValidationErrors();
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function clearForm() {
+            setNextMonthForInput(); // ★ 提案2: 最新の次月をセット
+            document.getElementById('evTotalCost').value = '';
+            document.getElementById('evTotalUsage').value = '';
+            document.getElementById('evCumulativeKwh').value = '';
+            document.getElementById('evCarUsage').value = '';
+            document.getElementById('evCarUsage').disabled = false;
+            document.getElementById('evCumulativeDistance').value = '';
+            document.getElementById('evMonthlyDistance').value = '';
+            document.getElementById('evEfficiency').value = '';
+            document.getElementById('evBaseFee').value = '';
+        }
+
+        function deleteData(id) {
+            if (confirm('このEV按分データを削除しますか?')) {
+                appData = appData.filter(item => item.id !== id);
+                recalculateAndSaveData();
+                updateDataTable();
+                // ★ フォームをリセット
+                setNextMonthForInput();
+                loadExistingData();
+                clearAllValidationErrors();
+            }
+        }
+
+        function updateDataTable() {
+            const tbody = document.getElementById('dataTableBody');
+            const thead = document.querySelector('.data-table thead tr');
+            if (!tbody || !thead) return;
+
+            if (appData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="' + (columnOrder.length + 1) + '" class="text-center" style="padding: 40px; color: var(--text-color);">データがありません</td></tr>';
+                return;
+            }
+
+            // ★ ヘッダーを動的に生成
+            thead.innerHTML = `
+        <th class="sticky-col text-center" style="left:0; z-index:3; width: 80px;">
+            操作
+            <button class="btn-column-config" onclick="openColumnConfigModal()" title="列の並び替え">⚙️</button>
+        </th>
+    ` + columnOrder.map(key => {
+                const config = columnConfig[key];
+                if (!config) return '';
+
+                const isYearMonth = key === 'yearMonth';
+                const stickyStyle = isYearMonth ? 'style="left:45px; z-index:3;"' : '';
+                const stickyClass = isYearMonth ? 'sticky-col' : '';
+                const sortableClass = config.sortable ? 'sortable' : '';
+                const className = config.className || '';
+                const onClick = config.sortable ? `onclick="requestSort('${key}')"` : '';
+
+                return `
+            <th class="${stickyClass} ${sortableClass} ${className} text-right" ${stickyStyle} ${onClick}>
+                <span>${config.label}</span>
+                ${config.sortable ? `<span id="sortIcon-${key}" class="sort-icon"></span>` : ''}
+            </th>
+        `;
+            }).join('');
+
+            const sortedData = [...appData];
+            sortedData.sort((a, b) => {
+                let aVal, bVal;
+
+                if (sortConfig.key === 'yearMonth') {
+                    aVal = a.year * 100 + a.month;
+                    bVal = b.year * 100 + b.month;
+                } else {
+                    aVal = a[sortConfig.key];
+                    bVal = b[sortConfig.key];
+                }
+
+                // null/undefinedをソートのために0として扱う
+                aVal = (isFinite(aVal) && aVal !== null) ? aVal : 0;
+                bVal = (isFinite(bVal) && bVal !== null) ? bVal : 0;
+
+                let result = (aVal < bVal) ? -1 : (aVal > bVal) ? 1 : 0;
+                return (sortConfig.direction === 'asc') ? result : -result;
+            });
+
+            // ★ 提案3: null/NaNの場合は '--' または '0' を返すフォーマッタ
+            const fNum = (num) => (isFinite(num) && num !== null) ? num.toLocaleString() : '--';
+            const fKwh = (num) => (isFinite(num) && num !== null) ? num.toFixed(1) : '--';
+            const fKwh2 = (num) => (isFinite(num) && num !== null) ? num.toFixed(2) : '--';
+            const fDist = (num) => (isFinite(num) && num !== null) ? num.toFixed(1) : '--';
+            const fEff = (num) => (isFinite(num) && num !== null) ? num.toFixed(2) : '--';
+            const fYen = (num) => (isFinite(num) && num !== null) ? `¥${fNum(Math.round(num))}` : `¥--`;
+            // kwhUnitPrice は null の場合は '¥--.--'
+            const fUnit = (num) => (isFinite(num) && num !== null) ? `¥${num.toFixed(2)}` : '¥--.--';
+
+            // ★ データ表示用のフォーマッタマップ
+            const formatters = {
+                'yearMonth': (item) => formatYearMonth(item.year, item.month, "slash"),
+                'evTotalCost': (item) => fYen(item.evTotalCost),
+                'person1Cost': (item) => `<span style="color: var(--chart-p1-color); font-weight: 600;">${fYen(item.person1Cost)}</span>`,
+                'person2Cost': (item) => `<span style="color: var(--chart-p2-color); font-weight: 600;">${fYen(item.person2Cost)}</span>`,
+                'carElectricCost': (item) => fYen(item.carElectricCost),
+                'evTotalUsage': (item) => fKwh(item.evTotalUsage),
+                'evCumulativeKwh': (item) => fKwh2(item.evCumulativeKwh),
+                'evCarUsage': (item) => fKwh2(item.evCarUsage),
+                'evCumulativeDistance': (item) => fDist(item.evCumulativeDistance),
+                'evMonthlyDistance': (item) => fDist(item.evMonthlyDistance),
+                'evEfficiency': (item) => fEff(item.evEfficiency),
+                'evBaseFee': (item) => fYen(item.evBaseFee),
+                'kwhUnitPrice': (item) => `<span style="color: var(--text-color);">${fUnit(item.kwhUnitPrice)}</span>`
+            };
+
+            tbody.innerHTML = sortedData.map(item => {
+                const cells = columnOrder.map(key => {
+                    const formatter = formatters[key];
+                    const isYearMonth = key === 'yearMonth';
+                    const stickyClass = isYearMonth ? 'sticky-col' : '';
+                    const stickyStyle = isYearMonth ? 'style="left:45px; background: var(--bg-card);"' : '';
+                    const fontWeight = ['evTotalCost', 'person1Cost', 'person2Cost', 'carElectricCost'].includes(key) ? 'style="font-weight: 600;"' : '';
+
+                    return `<td class="${stickyClass} text-right" ${stickyStyle} ${fontWeight}>${formatter ? formatter(item) : '--'}</td>`;
+                }).join('');
+
+                return `
+            <tr id="row-${item.id}" data-id="${item.id}">
+                <td class="text-center sticky-col" style="left:0; background: var(--bg-card);">
+                    <button class="btn-delete" onclick="editData(${item.id})" style="color: #3b82f6; margin-right: 8px;" title="編集">✏️</button>
+                    <button class="btn-delete" onclick="deleteData(${item.id})" title="削除">🗑️</button>
+                </td>
+                ${cells}
+            </tr>
+        `;
+            }).join('');
+
+            tbody.querySelectorAll("tr").forEach(tr => {
+                tr.addEventListener("click", () => {
+                    tbody.querySelectorAll("tr").forEach(r => r.classList.remove("selected"));
+                    tr.classList.add("selected");
+                });
+            });
+
+            updateSortIcons();
+            initializeTooltips();
+            syncScrollbars();
+        }
+
+        /**
+         * 列設定モーダルを開く
+         */
+        function openColumnConfigModal() {
+            const modal = document.getElementById('columnConfigModal');
+            if (!modal) {
+                createColumnConfigModal();
+            }
+
+            renderColumnList();
+            document.getElementById('columnConfigModal').classList.add('active');
+        }
+
+        /**
+         * 列設定モーダルを閉じる
+         */
+        function closeColumnConfigModal() {
+            document.getElementById('columnConfigModal').classList.remove('active');
+        }
+
+        /**
+         * 列設定モーダルのHTMLを作成
+         */
+        function createColumnConfigModal() {
+            const modalHTML = `
+        <div id="columnConfigModal" class="modal">
+            <div class="modal-content">
+                <h2>🔧 列の並び替え</h2>
+                <div class="modal-section">
+                    <p style="margin-bottom: 15px; color: var(--text-color);">
+                        ドラッグ＆ドロップで列の順序を変更できます
+                    </p>
+                    <div id="columnList" class="column-list"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="resetColumnOrder()">デフォルトに戻す</button>
+                    <button class="btn btn-primary" onclick="saveColumnOrder()">保存</button>
+                    <button class="btn btn-secondary" onclick="closeColumnConfigModal()">キャンセル</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        /**
+         * 列リストをレンダリング
+         */
+        function renderColumnList() {
+            const listEl = document.getElementById('columnList');
+            if (!listEl) return;
+
+            listEl.innerHTML = columnOrder.map((key, index) => {
+                const config = columnConfig[key];
+                // 年月列は固定のため除外
+                if (key === 'yearMonth') return '';
+
+                return `
+            <div class="column-item" draggable="true" data-key="${key}" data-index="${index}">
+                <span class="drag-handle">☰</span>
+                <span class="column-label">${config.label}</span>
+                ${config.className === 'column-input' ? '<span class="column-badge input">入力値</span>' : ''}
+                ${config.className === 'column-calculated' ? '<span class="column-badge calculated">計算値</span>' : ''}
+            </div>
+        `;
+            }).join('');
+
+            // ドラッグ＆ドロップイベントを設定
+            initializeDragAndDrop();
+        }
+
+        /**
+         * ドラッグ＆ドロップの初期化
+         */
+        function initializeDragAndDrop() {
+            const items = document.querySelectorAll('.column-item');
+            let draggedItem = null;
+
+            items.forEach(item => {
+                item.addEventListener('dragstart', (e) => {
+                    draggedItem = item;
+                    item.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                item.addEventListener('dragend', () => {
+                    item.classList.remove('dragging');
+                    draggedItem = null;
+                });
+
+                item.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    const afterElement = getDragAfterElement(document.getElementById('columnList'), e.clientY);
+                    const listEl = document.getElementById('columnList');
+
+                    if (afterElement == null) {
+                        listEl.appendChild(draggedItem);
+                    } else {
+                        listEl.insertBefore(draggedItem, afterElement);
+                    }
+                });
+            });
+        }
+
+        /**
+         * ドラッグ中の要素の挿入位置を取得
+         */
+        function getDragAfterElement(container, y) {
+            const draggableElements = [...container.querySelectorAll('.column-item:not(.dragging)')];
+
+            return draggableElements.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+
+                if (offset < 0 && offset > closest.offset) {
+                    return { offset: offset, element: child };
+                } else {
+                    return closest;
+                }
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
+        }
+
+        /**
+         * 列順序を保存
+         */
+        function saveColumnOrder() {
+            const items = document.querySelectorAll('.column-item');
+            // 年月列 ('yearMonth') は固定で先頭に追加
+            columnOrder = ['yearMonth'].concat(Array.from(items).map(item => item.dataset.key));
+
+            saveData();
+            updateDataTable();
+            closeColumnConfigModal();
+        }
+
+        /**
+         * 列順序をデフォルトに戻す
+         */
+        function resetColumnOrder() {
+            if (confirm('列の順序をデフォルトに戻しますか?')) {
+                columnOrder = [
+                    'yearMonth',
+                    'evCumulativeKwh',        // 累計EV充電量(kWh)
+                    'evCarUsage',             // 当月EV充電量(kWh)
+                    'kwhUnitPrice',           // 電力量単価(円/kWh)
+                    'carElectricCost',        // 当月EV電気代
+                    'evTotalCost',            // 総電気料金
+                    'evTotalUsage',           // 総使用電力量(kWh)
+                    'evCumulativeDistance',   // 累計走行距離(km)
+                    'person1Cost',            // 按分額(EVなし)
+                    'person2Cost',            // 按分額(EV使用者)
+                    'evMonthlyDistance',      // 当月走行距離(km)
+                    'evEfficiency',           // 電費(km/kWh)
+                    'evBaseFee',              // 基本料金
+                ];
+
+                renderColumnList();
+            }
+        }
+
+        // ★ 提案4: すべてのツールチップを非表示にする
+        function hideAllTooltips() {
+            document.querySelectorAll('.column-tooltip.visible').forEach(el => {
+                el.classList.remove('visible');
+                // DOMからも削除 (mouseleaveと同じ処理)
+                setTimeout(() => {
+                    if (el.parentNode) {
+                        el.parentNode.removeChild(el);
+                    }
+                }, 200);
+            });
+        }
+
+        /**
+         * テーブルヘッダーにツールチップ（計算式）を追加する
+         */
+        function initializeTooltips() {
+            const tooltipData = {
+                'evTotalCost': {
+                    title: '総電気料金',
+                    formula: '電力会社からの当月請求額'
+                },
+                'evTotalUsage': {
+                    title: '総使用電力量 (kWh)',
+                    formula: '電力会社からの当月利用量'
+                },
+                'evCumulativeKwh': {
+                    title: '累計EV充電量 (kWh)',
+                    formula: 'EV用電気メーターの累計値'
+                },
+                'person1Cost': {
+                    title: '按分額(EVなし)の計算式',
+                    formula: '(総電気料金 - 当月EV電気代) ÷ 2'
+                },
+                'person2Cost': {
+                    title: '按分額(EV使用者)の計算式',
+                    formula: '按分額(EVなし) + 当月EV電気代'
+                },
+                'carElectricCost': {
+                    title: '当月EV電気代の計算式',
+                    formula: '電力量単価 × 当月EV充電量'
+                },
+                'evCarUsage': {
+                    title: '当月EV充電量の計算式',
+                    formula: '累計EV充電量(今月) - 累計EV充電量(前月)'
+                },
+                'evMonthlyDistance': {
+                    title: '当月走行距離の計算式',
+                    formula: '累計走行距離(今月) - 累計走行距離(前月)'
+                },
+                'evEfficiency': {
+                    title: '電費の計算式',
+                    formula: '当月走行距離 ÷ 当月EV充電量'
+                },
+                'kwhUnitPrice': {
+                    title: '電力量単価の計算式',
+                    formula: '(総電気料金 - 基本料金) ÷ 総使用電力量'
+                }
+            };
+
+            // 既存のツールチップ要素を削除
+            document.querySelectorAll('.column-tooltip').forEach(el => el.remove());
+
+            const tableContainer = document.getElementById('tableContainer');
+            if (!tableContainer) return;
+
+            // ★ 提案4: スクロール時にツールチップを非表示にするイベントを追加
+            tableContainer.onscroll = hideAllTooltips;
+
+
+            Object.keys(tooltipData).forEach(key => {
+                const th = document.querySelector(`th.sortable[onclick*="${key}"]`);
+                if (th) {
+                    const info = tooltipData[key];
+
+                    // ツールチップ要素を作成
+                    const tooltip = document.createElement('div');
+                    tooltip.className = 'column-tooltip';
+                    tooltip.innerHTML = `
+                <div class="tooltip-title">${info.title}</div>
+                <div class="tooltip-formula">${info.formula}</div>
+            `;
+
+                    // ヘッダーにマウスオーバーイベントを追加
+                    th.style.position = 'relative';
+                    th.addEventListener('mouseenter', (e) => {
+                        // 他のツールチップを閉じる
+                        hideAllTooltips();
+
+                        document.body.appendChild(tooltip); // DOMの最前面に追加
+                        positionTooltip(tooltip, th);
+                        tooltip.classList.add('visible');
+                    });
+
+                    th.addEventListener('mouseleave', () => {
+                        tooltip.classList.remove('visible');
+                        setTimeout(() => {
+                            if (tooltip.parentNode) {
+                                tooltip.parentNode.removeChild(tooltip);
+                            }
+                        }, 200);
+                    });
+                }
+            });
+        }
+
+        /**
+         * ツールチップの位置を調整
+         */
+        function positionTooltip(tooltip, targetElement) {
+            const rect = targetElement.getBoundingClientRect();
+
+            // ツールチップの現在サイズを取得するために一旦表示 (opacity:0で)
+            tooltip.style.opacity = '0';
+            tooltip.classList.add('visible');
+            const tooltipRect = tooltip.getBoundingClientRect();
+            tooltip.classList.remove('visible');
+            tooltip.style.opacity = '';
+
+            // 基本位置: ヘッダーの下中央
+            let top = rect.bottom + window.scrollY + 8;
+            let left = rect.left + window.scrollX + (rect.width / 2) - (tooltipRect.width / 2);
+
+            // 画面右端からはみ出る場合は左に調整
+            if (left + tooltipRect.width > window.innerWidth) {
+                left = window.innerWidth - tooltipRect.width - 10;
+            }
+
+            // 画面左端からはみ出る場合は右に調整
+            if (left < 10) {
+                left = 10;
+            }
+
+            tooltip.style.top = `${top}px`;
+            tooltip.style.left = `${left}px`;
+        }
+
+
+        // 年月フォーマット切替
+        function formatYearMonth(year, month, style = "slash") {
+            if (style === "slash") {
+                return `${year}/${month}`;
+            }
+            return `${year}年${month}月`;
+        }
+
+
+        // ★★★ 既存の 'renderAnalysis' 関数と「丸ごと」置き換えてください ★★★
+        function renderAnalysis(data) {
+            const content = document.getElementById('newAnalysisContent');
+            const legacyContent = document.getElementById('analysisContent');
+
+            if (data.length === 0) {
+                content.innerHTML = `
+      <div class="analysis-section">
+        <div class="empty-state">
+          データがありません。まずはデータを入力してください。
+        </div>
+      </div>`;
+                if (legacyContent) {
+                    legacyContent.style.display = 'none';
+                }
+                return;
+            }
+
+            if (legacyContent) {
+                legacyContent.style.display = 'block';
+            }
+
+            const modeText = { timeseries: '[時系列]', yearly: '[年別集計]', monthly_compare: '[月別比較]' }[currentAggregationMode] || '';
+
+            const gasolinePrice = parseFloat(document.getElementById('gasPriceInput')?.value) || 170;
+            const gasolineFuelEfficiency = parseFloat(document.getElementById('gasEfficiencyInput')?.value) || 15;
+            const enrichedData = calculateNewMetrics(data, gasolinePrice, gasolineFuelEfficiency);
+
+            // --- サマリーカードの計算 (変更なし) ---
+            const avgCostPerKm = enrichedData.reduce((sum, d) => sum + (d.costPerKm || 0), 0) / enrichedData.filter(d => d.costPerKm > 0).length || 0;
+            const avgEvUsageRatio = enrichedData.reduce((sum, d) => sum + (d.evUsageRatio || 0), 0) / enrichedData.filter(d => d.evUsageRatio > 0).length || 0;
+            const totalSavings = enrichedData.reduce((sum, d) => sum + (d.savingsVsGas || 0), 0);
+            const effValues = enrichedData.map(d => d.evEfficiency || 0).filter(v => v > 0);
+            const maxEfficiency = effValues.length > 0 ? Math.max(...effValues) : 0;
+
+
+            let html = '';
+
+            // --- 1. サマリーカード (変更なし) ---
+            html += `
+    <div class="analysis-section">
+      <h2>📈 重要指標サマリー (全期間)</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="font-size: 14px; opacity: 0.9;">平均充電コスト効率</div>
+          <div style="font-size: 32px; font-weight: bold; margin: 10px 0;">
+            ¥${avgCostPerKm.toFixed(2)}
+          </div>
+          <div style="font-size: 14px; opacity: 0.9;">円/km</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="font-size: 14px; opacity: 0.9;">平均EV充電比率</div>
+          <div style="font-size: 32px; font-weight: bold; margin: 10px 0;">
+            ${avgEvUsageRatio.toFixed(1)}%
+          </div>
+          <div style="font-size: 14px; opacity: 0.9;">家庭電力に占める割合</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="font-size: 14px; opacity: 0.9;">ガソリン代との差額(累計)</div>
+          <div style="font-size: 32px; font-weight: bold; margin: 10px 0;">
+            ¥${totalSavings.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </div>
+          <div style="font-size: 14px; opacity: 0.9;">節約額</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="font-size: 14px; opacity: 0.9;">最高電費記録</div>
+          <div style="font-size: 32px; font-weight: bold; margin: 10px 0;">
+            ${maxEfficiency.toFixed(2)}
+          </div>
+          <div style="font-size: 14px; opacity: 0.9;">km/kWh</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+            // --- 2. グラフセクション (★ コメントボックスのdivを追加) ---
+            html += `
+    <div class="analysis-section">
+      <h2>💰 EV充電コスト効率 (円/km) - ${modeText}</h2>
+      <div class="chart-container" style="height: 350px;">
+        <canvas id="cost-per-km-chart"></canvas>
+      </div>
+      <div class="info-box" id="comment-box-cost-per-km" style="margin-top: 15px;"></div>
+    </div>
+  `;
+            html += `
+    <div class="analysis-section">
+      <h2>🔋 家庭内EV充電比率 (%) - ${modeText}</h2>
+      <div class="chart-container" style="height: 350px;">
+        <canvas id="ev-usage-ratio-chart"></canvas>
+      </div>
+      <div class="info-box" id="comment-box-ev-usage-ratio" style="margin-top: 15px;"></div>
+    </div>
+  `;
+
+            // --- 3. TOP10 ランキング (変更なし) ---
+            let rankingHtml = '';
+
+            // 1. [全期間] タブの中身
+            const rankingAllTime = getEfficiencyRanking(enrichedData, 10);
+            let rankingHtmlAllTime = (rankingAllTime.length > 0)
+                ? createRankingTable(rankingAllTime)
+                : '<div class="empty-state" style="padding: 20px;">データがありません</div>';
+
+            // 2. [年別] タブの中身
+            let rankingHtmlYearly = '';
+            const years = [...new Set(enrichedData.map(d => d.year))].sort((a, b) => b - a); // 新しい順
+            years.forEach(year => {
+                const yearlyData = enrichedData.filter(d => d.year === year);
+                const ranking = getEfficiencyRanking(yearlyData, 10);
+                if (ranking.length > 0) {
+                    rankingHtmlYearly += `<h3 style="margin-top: 20px; margin-bottom: 10px;">${year}年</h3>${createRankingTable(ranking)}`;
+                }
+            });
+            if (rankingHtmlYearly === '') rankingHtmlYearly = '<div class="empty-state" style="padding: 20px;">データがありません</div>';
+
+            // 3. [月別] タブの中身 (TOP5)
+            let rankingHtmlMonthly = '';
+            const months = Array.from({ length: 12 }, (_, i) => i + 1); // 1月〜12月
+            months.forEach(month => {
+                const monthlyData = enrichedData.filter(d => d.month === month);
+                const ranking = getEfficiencyRanking(monthlyData, 5); // 月別はTOP5
+                if (ranking.length > 0) {
+                    rankingHtmlMonthly += `<h3 style="margin-top: 20px; margin-bottom: 10px;">${month}月</h3>${createRankingTable(ranking)}`;
+                }
+            });
+            if (rankingHtmlMonthly === '') rankingHtmlMonthly = '<div class="empty-state" style="padding: 20px;">データがありません</div>';
+
+            // 4. HTMLの構築 (グラフの集計モードに応じてデフォルトタブを決定)
+            let timeseriesActive = (currentAggregationMode === 'timeseries');
+            let yearlyActive = (currentAggregationMode === 'yearly');
+            let monthlyActive = (currentAggregationMode === 'monthly_compare');
+
+            if (!timeseriesActive && !yearlyActive && !monthlyActive) {
+                timeseriesActive = true;
+            }
+
+            rankingHtml = `
+            <div class="analysis-section">
+              <h2>🏆 電費効率ランキング</h2>
+              
+              <div style="display: flex; gap: 8px; margin-bottom: 0; border-bottom: 2px solid var(--border-color); overflow-x: auto;">
+                <button id="btn-rank-timeseries" class="btn ${timeseriesActive ? 'btn-primary' : 'btn-secondary'}" style="border-radius: 8px 8px 0 0; border-bottom: 0; margin-bottom: -2px; flex-shrink: 0;" onclick="switchRankingTab('timeseries')">全期間 TOP10</button>
+                <button id="btn-rank-yearly" class="btn ${yearlyActive ? 'btn-primary' : 'btn-secondary'}" style="border-radius: 8px 8px 0 0; border-bottom: 0; margin-bottom: -2px; flex-shrink: 0;" onclick="switchRankingTab('yearly')">年別 TOP10</button>
+                <button id="btn-rank-monthly" class="btn ${monthlyActive ? 'btn-primary' : 'btn-secondary'}" style="border-radius: 8px 8px 0 0; border-bottom: 0; margin-bottom: -2px; flex-shrink: 0;" onclick="switchRankingTab('monthly')">月別 TOP5</button>
+              </div>
+              
+              <div style="padding-top: 20px;">
+                  <div id="ranking-timeseries" class="ranking-tab-content" style="display: ${timeseriesActive ? 'block' : 'none'};">
+                    ${rankingHtmlAllTime}
+                  </div>
+                  <div id="ranking-yearly" class="ranking-tab-content" style="display: ${yearlyActive ? 'block' : 'none'};">
+                    ${rankingHtmlYearly}
+                  </div>
+                  <div id="ranking-monthly" class="ranking-tab-content" style="display: ${monthlyActive ? 'block' : 'none'};">
+                    ${rankingHtmlMonthly}
+                  </div>
+              </div>
+            </div>
+            `;
+
+            html += rankingHtml; // 構築したHTMLを追加
+
+            // --- 4. ガソリン代比較 (★ コメントボックスのdivを追加) ---
+            html += `
+    <div class="analysis-section">
+      <h2>⛽ EVvsガソリン車 コスト比較 - ${modeText}</h2>
+      
+      <div class="form-grid" style="margin-bottom: 20px; max-width: 600px; gap: 10px;">
+          <div class="form-group" style="margin-bottom: 0;">
+              <label style="font-size: 13px;">想定ガソリン価格 (円/L)</label>
+              <input type="number" id="gasPriceInput" class="form-control" value="${gasolinePrice}" onchange="updateAnalysisView()">
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+              <label style="font-size: 13px;">想定ガソリン車燃費 (km/L)</label>
+              <input type="number" id="gasEfficiencyInput" class="form-control" value="${gasolineFuelEfficiency}" onchange="updateAnalysisView()">
+          </div>
+      </div>
+      
+      <div class="chart-grid">
+        <div>
+          <h3>コスト比較</h3>
+          <div class="chart-container">
+            <canvas id="gas-comparison-chart"></canvas>
+          </div>
+          <div class="info-box" id="comment-box-gas-comparison" style="margin-top: 15px;"></div>
+        </div>
+        <div>
+          <h3>月別節約額</h3>
+          <div class="chart-container">
+            <canvas id="savings-chart"></canvas>
+          </div>
+          <div class="info-box" id="comment-box-savings" style="margin-top: 15px;"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+            content.innerHTML = html;
+            renderNewMetricsCharts(enrichedData);
+        }
+
+        // ★★★ 既存の 'renderNewMetricsCharts' 関数と「丸ごと」置き換えてください ★★★
+        function renderNewMetricsCharts(enrichedData) {
+
+            let labels;
+            let costPerKmData, evUsageRatioData, gasCompareData, savingsData;
+            const P1_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--chart-p1-color').trim();
+            const P2_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--chart-p2-color').trim();
+
+            const chartType = (currentAggregationMode === 'yearly') ? 'bar' : 'line';
+            const barChartType = (currentAggregationMode === 'timeseries') ? 'bar' : (currentAggregationMode === 'yearly') ? 'bar' : 'line';
+            const savingsChartType = (currentAggregationMode === 'monthly_compare') ? 'bar' : barChartType;
+
+            // ★ (修正) コメント生成用のデータを準備
+            let effectiveData;
+            let commentLabelKey;
+            let monthlyCompData = null; // ★ 月別比較データを保持
+
+            if (currentAggregationMode === 'timeseries') {
+                const sortedData = [...enrichedData].sort(
+                    (a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month)
+                );
+                labels = sortedData.map(d => `${d.year}/${d.month}`);
+                effectiveData = sortedData;
+                commentLabelKey = 'yearMonth';
+
+                // ★ 提案3: 0やnullをそのまま渡す
+                costPerKmData = { datasets: [{ label: '充電コスト効率 (円/km)', data: sortedData.map(d => (d.costPerKm && isFinite(d.costPerKm)) ? d.costPerKm : (d.costPerKm === 0 ? 0 : null)), borderColor: '#8b5cf6', backgroundColor: '#8b5cf640', tension: 0.4, fill: true }] };
+                evUsageRatioData = { datasets: [{ label: 'EV充電比率 (%)', data: sortedData.map(d => (d.evUsageRatio && isFinite(d.evUsageRatio)) ? d.evUsageRatio : (d.evUsageRatio === 0 ? 0 : null)), backgroundColor: '#f59e0b' }] };
+                gasCompareData = {
+                    datasets: [
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { label: 'EV充電代', data: sortedData.map(d => (d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d.carElectricCost === 0 ? 0 : null)), borderColor: P2_COLOR, backgroundColor: P2_COLOR + '40', tension: 0.4 },
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { label: '想定ガソリン代', data: sortedData.map(d => (d.equivalentGasCost && isFinite(d.equivalentGasCost)) ? d.equivalentGasCost : (d.equivalentGasCost === 0 ? 0 : null)), borderColor: P1_COLOR, backgroundColor: P1_COLOR + '40', tension: 0.4, borderDash: [5, 5] }
+                    ]
+                };
+                // ★ 提案3: 0やnullをそのまま渡す
+                savingsData = { datasets: [{ label: '節約額 (円)', data: sortedData.map(d => (d.savingsVsGas && isFinite(d.savingsVsGas)) ? d.savingsVsGas : (d.savingsVsGas === 0 ? 0 : null)), backgroundColor: '#10b981' }] };
+
+            } else if (currentAggregationMode === 'yearly') {
+                const yearlyProcessed = aggregateDataYearly(enrichedData);
+                labels = yearlyProcessed.map(d => `${d.year}年`);
+                effectiveData = yearlyProcessed;
+                commentLabelKey = 'year';
+
+                yearlyProcessed.forEach(d => {
+                    // ★ 提案3: 分母ゼロ対策
+                    d.costPerKm = (d.evMonthlyDistance > 0 && d.carElectricCost > 0) ? d.carElectricCost / d.evMonthlyDistance : (d.evMonthlyDistance === 0 ? 0 : null);
+                    d.evUsageRatio = (d.evTotalUsage > 0 && d.evCarUsage > 0) ? (d.evCarUsage / d.evTotalUsage) * 100 : (d.evTotalUsage === 0 ? 0 : null);
+                    d.equivalentGasCost = (d.equivalentGasCostSum) ? d.equivalentGasCostSum : 0;
+                    d.savingsVsGas = (d.savingsVsGasSum) ? d.savingsVsGasSum : 0;
+                });
+
+                // ★ 提案3: 0やnullをそのまま渡す
+                costPerKmData = { datasets: [{ label: '充電コスト効率 (円/km)', data: yearlyProcessed.map(d => (d.costPerKm && isFinite(d.costPerKm)) ? d.costPerKm : (d.costPerKm === 0 ? 0 : null)), backgroundColor: '#8b5cf6' }] };
+                // ★ 提案3: 0やnullをそのまま渡す
+                evUsageRatioData = { datasets: [{ label: 'EV充電比率 (%)', data: yearlyProcessed.map(d => (d.evUsageRatio && isFinite(d.evUsageRatio)) ? d.evUsageRatio : (d.evUsageRatio === 0 ? 0 : null)), backgroundColor: '#f59e0b' }] };
+                gasCompareData = {
+                    datasets: [
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { label: 'EV充電代', data: yearlyProcessed.map(d => (d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d.carElectricCost === 0 ? 0 : null)), backgroundColor: P2_COLOR },
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { label: '想定ガソリン代', data: yearlyProcessed.map(d => (d.equivalentGasCostSum && isFinite(d.equivalentGasCostSum)) ? d.equivalentGasCostSum : (d.equivalentGasCostSum === 0 ? 0 : null)), backgroundColor: P1_COLOR }
+                    ]
+                };
+                // ★ 提案3: 0やnullをそのまま渡す
+                savingsData = { datasets: [{ label: '節約額 (円)', data: yearlyProcessed.map(d => (d.savingsVsGasSum && isFinite(d.savingsVsGasSum)) ? d.savingsVsGasSum : (d.savingsVsGasSum === 0 ? 0 : null)), backgroundColor: '#10b981' }] };
+
+            } else if (currentAggregationMode === 'monthly_compare') {
+                monthlyCompData = aggregateDataMonthlyCompare(enrichedData); // ★ 月別データを保持
+                labels = monthlyCompData.labels;
+                effectiveData = null; // ★ 月別比較は別のロジックを使う
+                commentLabelKey = null;
+                const yearColors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+                costPerKmData = {
+                    datasets: monthlyCompData.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `コスト効率 (${year}年)`, data: monthlyCompData.dataByYear[year].map(d => (d && d.costPerKm && isFinite(d.costPerKm)) ? d.costPerKm : (d && d.costPerKm === 0 ? 0 : null)), borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+                evUsageRatioData = {
+                    datasets: monthlyCompData.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `充電比率 (${year}年)`, data: monthlyCompData.dataByYear[year].map(d => (d && d.evUsageRatio && isFinite(d.evUsageRatio)) ? d.evUsageRatio : (d && d.evUsageRatio === 0 ? 0 : null)), borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+
+                const gasCompareDatasets = monthlyCompData.years.map((year, i) => ({
+                    label: `EV充電代 (${year}年)`,
+                    // ★ 提案3: 0やnullをそのまま渡す
+                    data: monthlyCompData.dataByYear[year].map(d => (d && d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d && d.carElectricCost === 0 ? 0 : null)),
+                    borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                }));
+                monthlyCompData.years.forEach((year, i) => {
+                    gasCompareDatasets.push({
+                        label: `ガソリン代 (${year}年)`,
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        data: monthlyCompData.dataByYear[year].map(d => (d && d.equivalentGasCost && isFinite(d.equivalentGasCost)) ? d.equivalentGasCost : (d && d.equivalentGasCost === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], borderDash: [5, 5], tension: 0.4, fill: false
+                    });
+                });
+                gasCompareData = { datasets: gasCompareDatasets };
+
+                savingsData = {
+                    datasets: monthlyCompData.years.map((year, i) => ({
+                        label: `節約額 (${year}年)`,
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        data: monthlyCompData.dataByYear[year].map(d => (d && d.savingsVsGas && isFinite(d.savingsVsGas)) ? d.savingsVsGas : (d && d.savingsVsGas === 0 ? 0 : null)),
+                        backgroundColor: yearColors[i % yearColors.length]
+                    }))
+                };
+            }
+
+            // --- グラフ描画 (変更なし) ---
+            const lineOptions = (yTitle) => ({
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: true, position: 'top', labels: { usePointStyle: false } } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: yTitle }, grace: '10%' } }
+            });
+            const barOptions = (yTitle) => ({
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: true, position: 'top', labels: { usePointStyle: false } } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: yTitle }, grace: '10%' } }
+            });
+            renderOrUpdateChart('cost-per-km-chart', {
+                type: chartType, data: { labels: labels, ...costPerKmData },
+                options: lineOptions('円/km')
+            });
+            renderOrUpdateChart('ev-usage-ratio-chart', {
+                type: barChartType, data: { labels: labels, ...evUsageRatioData },
+                options: (barChartType === 'line') ? lineOptions('%') : barOptions('%')
+            });
+            const gasCompareContainer = document.getElementById('gas-comparison-chart').parentElement.parentElement;
+            gasCompareContainer.style.display = 'block';
+            renderOrUpdateChart('gas-comparison-chart', {
+                type: chartType, data: { labels: labels, ...gasCompareData },
+                options: lineOptions('円')
+            });
+            renderOrUpdateChart('savings-chart', {
+                type: savingsChartType,
+                data: { labels: labels, ...savingsData },
+                options: (savingsChartType === 'line') ? lineOptions('円') : barOptions('円')
+            });
+
+            // ★★★ (ここからが修正箇所) ★★★
+            // グラフ描画後に、コメントボックスを取得して中身を挿入
+            const commentBoxCostPerKm = document.getElementById('comment-box-cost-per-km');
+            const commentBoxEvUsageRatio = document.getElementById('comment-box-ev-usage-ratio');
+            const commentBoxGasCompare = document.getElementById('comment-box-gas-comparison');
+            const commentBoxSavings = document.getElementById('comment-box-savings');
+            const boxes = [commentBoxCostPerKm, commentBoxEvUsageRatio, commentBoxGasCompare, commentBoxSavings];
+
+            if (effectiveData) { // 'timeseries' または 'yearly' の場合
+                commentBoxCostPerKm.innerHTML = generateTrendComment(effectiveData, 'costPerKm', commentLabelKey, '円/km', false);
+                commentBoxEvUsageRatio.innerHTML = generateTrendComment(effectiveData, 'evUsageRatio', commentLabelKey, '%', true);
+                commentBoxGasCompare.innerHTML = generateTrendComment(effectiveData, 'carElectricCost', commentLabelKey, '円', false);
+                commentBoxSavings.innerHTML = generateTrendComment(effectiveData, 'savingsVsGas', commentLabelKey, '円', true);
+
+                boxes.forEach(box => box.style.display = 'block');
+            } else if (monthlyCompData) { // 'monthly_compare' の場合
+                commentBoxCostPerKm.innerHTML = generateMonthlyComparisonComment(monthlyCompData, 'costPerKm', '円/km', false);
+                commentBoxEvUsageRatio.innerHTML = generateMonthlyComparisonComment(monthlyCompData, 'evUsageRatio', '%', true);
+                commentBoxGasCompare.innerHTML = generateMonthlyComparisonComment(monthlyCompData, 'carElectricCost', '円', false);
+                commentBoxSavings.innerHTML = generateMonthlyComparisonComment(monthlyCompData, 'savingsVsGas', '円', true);
+
+                boxes.forEach(box => box.style.display = 'block'); // ★ 表示する
+            } else {
+                boxes.forEach(box => {
+                    if (box) box.style.display = 'none'; // 非表示
+                });
+            }
+        }
+
+        // ★★★ 既存の 'showAnalysisView' 関数と「丸ごと」置き換えてください ★★★
+        function showAnalysisView(data) {
+            const legacyContent = document.getElementById('analysisContent');
+            if (!legacyContent) return;
+
+            if (!data || data.length === 0) {
+                legacyContent.style.display = 'none';
+                return;
+            }
+            legacyContent.style.display = 'block';
+
+            const modeText = { timeseries: '[時系列]', yearly: '[年別集計]', monthly_compare: '[月別比較]' }[currentAggregationMode] || '';
+            const titleEl = document.querySelector('#analysisContent h2');
+            if (titleEl) titleEl.textContent = `📊 基本レポート (月別推移) - ${modeText}`;
+
+            const P1_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--chart-p1-color').trim();
+            const P2_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--chart-p2-color').trim();
+            const yearColors = [P2_COLOR, P1_COLOR, '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+            let labels;
+            let chart1Data, chart2Data, chart3Data, chart4Data, chart5Data;
+
+            // ★ (追加) コメント生成用のデータを準備
+            let effectiveData;
+            let commentLabelKey;
+
+            if (currentAggregationMode === 'timeseries') {
+                const sortedData = [...data].sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
+                labels = sortedData.map(d => d.yearMonth);
+                effectiveData = sortedData; // ★ コメント用
+                commentLabelKey = 'yearMonth'; // ★ コメント用
+
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart1Data = { type: 'line', datasets: [{ label: 'EV電気代', data: sortedData.map(d => (d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d.carElectricCost === 0 ? 0 : null)), borderColor: P1_COLOR, backgroundColor: P1_COLOR + '40', fill: true }] };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart2Data = { type: 'bar', datasets: [{ label: 'EV充電量(kWh)', data: sortedData.map(d => (d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d.evCarUsage === 0 ? 0 : null)), backgroundColor: P2_COLOR }] };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart3Data = { type: 'line', datasets: [{ label: '電費(km/kWh)', data: sortedData.map(d => (d.evEfficiency && isFinite(d.evEfficiency)) ? d.evEfficiency : (d.evEfficiency === 0 ? 0 : null)), borderColor: '#10b981', backgroundColor: '#10b98140', fill: true }] };
+                chart4Data = {
+                    type: 'bar', datasets: [
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { type: 'bar', label: '走行距離(km)', data: sortedData.map(d => (d.evMonthlyDistance && isFinite(d.evMonthlyDistance)) ? d.evMonthlyDistance : (d.evMonthlyDistance === 0 ? 0 : null)), backgroundColor: '#7c3aed', yAxisID: 'y', order: 2 },
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { type: 'line', label: 'EV充電量(kWh)', data: sortedData.map(d => (d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d.evCarUsage === 0 ? 0 : null)), backgroundColor: '#60a5fa', borderColor: '#60a5fa', fill: false, yAxisID: 'y1', order: 1 }
+                    ]
+                };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart5Data = { type: 'line', datasets: [{ label: '電力量単価(円/kWh)', data: sortedData.map(d => (d.kwhUnitPrice && isFinite(d.kwhUnitPrice)) ? d.kwhUnitPrice : (d.kwhUnitPrice === 0 ? 0 : null)), borderColor: '#f59e0b', backgroundColor: '#f59e0b40', fill: true }] };
+
+            } else if (currentAggregationMode === 'yearly') {
+                const yearlyData = aggregateDataYearly(data);
+                labels = yearlyData.map(d => `${d.year}年`);
+                effectiveData = yearlyData; // ★ コメント用
+                commentLabelKey = 'year'; // ★ コメント用
+
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart1Data = { type: 'bar', datasets: [{ label: 'EV電気代(年間合計)', data: yearlyData.map(d => (d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d.carElectricCost === 0 ? 0 : null)), backgroundColor: P1_COLOR }] };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart2Data = { type: 'bar', datasets: [{ label: 'EV充電量(年間合計)', data: yearlyData.map(d => (d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d.evCarUsage === 0 ? 0 : null)), backgroundColor: P2_COLOR }] };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart3Data = { type: 'bar', datasets: [{ label: '平均電費(km/kWh)', data: yearlyData.map(d => (d.evEfficiency && isFinite(d.evEfficiency)) ? d.evEfficiency : (d.evEfficiency === 0 ? 0 : null)), backgroundColor: '#10b981' }] };
+                chart4Data = {
+                    type: 'bar', datasets: [
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { type: 'bar', label: '走行距離(年間合計)', data: yearlyData.map(d => (d.evMonthlyDistance && isFinite(d.evMonthlyDistance)) ? d.evMonthlyDistance : (d.evMonthlyDistance === 0 ? 0 : null)), backgroundColor: '#7c3aed', yAxisID: 'y', order: 2 },
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        { type: 'line', label: 'EV充電量(年間合計)', data: yearlyData.map(d => (d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d.evCarUsage === 0 ? 0 : null)), backgroundColor: '#60a5fa', borderColor: '#60a5fa', fill: false, yAxisID: 'y1', order: 1 }
+                    ]
+                };
+                // ★ 提案3: 0やnullをそのまま渡す
+                chart5Data = { type: 'bar', datasets: [{ label: '電力量単価(円/kWh)', data: yearlyData.map(d => (d.kwhUnitPrice && isFinite(d.kwhUnitPrice)) ? d.kwhUnitPrice : (d.kwhUnitPrice === 0 ? 0 : null)), backgroundColor: '#f59e0b' }] };
+
+            } else if (currentAggregationMode === 'monthly_compare') {
+                const monthlyComp = aggregateDataMonthlyCompare(data);
+                labels = monthlyComp.labels;
+                effectiveData = null; // ★ 月別比較はコメント対象外
+                commentLabelKey = null; // ★
+
+                chart1Data = {
+                    type: 'line', datasets: monthlyComp.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `EV電気代 (${year}年)`,
+                        data: monthlyComp.dataByYear[year].map(d => (d && d.carElectricCost && isFinite(d.carElectricCost)) ? d.carElectricCost : (d && d.carElectricCost === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+                chart2Data = {
+                    type: 'line', datasets: monthlyComp.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `EV充電量 (${year}年)`,
+                        data: monthlyComp.dataByYear[year].map(d => (d && d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d && d.evCarUsage === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+                chart3Data = {
+                    type: 'line', datasets: monthlyComp.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `電費 (${year}年)`,
+                        data: monthlyComp.dataByYear[year].map(d => (d && d.evEfficiency && isFinite(d.evEfficiency)) ? d.evEfficiency : (d && d.evEfficiency === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+
+                const chart4Datasets = monthlyComp.years.map((year, i) => ({
+                    label: `走行距離 (${year}年)`,
+                    // ★ 提案3: 0やnullをそのまま渡す
+                    data: monthlyComp.dataByYear[year].map(d => (d && d.evMonthlyDistance && isFinite(d.evMonthlyDistance)) ? d.evMonthlyDistance : (d && d.evMonthlyDistance === 0 ? 0 : null)),
+                    borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false,
+                    yAxisID: 'y'
+                }));
+                monthlyComp.years.forEach((year, i) => {
+                    chart4Datasets.push({
+                        label: `充電量 (${year}年)`,
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        data: monthlyComp.dataByYear[year].map(d => (d && d.evCarUsage && isFinite(d.evCarUsage)) ? d.evCarUsage : (d && d.evCarUsage === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], borderDash: [5, 5], tension: 0.4, fill: false,
+                        yAxisID: 'y1'
+                    });
+                });
+                chart4Data = { type: 'line', datasets: chart4Datasets };
+
+                chart5Data = {
+                    type: 'line', datasets: monthlyComp.years.map((year, i) => ({
+                        // ★ 提案3: 0やnullをそのまま渡す
+                        label: `電力量単価 (${year}年)`,
+                        data: monthlyComp.dataByYear[year].map(d => (d && d.kwhUnitPrice && isFinite(d.kwhUnitPrice)) ? d.kwhUnitPrice : (d && d.kwhUnitPrice === 0 ? 0 : null)),
+                        borderColor: yearColors[i % yearColors.length], tension: 0.4, fill: false
+                    }))
+                };
+            }
+
+            // --- グラフ描画 (変更なし) ---
+            const lineOptions = (yTitle) => ({
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', display: true, labels: { usePointStyle: false } } },
+                scales: { y: { beginAtZero: true, grace: '10%', title: { display: true, text: yTitle } } }
+            });
+            const barOptions = (yTitle) => ({
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', display: true, labels: { usePointStyle: false } } },
+                scales: { y: { beginAtZero: true, grace: '10%', title: { display: true, text: yTitle } } }
+            });
+            const dualAxisOptions = {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', display: true, labels: { usePointStyle: false } } },
+                scales: {
+                    y: { type: 'linear', position: 'left', title: { display: true, text: '走行距離(km)' }, beginAtZero: true, grace: '10%' },
+                    y1: { type: 'linear', position: 'right', title: { display: true, text: 'EV充電量(kWh)' }, beginAtZero: true, grace: '10%', grid: { drawOnChartArea: false } }
+                }
+            };
+            const chart2Options = (chart2Data.type === 'bar') ? barOptions('kWh') : lineOptions('kWh');
+            renderOrUpdateChart('chart1', { type: chart1Data.type, data: { labels: labels, datasets: chart1Data.datasets }, options: lineOptions('円') });
+            renderOrUpdateChart('chart2', { type: chart2Data.type, data: { labels: labels, datasets: chart2Data.datasets }, options: chart2Options });
+            renderOrUpdateChart('chart3', { type: chart3Data.type, data: { labels: labels, datasets: chart3Data.datasets }, options: lineOptions('km/kWh') });
+            renderOrUpdateChart('chart4', { type: chart4Data.type, data: { labels: labels, datasets: chart4Data.datasets }, options: dualAxisOptions });
+            renderOrUpdateChart('chart5', { type: chart5Data.type, data: { labels: labels, datasets: chart5Data.datasets }, options: lineOptions('円/kWh') });
+
+            // ★★★ (ここからが新規追加ロジック) ★★★
+            // グラフ描画後に、コメントボックスを取得して中身を挿入
+            const commentBox1 = document.getElementById('comment-box-chart1');
+            const commentBox2 = document.getElementById('comment-box-chart2');
+            const commentBox3 = document.getElementById('comment-box-chart3');
+            const commentBox5 = document.getElementById('comment-box-chart5');
+            const boxes = [commentBox1, commentBox2, commentBox3, commentBox5];
+
+            if (effectiveData) { // 'timeseries' または 'yearly' の場合
+                commentBox1.innerHTML = generateTrendComment(effectiveData, 'carElectricCost', commentLabelKey, '円', false); // 低い方が良い
+                commentBox2.innerHTML = generateTrendComment(effectiveData, 'evCarUsage', commentLabelKey, 'kWh', true); // 高い方が良い (充電量)
+                commentBox3.innerHTML = generateTrendComment(effectiveData, 'evEfficiency', commentLabelKey, 'km/kWh', true); // 高い方が良い
+                commentBox5.innerHTML = generateTrendComment(effectiveData, 'kwhUnitPrice', commentLabelKey, '円/kWh', false); // 低い方が良い
+
+                boxes.forEach(box => box.style.display = 'block');
+            } else { // 'monthly_compare' の場合
+                boxes.forEach(box => {
+                    if (box) box.style.display = 'none'; // 非表示
+                });
+            }
+        }
+
+        // ★★★ (修正) calculateNewMetrics: ガソリン設定を引数で受け取る ★★★
+        function calculateNewMetrics(data, gasolinePrice = 170, gasolineFuelEfficiency = 15) {
+
+            const metricsByYear = {}; // 年別集計用
+
+            const enrichedData = data.map((item) => {
+                const metrics = { ...item };
+                const year = item.year;
+
+                // 1. EV充電コスト効率 (円/km)
+                // ★ 提案3: 分母ゼロ対策
+                metrics.costPerKm = (item.evMonthlyDistance > 0 && item.carElectricCost > 0)
+                    ? item.carElectricCost / item.evMonthlyDistance
+                    : (item.evMonthlyDistance === 0 ? 0 : null);
+
+                // 2. 家庭内EV充電比率 (%)
+                // ★ 提案3: 分母ゼロ対策
+                metrics.evUsageRatio = (item.evTotalUsage > 0 && item.evCarUsage > 0)
+                    ? (item.evCarUsage / item.evTotalUsage) * 100
+                    : (item.evTotalUsage === 0 ? 0 : null);
+
+                // 3. 月別コスト変動率 (前年同月比)
+                const prevYearData = appData.find(
+                    (d) => d.year === item.year - 1 && d.month === item.month
+                );
+                metrics.costChangeRate = (prevYearData && prevYearData.evTotalCost > 0)
+                    ? ((item.evTotalCost - prevYearData.evTotalCost) / prevYearData.evTotalCost) * 100
+                    : null;
+
+                // 4. 想定ガソリン代
+                if (item.evMonthlyDistance > 0) {
+                    const gasConsumption = item.evMonthlyDistance / gasolineFuelEfficiency;
+                    metrics.equivalentGasCost = gasConsumption * gasolinePrice;
+                    metrics.savingsVsGas = metrics.equivalentGasCost - item.carElectricCost;
+                } else {
+                    metrics.equivalentGasCost = 0;
+                    metrics.savingsVsGas = 0;
+                }
+
+                // ★ 年別集計用のデータ蓄積
+                if (!metricsByYear[year]) {
+                    metricsByYear[year] = { equivalentGasCostSum: 0, savingsVsGasSum: 0 };
+                }
+                metricsByYear[year].equivalentGasCostSum += metrics.equivalentGasCost;
+                metricsByYear[year].savingsVsGasSum += metrics.savingsVsGas;
+
+                return metrics;
+            });
+
+            //  enrichedData に年別集計結果をマージ (元の月別データにもたせる)
+            return enrichedData.map(item => ({
+                ...item,
+                equivalentGasCostSum: metricsByYear[item.year].equivalentGasCostSum,
+                savingsVsGasSum: metricsByYear[item.year].savingsVsGasSum
+            }));
+        }
+
+        // ★★★ (修正) getEfficiencyRanking: 引数でデータを受け取る ★★★
+        function getEfficiencyRanking(data, count = 10) {
+            return data
+                .filter((item) => item.evEfficiency && item.evEfficiency > 0) // 0やnullを除外
+                .sort((a, b) => b.evEfficiency - a.evEfficiency)
+                .slice(0, count)
+                .map((item, index) => ({
+                    rank: index + 1,
+                    ...item,
+                }));
+        }
+
+        // --- CSVエクスポート ---
+        function exportData() {
+            if (appData.length === 0) return alert('エクスポートするデータがありません');
+            const data = [...appData].sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month));
+            const filename = `EV按分データ_${new Date().toISOString().split('T')[0]}.csv`;
+            const headers = ['年', '月', '総電気料金(円)', '総使用電力量(kWh)', '累計EV充電量(kWh)', '当月EV充電量(kWh)', '累計走行距離(km)', '当月走行距離(km)', '電費(km/kWh)', '基本料金(円)', '電力量単価(円/kWh)', '当月EV電気代(円)', '按分額（EVなし）(円)', '按分額（EV使用者）(円)'];
+
+            const csvContent = [
+                headers.join(','),
+                ...data.map(row =>
+                    [
+                        row.year,
+                        row.month,
+                        row.evTotalCost,
+                        row.evTotalUsage,
+                        (row.evCumulativeKwh !== undefined && isFinite(row.evCumulativeKwh)) ? row.evCumulativeKwh.toFixed(2) : '',
+                        (row.evCarUsage && isFinite(row.evCarUsage)) ? row.evCarUsage.toFixed(2) : '0.00',
+                        row.evCumulativeDistance !== undefined ? row.evCumulativeDistance : '',
+                        row.evMonthlyDistance || 0,
+                        (row.evEfficiency && isFinite(row.evEfficiency)) ? row.evEfficiency.toFixed(2) : '0.00',
+                        row.evBaseFee,
+                        (row.kwhUnitPrice && isFinite(row.kwhUnitPrice)) ? row.kwhUnitPrice.toFixed(2) : '0.00',
+                        Math.round(row.carElectricCost || 0),
+                        Math.round(row.person1Cost || 0),
+                        Math.round(row.person2Cost || 0)
+                    ].join(',')
+                )
+            ].join('\n');
+
+            const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+        }
+
+        // --- CSVインポート ---
+        function openImportModal() {
+            document.getElementById('importModal').classList.add('active');
+        }
+
+        function closeImportModal() {
+            document.getElementById('importModal').classList.remove('active');
+            document.getElementById('importText').value = '';
+            document.getElementById('importError').style.display = 'none';
+            document.getElementById('fileInput').value = '';
+        }
+
+        function showImportError(message) {
+            document.getElementById('importError').style.display = 'block';
+            document.getElementById('importErrorText').textContent = message;
+        }
+
+        function hideImportError() {
+            document.getElementById('importError').style.display = 'none';
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                processImportData(e.target.result);
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        function handleTextImport() {
+            const text = document.getElementById('importText').value;
+            if (!text.trim()) {
+                showImportError('データを入力してください');
+                return;
+            }
+            processImportData(text.trim());
+        }
+
+        function processImportData(text) {
+            hideImportError();
+            try {
+                const parsed = Papa.parse(text, {
+                    header: true,
+                    skipEmptyLines: true,
+                    dynamicTyping: true,
+                    trimHeaders: true,
+                    delimitersToGuess: [",", "\t"]
+                });
+
+                if (parsed.errors.length > 0) {
+                    showImportError('CSVの解析エラー: ' + parsed.errors[0].message);
+                    return;
+                }
+
+                processImport(parsed.data);
+            } catch (error) {
+                showImportError('データの処理中にエラーが発生しました: ' + error.message);
+            }
+        }
+
+
+        function findKey(row, ...prefixes) {
+            const keys = Object.keys(row);
+            for (const prefix of prefixes) {
+                const foundKey = keys.find(k => k.trim().toLowerCase().startsWith(prefix.toLowerCase()));
+                if (foundKey !== undefined) {
+                    const value = row[foundKey];
+                    // 空文字列やnullの場合もundefinedとして扱う
+                    if (value === null || value === undefined || value === '') return undefined;
+                    return value;
+                }
+            }
+            return undefined;
+        }
+
+        function parseNumericValue(val) {
+            if (typeof val === 'number') {
+                return isFinite(val) ? val : 0;
+            }
+            if (typeof val === 'string') {
+                const cleanedVal = val.replace(/[¥, 　]/g, '');
+                return parseFloat(cleanedVal) || 0;
+            }
+            return 0;
+        }
+
+        function parseNumericValueAllowNaN(val) {
+            if (typeof val === 'number') {
+                return val;
+            }
+            if (typeof val === 'string') {
+                const cleanedVal = val.replace(/[¥, 　]/g, '');
+                return parseFloat(cleanedVal);
+            }
+            return NaN;
+        }
+
+        function processImport(data) {
+            const importedData = [];
+
+            data.sort((a, b) => {
+                const yearA = parseInt(findKey(a, '年')) || (findKey(a, '年月') ? parseInt(String(findKey(a, '年月')).split(/[/.-]/)[0]) : 0);
+                const monthA = parseInt(findKey(a, '月')) || (findKey(a, '年月') ? parseInt(String(findKey(a, '年月')).split(/[/.-]/)[1]) : 0);
+                const yearB = parseInt(findKey(b, '年')) || (findKey(b, '年月') ? parseInt(String(findKey(b, '年月')).split(/[/.-]/)[0]) : 0);
+                const monthB = parseInt(findKey(b, '月')) || (findKey(b, '年月') ? parseInt(String(findKey(b, '年月')).split(/[/.-]/)[1]) : 0);
+
+                if (!yearA || !monthA) return 1;
+                if (!yearB || !monthB) return -1;
+
+                return (yearA * 100 + monthA) - (yearB * 100 + monthB);
+            });
+
+            let prevCumulativeKwh = null;
+            let prevCumulativeDistance = null;
+
+            data.forEach((row, index) => {
+                let year, month;
+                const yearMonthKey = findKey(row, '年月');
+                if (yearMonthKey) {
+                    const parts = String(yearMonthKey).split(/[/.-]/);
+                    year = parseInt(parts[0]);
+                    month = parseInt(parts[1]);
+                } else {
+                    year = parseInt(findKey(row, '年'));
+                    month = parseInt(findKey(row, '月'));
+                }
+
+                if (year && month && month >= 1 && month <= 12) {
+                    const evTotalCost = parseNumericValue(findKey(row, '総電気料金(円)', '電気費用(円)', '总电气代'));
+                    const evTotalUsage = parseNumericValue(findKey(row, '総使用電力量(kWh)', '電気使用量(kWh)', '总使用', '総使用kwh'));
+                    const evBaseFee = parseNumericValue(findKey(row, '基本料金(円)'));
+
+                    const evCarUsageFromImport = parseNumericValue(findKey(row, '当月EV充電量(kWh)', '当月車使用量', '当月車', '当月车'));
+                    let evCarUsage;
+                    let evCumulativeKwh = undefined;
+                    const cumulativeKwh = parseNumericValueAllowNaN(findKey(row, '累計EV充電量(kWh)', '累计车'));
+
+                    if (isFinite(cumulativeKwh) && cumulativeKwh > 0) {
+                        evCumulativeKwh = cumulativeKwh;
+                        if (prevCumulativeKwh !== null) {
+                            evCarUsage = Math.max(0, cumulativeKwh - prevCumulativeKwh);
+                        } else {
+                            evCarUsage = evCarUsageFromImport; // 差が計算できない最初の累計行は、インポートされた当月値を使う
+                        }
+                        prevCumulativeKwh = cumulativeKwh;
+                    } else {
+                        evCarUsage = evCarUsageFromImport;
+                    }
+
+                    let evCumulativeDistance = undefined;
+                    let evMonthlyDistance = 0;
+                    const evMonthlyDistanceFromImport = parseNumericValue(findKey(row, '当月走行距離', '当月走行'));
+                    let evEfficiency = 0;
+                    const cumulativeDistance = parseNumericValueAllowNaN(findKey(row, '累計走行距離', '累計走行'));
+
+                    if (isFinite(cumulativeDistance) && cumulativeDistance > 0) {
+                        evCumulativeDistance = cumulativeDistance;
+                        if (prevCumulativeDistance !== null) {
+                            evMonthlyDistance = Math.max(0, cumulativeDistance - prevCumulativeDistance);
+                        } else {
+                            evMonthlyDistance = evMonthlyDistanceFromImport; // 差が計算できない最初の累計行は、インポートされた当月値を使う
+                        }
+                        prevCumulativeDistance = cumulativeDistance;
+                    } else {
+                        evMonthlyDistance = evMonthlyDistanceFromImport;
+                    }
+
+                    const efficiency = (evCarUsage > 0 && evMonthlyDistance > 0)
+                        ? evMonthlyDistance / evCarUsage
+                        : (evCarUsage > 0 && evMonthlyDistance === 0) ? 0 : null;
+
+                    const calculations = calculateEvShare(evTotalCost, evTotalUsage, evCarUsage, evBaseFee);
+
+                    const importedRow = {
+                        id: Date.now() + index,
+                        year,
+                        month,
+                        evTotalCost,
+                        evTotalUsage,
+                        evCumulativeDistance,
+                        evMonthlyDistance,
+                        evEfficiency: efficiency,
+                        evBaseFee,
+                        evCumulativeKwh,
+                        evCarUsage,
+                        evCarUsageFromImport,
+                        evMonthlyDistanceFromImport,
+                        ...calculations
+                    };
+
+                    importedData.push(importedRow);
+                }
+            });
+
+            if (importedData.length === 0) {
+                showImportError('有効なデータが見つかりませんでした');
+                return;
+            }
+
+            // ユーザーの要望に基づき、既存のデータをマージする代わりに、インポートされたデータで完全に置き換える
+            appData = importedData;
+
+            recalculateAndSaveData();
+            updateDataTable();
+            closeImportModal();
+            alert(`EV按分データ ${importedData.length}件をインポートしました`);
+        }
+
+        // --- スクロール同期 ---
+        function setupScrollSync() {
+            const topScroll = document.querySelector('.table-scroll-top');
+            const bottomScroll = document.getElementById('tableContainer');
+            if (!topScroll || !bottomScroll) return;
+
+            // イベント重複防止
+            topScroll.onscroll = null;
+            bottomScroll.onscroll = null;
+
+            // 双方向同期
+            topScroll.addEventListener('scroll', () => {
+                bottomScroll.scrollLeft = topScroll.scrollLeft;
+            });
+            bottomScroll.addEventListener('scroll', () => {
+                topScroll.scrollLeft = bottomScroll.scrollLeft;
+            });
+        }
+        document.addEventListener('DOMContentLoaded', setupScrollSync);
+        const _updateDataTable = window.updateDataTable;
+        window.updateDataTable = function (...args) {
+            const result = _updateDataTable.apply(this, args);
+            setupScrollSync();
+            return result;
+        };
+
+
+        // ★★★ (ここから下は新しく追加/大幅修正された関数群です) ★★★
+
+        /**
+         * グラフを描画または更新する汎用関数
+         * @param {string} canvasId - canvasのID
+         * @param {object} config - Chart.jsのコンフィグオブジェクト
+         */
+        function renderOrUpdateChart(canvasId, config) {
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+
+            // 既存のチャートがあれば破棄
+            if (chartInstances[canvasId]) {
+                chartInstances[canvasId].destroy();
+            }
+
+            // 新しいチャートを作成してインスタンスを保存
+            chartInstances[canvasId] = new Chart(ctx.getContext('2d'), config);
+        }
+
+        /**
+         * 集計モードを設定し、分析ビューを再描画する
+         * @param {string} mode - 'timeseries', 'yearly', 'monthly_compare'
+         */
+        function setAggregationMode(mode) {
+            currentAggregationMode = mode;
+
+            // ボタンのUIを更新
+            ['timeseries', 'yearly', 'monthly_compare'].forEach(m => {
+                const btn = document.getElementById(`btn-mode-${m}`);
+                if (btn) {
+                    if (m === mode) {
+                        btn.classList.add('btn-primary');
+                        btn.classList.remove('btn-secondary');
+                    } else {
+                        btn.classList.add('btn-secondary');
+                        btn.classList.remove('btn-primary');
+                    }
+                }
+            });
+
+            // 分析ビューがアクティブな場合のみ再描画
+            if (document.getElementById('analysis-view').classList.contains('active')) {
+                updateAnalysisView();
+            }
+        }
+
+        /**
+         * 現在の集計モードに基づいて分析ビュー全体を更新する
+         */
+        function updateAnalysisView() {
+            // 既存のグラフインスタンスを全て破棄
+            Object.values(chartInstances).forEach(chart => chart.destroy());
+            chartInstances = {};
+
+            recalculateAndSaveData(); // 常に最新の元データを再計算
+            const data = appData;
+            if (data.length === 0) {
+                // データが無い場合の処理
+                document.getElementById('newAnalysisContent').innerHTML = `
+                    <div class="analysis-section">
+                        <div class="empty-state">データがありません。</div>
+                    </div>`;
+                document.getElementById('analysisContent').style.display = 'none';
+                return;
+            }
+
+            document.getElementById('analysisContent').style.display = 'block';
+
+            // モードに応じたデータ処理と描画
+            showAnalysisView(data); // chart1-5 を描画
+            renderAnalysis(data);   // newAnalysisContent を描画
+        }
+
+        // --- データ集計関数 ---
+
+        /**
+         * 年別にデータを集計する
+         */
+        function aggregateDataYearly(data) {
+            const yearlyData = {};
+
+            data.forEach(item => {
+                const year = item.year;
+                if (!yearlyData[year]) {
+                    yearlyData[year] = {
+                        year: year,
+                        month: 0,
+                        evTotalCost: 0,
+                        evTotalUsage: 0,
+                        evCarUsage: 0,
+                        evMonthlyDistance: 0,
+                        carElectricCost: 0,
+                        person1Cost: 0,
+                        person2Cost: 0,
+                        kwhUnitPriceSum: 0,
+                        kwhUnitPriceCount: 0,
+                    };
+                }
+
+                // 合計
+                yearlyData[year].evTotalCost += item.evTotalCost || 0;
+                yearlyData[year].evTotalUsage += item.evTotalUsage || 0;
+                yearlyData[year].evCarUsage += item.evCarUsage || 0;
+                yearlyData[year].evMonthlyDistance += item.evMonthlyDistance || 0;
+                yearlyData[year].carElectricCost += item.carElectricCost || 0;
+                yearlyData[year].person1Cost += item.person1Cost || 0;
+                yearlyData[year].person2Cost += item.person2Cost || 0;
+
+                // ★ 提案3: null/NaN の単価はカウントしない
+                if (item.kwhUnitPrice && isFinite(item.kwhUnitPrice)) {
+                    yearlyData[year].kwhUnitPriceSum += item.kwhUnitPrice;
+                    yearlyData[year].kwhUnitPriceCount++;
+                }
+            });
+
+            // 集計結果の配列に変換し、平均値などを再計算
+            return Object.values(yearlyData).map(yearData => {
+                // 電費 (年間走行距離 / 年間充電量)
+                // ★ 提案3: 分母ゼロ対策
+                yearData.evEfficiency = (yearData.evCarUsage > 0)
+                    ? (yearData.evMonthlyDistance / yearData.evCarUsage)
+                    : (yearData.evMonthlyDistance === 0 ? 0 : null);
+                // 電力量単価 (年間平均)
+                yearData.kwhUnitPrice = (yearData.kwhUnitPriceCount > 0)
+                    ? (yearData.kwhUnitPriceSum / yearData.kwhUnitPriceCount)
+                    : 0;
+                return yearData;
+            }).sort((a, b) => a.year - b.year);
+        }
+
+        /**
+         * 月別比較用のデータセットを作成する
+         */
+        function aggregateDataMonthlyCompare(data) {
+            const byYear = {};
+            const years = [...new Set(data.map(d => d.year))].sort();
+
+            years.forEach(year => {
+                byYear[year] = new Array(12).fill(null); // 12ヶ月分のスロット
+            });
+
+            data.forEach(item => {
+                if (byYear[item.year]) {
+                    // ★ 提案3: 分母ゼロ対策
+                    // 月別比較グラフでも、計算値がnullにならないように計算し直す
+                    const metrics = calculateNewMetrics([item])[0]; // 最新の計算メトリクスを取得
+                    byYear[item.year][item.month - 1] = metrics; // 0-indexed
+                }
+            });
+
+            return {
+                labels: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+                years: years,
+                dataByYear: byYear
+            };
+        }
+
+        // --- JSON エクスポート / インポート ---
+
+        /**
+         * 全データと設定をJSONファイルとしてエクスポート
+         */
+        function exportDataJSON() {
+            if (appData.length === 0) return alert('エクスポートするデータがありません');
+
+            // ★ データと設定を含める
+            const exportData = {
+                version: '1.1', // バージョン情報 (ソート設定追加)
+                exportDate: new Date().toISOString(),
+                data: appData,
+                settings: {
+                    columnOrder: columnOrder,
+                    theme: localStorage.getItem('theme') || 'light',
+                    sortConfig: sortConfig // ★ 提案5: ソート設定を追加
+                }
+            };
+
+            const jsonString = JSON.stringify(exportData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const filename = `EV按分データ_バックアップ_${new Date().toISOString().split('T')[0]}.json`;
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        /**
+         * JSONファイルインポート処理
+         */
+        function handleJSONImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const text = e.target.result;
+                    const imported = JSON.parse(text);
+
+                    // ★ 新形式（設定を含む）と旧形式（データのみ）の両方に対応
+                    let importedData;
+                    let importedSettings = null;
+
+                    if (Array.isArray(imported)) {
+                        // 旧形式: データ配列のみ
+                        importedData = imported;
+                    } else if (imported.version && imported.data) {
+                        // 新形式: データと設定を含む
+                        importedData = imported.data;
+                        importedSettings = imported.settings;
+                    } else {
+                        alert('無効なJSONファイル形式です。\n（ヒント: CSVインポートは「CSVインポート」ボタンから行ってください）');
+                        return;
+                    }
+
+                    // データの検証
+                    if (!Array.isArray(importedData) || (importedData.length > 0 && (!importedData[0].year || !importedData[0].month))) {
+                        alert('無効なJSONファイル形式です。\n（ヒント: CSVインポートは「CSVインポート」ボタンから行ってください）');
+                        return;
+                    }
+
+                    // ★ 設定の適用確認
+                    let settingsMessage = '';
+                    if (importedSettings) {
+                        settingsMessage = '\n\n【含まれる設定】\n';
+                        if (importedSettings.columnOrder) {
+                            settingsMessage += '- 列の順序設定\n';
+                        }
+                        if (importedSettings.theme) {
+                            settingsMessage += `- テーマ設定 (${importedSettings.theme === 'dark' ? 'ダークモード' : 'ライトモード'})\n`;
+                        }
+                        // ★ 提案5: ソート設定の表示を追加
+                        if (importedSettings.sortConfig) {
+                            settingsMessage += `- ソート設定\n`;
+                        }
+                        settingsMessage += '\n※これらの設定も復元されます';
+                    }
+
+                    if (confirm(`現在のデータ${appData.length}件は、インポートするデータ${importedData.length}件に置き換えられます。${settingsMessage}\n\nよろしいですか？`)) {
+                        appData = importedData;
+                        recalculateAndSaveData();
+
+                        // ★ 設定の復元
+                        if (importedSettings) {
+                            if (importedSettings.columnOrder && Array.isArray(importedSettings.columnOrder)) {
+                                columnOrder = importedSettings.columnOrder;
+                            }
+
+                            if (importedSettings.theme) {
+                                const themeToggle = document.getElementById('themeToggle');
+                                if (themeToggle) {
+                                    themeToggle.checked = (importedSettings.theme === 'light');
+                                    toggleTheme();
+                                }
+                            }
+                            // ★ 提案5: ソート設定の復元
+                            if (importedSettings.sortConfig && importedSettings.sortConfig.key) {
+                                sortConfig = importedSettings.sortConfig;
+                            }
+                        }
+
+                        saveData();
+                        updateDataTable();
+                        setNextMonthForInput();
+                        loadExistingData();
+
+                        let successMessage = `JSONデータ ${importedData.length}件をインポートしました。`;
+                        if (importedSettings) {
+                            successMessage += '\n設定も復元されました。';
+                        }
+                        alert(successMessage);
+                    }
+                } catch (error) {
+                    alert('JSONファイルの読み込みまたは解析に失敗しました: ' + error.message);
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+
+        // --- (新規追加) ランキングタブ ---
+        function createRankingTable(rankingData) {
+            return `
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="text-center">順位</th>
+                  <th>年月</th>
+                  <th class="text-right">電費 (km/kWh)</th>
+                  <th class="text-right">走行距離 (km)</th>
+                  <th class="text-right">充電量 (kWh)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rankingData.map(item => `
+                  <tr>
+                    <td class="text-center">
+                      <span style="font-size: 20px; font-weight: bold;">
+                        ${item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : item.rank}
+                      </span>
+                    </td>
+                    <td>${item.year}年${item.month}月</td>
+                    <td class="text-right" style="font-weight: bold; color: #10b981;">
+                      ${item.evEfficiency != null ? item.evEfficiency.toFixed(2) : '--'}
+                    </td>
+                    <td class="text-right">${item.evMonthlyDistance != null ? item.evMonthlyDistance.toFixed(1) : '--'}</td>
+                    <td class="text-right">${item.evCarUsage != null ? item.evCarUsage.toFixed(1) : '--'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            `;
+        }
+
+        function switchRankingTab(mode) {
+            // コンテンツをすべて非表示
+            document.querySelectorAll('.ranking-tab-content').forEach(el => el.style.display = 'none');
+            // ボタンのスタイルをリセット
+            document.querySelectorAll('#btn-rank-timeseries, #btn-rank-yearly, #btn-rank-monthly').forEach(btn => {
+                if (btn) {
+                    btn.classList.add('btn-secondary');
+                    btn.classList.remove('btn-primary');
+                }
+            });
+
+            // 対象のコンテンツを表示
+            const content = document.getElementById(`ranking-${mode}`);
+            if (content) {
+                content.style.display = 'block';
+            }
+            // 対象のボタンをアクティブ化
+            const button = document.getElementById(`btn-rank-${mode}`);
+            if (button) {
+                button.classList.add('btn-primary');
+                button.classList.remove('btn-secondary');
+            }
+        }
+
+        // ★★★ (新規追加) 傾向分析コメントを自動生成する関数 ★★★
+        /**
+         * データ配列から傾向分析コメントを生成する
+         * @param {Array} data - 分析対象のデータ配列 (ソート済み)
+         * @param {string} key - 分析するデータのキー (例: 'carElectricCost')
+         * @param {string} labelKey - ラベルのキー (例: 'yearMonth' または 'year')
+         * @param {string} unit - 単位 (例: '円', 'kWh', 'km/kWh', '%')
+         * @param {boolean} higherIsBetter - 数値が高い方が良いか (例: 電費=true, コスト=false)
+         */
+        function generateTrendComment(data, key, labelKey, unit, higherIsBetter = false) {
+            // 'key' が null や 0 でない有効なデータのみを抽出
+            const validData = data.filter(d => d[key] && isFinite(d[key]));
+            if (validData.length < 2) {
+                return "<ul><li>データが不足しているため、傾向を分析できません。</li></ul>";
+            }
+
+            let minItem = validData[0];
+            let maxItem = validData[0];
+            let sum = 0;
+
+            validData.forEach(item => {
+                sum += item[key];
+                if (item[key] < minItem[key]) minItem = item;
+                if (item[key] > maxItem[key]) maxItem = item;
+            });
+
+            const avg = sum / validData.length;
+
+            // 単位に応じたフォーマット
+            const fVal = (val) => {
+                if (val === null || val === undefined) return '--';
+                if (unit === '円') return `¥${Math.round(val).toLocaleString()}`;
+                if (unit === 'kWh') return `${val.toFixed(1)} kWh`;
+                if (unit === 'km/kWh' || unit === '円/km') return `${val.toFixed(2)} ${unit}`;
+                if (unit === '%') return `${val.toFixed(1)} %`;
+                return val.toFixed(1);
+            };
+
+            // ラベルのフォーマット ( "2024" -> "2024年", "2024/5" -> "2024/5" )
+            const fLabel = (label) => {
+                return String(label).includes('/') ? label : `${label}年`;
+            };
+
+            let comments = [];
+            comments.push(`<strong>${fLabel(maxItem[labelKey])}</strong> に最高値 (<strong>${fVal(maxItem[key])}</strong>) を記録しました。`);
+            comments.push(`<strong>${fLabel(minItem[labelKey])}</strong> に最低値 (<strong>${fVal(minItem[key])}</strong>) を記録しました。`);
+            comments.push(`期間中の平均は <strong>${fVal(avg)}</strong> です。`);
+
+            // 最後のデータポイントが平均より良いか悪いか
+            const lastVal = validData[validData.length - 1][key];
+            if ((higherIsBetter && lastVal > avg) || (!higherIsBetter && lastVal < avg)) {
+                comments.push(`直近のデータは平均より<strong>良好</strong>です。`);
+            } else if ((higherIsBetter && lastVal < avg) || (!higherIsBetter && lastVal > avg)) {
+                comments.push(`直近のデータは平均より<strong>悪化</strong>しています。`);
+            }
+
+            return `<ul>${comments.map(c => `<li>${c}</li>`).join('')}</ul>`;
+        }
+
+
+        // ★★★ (新規追加) 月別比較の傾向分析コメントを自動生成する関数 ★★★
+        /**
+         * 月別比較データから、直近2年間の比較コメントを生成する
+         * @param {Object} monthlyCompData - aggregateDataMonthlyCompare から返されたデータ
+         * @param {string} key - 分析するデータのキー (例: 'carElectricCost')
+         * @param {string} unit - 単位 (例: '円', 'kWh', 'km/kWh', '%')
+         * @param {boolean} higherIsBetter - 数値が高い方が良いか (例: 電費=true, コスト=false)
+         */
+        function generateMonthlyComparisonComment(monthlyCompData, key, unit, higherIsBetter = false) {
+            const { labels, years, dataByYear } = monthlyCompData;
+
+            // 比較するには最低2年分のデータが必要
+            if (years.length < 2) {
+                return `<ul><li>${years[years.length - 1]}年を含む直近2年間の同月データが不足しているため、年比較はできません。</li></ul>`;
+            }
+
+            // 直近の2年間を取得
+            const latestYear = years[years.length - 1];
+            const prevYear = years[years.length - 2];
+
+            let improvements = 0;
+            let declines = 0;
+            let maxImprovement = { month: null, diff: 0 };
+            let maxDecline = { month: null, diff: 0 };
+
+            // 単位に応じたフォーマット
+            const fVal = (val) => {
+                if (val === null || val === undefined || !isFinite(val)) return '--';
+                if (unit === '円') return `¥${Math.round(val).toLocaleString()}`;
+                if (unit === 'kWh') return `${val.toFixed(1)} kWh`;
+                if (unit === 'km/kWh' || unit === '円/km') return `${val.toFixed(2)} ${unit}`;
+                if (unit === '%') return `${val.toFixed(1)} %`;
+                return val.toFixed(1);
+            };
+
+            for (let i = 0; i < 12; i++) {
+                const latestData = dataByYear[latestYear][i];
+                const prevData = dataByYear[prevYear][i];
+
+                // 両方の年にその月のデータが存在するかチェック
+                if (latestData && prevData && latestData[key] !== null && prevData[key] !== null && isFinite(latestData[key]) && isFinite(prevData[key])) {
+                    const latestVal = latestData[key];
+                    const prevVal = prevData[key];
+                    const diff = latestVal - prevVal; // プラスなら増加、マイナスなら減少
+
+                    if ((higherIsBetter && diff > 0) || (!higherIsBetter && diff < 0)) {
+                        // 改善した
+                        improvements++;
+                        const improvementDiff = higherIsBetter ? diff : -diff; // 改善幅（常にプラス）
+                        if (improvementDiff > maxImprovement.diff) {
+                            maxImprovement = { month: labels[i], diff: improvementDiff };
+                        }
+                    } else if ((higherIsBetter && diff < 0) || (!higherIsBetter && diff > 0)) {
+                        // 悪化した
+                        declines++;
+                        const declineDiff = higherIsBetter ? -diff : diff; // 悪化幅（常にプラス）
+                        if (declineDiff > maxDecline.diff) {
+                            maxDecline = { month: labels[i], diff: declineDiff };
+                        }
+                    }
+                }
+            }
+
+            if (improvements === 0 && declines === 0) {
+                return `<ul><li>${latestYear}年と${prevYear}年の比較可能なデータがありませんでした。</li></ul>`;
+            }
+
+            // コメントを生成
+            let comments = [];
+            comments.push(`<strong>${latestYear}年</strong>は${prevYear}年と比較し、<strong>${improvements}ヶ月</strong>で${higherIsBetter ? '改善' : 'コストが減少'}し、<strong>${declines}ヶ月</strong>で${higherIsBetter ? '悪化' : 'コストが増加'}しました。`);
+
+            if (maxImprovement.month) {
+                const changeText = higherIsBetter ? '改善' : 'コスト削減';
+                const valueChangeText = higherIsBetter ? '増加' : '減少';
+                comments.push(`最大の${changeText}は<strong>${maxImprovement.month}</strong>で、前年同月比 <strong>${fVal(maxImprovement.diff)} ${valueChangeText}</strong>しました。`);
+            }
+            if (maxDecline.month) {
+                const changeText = higherIsBetter ? '悪化' : 'コスト増';
+                const valueChangeText = higherIsBetter ? '減少' : '増加';
+                comments.push(`最大の${changeText}は<strong>${maxDecline.month}</strong>で、前年同月比 <strong>${fVal(maxDecline.diff)} ${valueChangeText}</strong>しました。`);
+            }
+
+            return `<ul>${comments.map(c => `<li>${c}</li>`).join('')}</ul>`;
+        }
+    </script>
+</body>
+
+</html>
