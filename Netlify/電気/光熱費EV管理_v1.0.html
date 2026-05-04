@@ -1291,7 +1291,8 @@ async function loadFromDrive() {
 
 async function saveToDrive() {
     if (driveStatus !== 'connected') { alert('先にDriveに接続してください'); return; }
-    const filename = `${DRIVE_PREFIX}${today()}.json`;
+    // 読み込んだファイルがあればそのファイル名で上書き、なければ新規作成
+    const filename = driveLastFile ? driveLastFile.name : `${DRIVE_PREFIX}${today()}.json`;
     try {
         await driveManager.uploadJson(filename, {
             version: '1.0',
