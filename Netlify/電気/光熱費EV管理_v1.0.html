@@ -498,6 +498,7 @@
                         <th>当月充電</th>
                         <th>走行距離</th>
                         <th>電費</th>
+                        <th>基本料金</th>
                         <th>EV電気代</th>
                         <th>按分(EVなし)</th>
                         <th>按分(EV)</th>
@@ -699,7 +700,8 @@ function updateEvPreview() {
 }
 
 function calculateEvShare(totalCost, totalUsage, carUsage, baseFee) {
-    if (totalCost == null || totalUsage == null || baseFee == null) {
+    // totalCost・totalUsageがnullなら計算不可（baseFeeは0でもOK）
+    if (totalCost == null || totalUsage == null) {
         return { kwhUnitPrice: null, carElectricCost: null, person1Cost: null, person2Cost: null };
     }
     totalCost = totalCost || 0; totalUsage = totalUsage || 0;
@@ -738,7 +740,10 @@ function loadMonthData() {
     if (e) {
         document.getElementById('evTotalCost').value = e.evTotalCost || '';
         document.getElementById('evTotalUsage').value = e.evTotalUsage || '';
-        document.getElementById('evBaseFee').value = e.evBaseFee || '';
+        // 基本料金が引き継ぎの場合はプレースホルダーで表示
+        const baseFeeInput = document.getElementById('evBaseFee');
+        baseFeeInput.value = e.evBaseFee != null ? e.evBaseFee : '';
+        baseFeeInput.placeholder = e.evBaseFee != null ? e.evBaseFee : '前月から引き継ぎ';
         document.getElementById('evCumulativeKwh').value = e.evCumulativeKwh != null ? e.evCumulativeKwh : '';
         document.getElementById('evCumulativeDistance').value = e.evCumulativeDistance != null ? e.evCumulativeDistance : '';
         document.getElementById('evCarUsage').value = e.evCarUsage != null ? e.evCarUsage.toFixed(2) : '';
@@ -775,7 +780,7 @@ function saveMonthData() {
 
     // EV record
     const evEfficiency = (evCarUsage > 0 && evMonthlyDistance > 0) ? evMonthlyDistance / evCarUsage : null;
-    const calc = calculateEvShare(electricCost || null, electricUsage || null, evCarUsage, evBaseFee || null);
+    const calc = calculateEvShare(electricCost || null, electricUsage || null, evCarUsage, evBaseFee ?? null);
     const eIdx = evData.findIndex(d => d.year === currentYear && d.month === currentMonth);
     const eEntry = {
         id: eIdx >= 0 ? evData[eIdx].id : Date.now() + 1,
@@ -1002,6 +1007,7 @@ function renderEvTable() {
         <td>${f(d.evCarUsage,2)}</td>
         <td>${f(d.evMonthlyDistance,1)}</td>
         <td>${f(d.evEfficiency,2)}</td>
+        <td style="color:var(--text-muted)">¥${f(d.evBaseFee)}</td>
         <td>¥${f(d.carElectricCost)}</td>
         <td style="color:#0891b2">¥${f(d.person1Cost)}</td>
         <td style="color:#7c3aed;font-weight:600">¥${f(d.person2Cost)}</td>
@@ -1194,6 +1200,7 @@ function normalizeUtility(items) {
 function normalizeEv(items) {
     // 累計順にソートして当月充電量・走行距離を再計算
     const sorted = [...items].sort((a, b) => a.year * 100 + a.month - (b.year * 100 + b.month));
+    let lastBaseFee = null; // 前月の基本料金を記憶
     return sorted.map((item, idx) => {
         const prev = idx > 0 ? sorted[idx - 1] : null;
         // 累計差分から当月値を再計算
@@ -1204,9 +1211,12 @@ function normalizeEv(items) {
             ? Math.max(0, item.evCumulativeDistance - prev.evCumulativeDistance)
             : (item.evMonthlyDistance || 0);
         const evEfficiency = (evCarUsage > 0 && evMonthlyDistance > 0) ? evMonthlyDistance / evCarUsage : null;
+        // 基本料金: 未入力なら前月の値を引き継ぐ
+        const evBaseFee = (item.evBaseFee != null && item.evBaseFee !== '') ? item.evBaseFee : lastBaseFee;
+        if (evBaseFee != null) lastBaseFee = evBaseFee;
         // EV按分を再計算
-        const calc = calculateEvShare(item.evTotalCost || null, item.evTotalUsage || null, evCarUsage, item.evBaseFee || null);
-        return { ...item, evCarUsage, evMonthlyDistance, evEfficiency, ...calc };
+        const calc = calculateEvShare(item.evTotalCost ?? null, item.evTotalUsage ?? null, evCarUsage, evBaseFee);
+        return { ...item, evBaseFee, evCarUsage, evMonthlyDistance, evEfficiency, ...calc };
     });
 }
 
