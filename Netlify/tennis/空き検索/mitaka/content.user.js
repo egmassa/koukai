@@ -5,6 +5,7 @@
 // @run-at       document-idle
 // @updateURL    https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
 // @downloadURL  https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
+// @version      3.1   
 // ==/UserScript==
 
 (function() {
