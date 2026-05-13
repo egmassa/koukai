@@ -3,9 +3,9 @@
 // @match        https://www.yoyaku.mitaka.site/*
 // @description  クイックフィルタパネル対応・日付/曜日/テキストフィルタ追加・施設複数選択対応
 // @run-at       document-idle
+// @version      3.2
 // @updateURL    https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
 // @downloadURL  https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
-// @version      3.1   
 // ==/UserScript==
 
 (function() {
@@ -207,6 +207,7 @@ async function loadSettings() {
 }
     async function saveSettings(settings) {
         await StorageHelper.set({ settings });
+        cachedSettings = null;
         await debugLog('設定を保存しました');
     }
 
