@@ -3,6 +3,8 @@
 // @match        https://www.yoyaku.mitaka.site/*
 // @description  クイックフィルタパネル対応・日付/曜日/テキストフィルタ追加・施設複数選択対応
 // @run-at       document-idle
+// @updateURL    https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
+// @downloadURL  https://egmassa.github.io/koukai/Netlify/tennis/空き検索/mitaka/content.user.js
 // ==/UserScript==
 
 (function() {
