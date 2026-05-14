@@ -1,3 +1,4 @@
+
         // --- Constants & State ---
         const LS_KEY = 'interactiveDoublesDashboard_v2_17'; // Version up for new data structure
         const DEFAULT_MAX_CONSECUTIVE = 2;
@@ -140,7 +141,7 @@
         const dom = {};
         document.addEventListener('DOMContentLoaded', () => {
             const ids = [
-                'surfaceCountSelect', 'totalMemberCountSelect', 'maxConsecutiveSelect', 'maxConsecWarning', 'matchCountSelect', 'matchCountWarning',
+                'surfaceCountSelect', 'totalMemberCountSelect', 'maxConsecutiveSelect', 'maxConsecWarning', 'matchCountSelect',
                 'memberNamesSection', 'memberNamesContainerWrapper', 'memberNamesContainer', 'toggleNamesBtn',
                 'loadingIndicator', 'loadingMessage', 'resultsDashboard', 'matchScheduleCard',
                 'progressText', 'progressFill', 'matchListContainer', 'analysisSection', 'attemptCountSelect', 'findBestButton',
@@ -342,7 +343,6 @@
             dom.totalMemberCountSelect.addEventListener('change', updateTargetScoreUI);
             dom.surfaceCountSelect.addEventListener('change', updateTargetScoreUI);
             document.getElementById('matchCountSelect')?.addEventListener('change', updateTargetScoreUI);
-            document.getElementById('matchCountSelect')?.addEventListener('change', updateMatchCountWarning);
             dom.maxConsecutiveSelect.addEventListener('change', handleMaxConsecutiveChange);
             dom.memberNamesContainer.addEventListener('input', handleMemberNameChange);
             dom.findBestButton.addEventListener('click', findBestOfNGenerations);
@@ -593,9 +593,13 @@
                 inlineStyle += ` background-color:${pairColor};`;
             }
 
-            const namesHtml = pairIndices.map(idx => {
+            const _prtSorted = [...pairIndices].sort((a, b) => {
+                const na = parseInt(members[a], 10), nb = parseInt(members[b], 10);
+                if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                return String(members[a]).localeCompare(String(members[b]));
+            });
+            const namesHtml = _prtSorted.map(idx => {
                 const name = members[idx] || `不明(${idx})`;
-                // ▼▼▼ この判定が重要です ▼▼▼
                 if (ruleType === 'genderMix' && groups[idx] === 'F') {
                     return `<span class="female-pill">${name}</span>`;
                 }
@@ -835,25 +839,32 @@
             updateGenerateButtonsState();
             updateSaveFavoriteButtonState();
             updateExportCsvButtonState();
-            updateMatchCountWarning();
             renderFavoritesList();
             applyDisplayLogicBasedOnState();
         }
 
         // ▼▼▼ 以下の関数を、既存のものとまるごと置き換えてください ▼▼▼
         function handleSurfaceOrMemberCountChange() {
+            const prevSurface = appState.currentSurfaceCount;
             appState.currentSurfaceCount = +dom.surfaceCountSelect.value;
             const minMembers = appState.currentSurfaceCount * 4;
             const maxMembers = appState.currentSurfaceCount * 8 + 4;
+            let wanted = +dom.totalMemberCountSelect.value;
 
-            // DOMから新しい選択値を読み、新しい面数の有効範囲にクランプ
-            // 面数が変わった場合は旧ドロップダウン値を範囲内に収める
-            const rawWanted = +dom.totalMemberCountSelect.value || appState.currentTotalMemberCount;
-            const wanted = Math.min(Math.max(rawWanted, minMembers), maxMembers);
-
+            if (wanted < minMembers || wanted > maxMembers) {
+                wanted = minMembers;
+                dom.totalMemberCountSelect.value = wanted;
+            }
             if (wanted !== appState.currentTotalMemberCount) {
                 appState.currentTotalMemberCount = wanted;
-                appState.members = Array.from({ length: wanted }, (_, i) => appState.members[i] || `${i + 1}`);
+                appState.members = Array.from({ length: wanted }, (_, i) => `${i + 1}`);
+                appState.groups = {};
+                appState.exclusions = {};
+            }
+            if (appState.currentSurfaceCount < prevSurface) {
+                dom.totalMemberCountSelect.value = minMembers;
+                appState.currentTotalMemberCount = minMembers;
+                appState.members = Array.from({ length: minMembers }, (_, i) => `${i + 1}`);
                 appState.groups = {};
                 appState.exclusions = {};
             }
@@ -868,13 +879,7 @@
             let newLimit = DEFAULT_MAX_CONSECUTIVE;
             if (N > P) {
                 const Kmin = Math.ceil(P / (N - P));
-                if (Kmin >= 99) {
-                    newLimit = 99;
-                } else {
-                    const _pp = P / N;
-                    newLimit = Kmin;
-                    while (newLimit < 15 && Math.round(Math.pow(_pp, newLimit) * 100) >= 20) newLimit++;
-                }
+                newLimit = (Kmin >= 99) ? 99 : Math.min(Kmin + 1, 15);
             } else if (N <= P) {
                 newLimit = 99;
             }
@@ -909,39 +914,10 @@
             if (P === 0 || N <= P) { dom.maxConsecWarning.classList.add('hidden'); return; }
             const Kmin = Math.ceil(P / (N - P));
             const selected = appState.maxConsecutiveLimit;
-            const playProb = P / N;
-            const consecPct = Math.round(Math.pow(playProb, selected) * 100);
-            const restPct = Math.round((N - P) / N * 100);
             if (selected === Kmin) {
-                dom.maxConsecWarning.textContent = `⚠️ この人数・面数での最低値です。公平性スコアが大幅に制限されます。連続数を増やすことを推奨します。`;
-                dom.maxConsecWarning.classList.remove('hidden');
-            } else if (consecPct >= 20) {
-                dom.maxConsecWarning.textContent = `⚠️ 出場確率${Math.round(playProb * 100)}%のため${selected}連続が約${consecPct}%の確率で発生します（休憩率${restPct}%）。連続数を増やすと改善できます。`;
                 dom.maxConsecWarning.classList.remove('hidden');
             } else {
                 dom.maxConsecWarning.classList.add('hidden');
-            }
-        }
-
-        function updateMatchCountWarning() {
-            if (!dom.matchCountWarning) return;
-            const P = appState.currentSurfaceCount * 4;
-            const N = appState.currentTotalMemberCount;
-            const M = parseInt(dom.matchCountSelect?.value || 10, 10);
-            if (N < P || P === 0) { dom.matchCountWarning.classList.add('hidden'); return; }
-            // logC(N,P) + log(M) で難易度を推定
-            const k = Math.min(P, N - P);
-            let logC = 0;
-            for (let i = 0; i < k; i++) logC += Math.log(N - i) - Math.log(i + 1);
-            const logComplexity = logC + Math.log(M);
-            if (logComplexity >= 9.0) {
-                dom.matchCountWarning.textContent = `🔴 この条件では収束が難しいです。試合数を10以下にするか思考時間を30秒以上にすることを推奨します。`;
-                dom.matchCountWarning.classList.remove('hidden');
-            } else if (logComplexity >= 7.5) {
-                dom.matchCountWarning.textContent = `⚠️ やや重い条件です。収束しない場合は思考時間を増やすか試合数を減らしてください。`;
-                dom.matchCountWarning.classList.remove('hidden');
-            } else {
-                dom.matchCountWarning.classList.add('hidden');
             }
         }
 
@@ -1024,17 +1000,8 @@
                     sel.appendChild(new Option('制限なし (∞)', 99));
                 }
 
-                // アラートが出ない（連続確率 < 20%）最初の k をデフォルトに
-                const _playProb = P / N;
-                let calculatedDefaultK = Kmin;
-                if (Kmin < 99) {
-                    while (calculatedDefaultK < practicalMaxK &&
-                           Math.round(Math.pow(_playProb, calculatedDefaultK) * 100) >= 20) {
-                        calculatedDefaultK++;
-                    }
-                } else {
-                    calculatedDefaultK = 99;
-                }
+                let calculatedDefaultK = (Kmin >= 99) ? 99 : Kmin + 1;
+                calculatedDefaultK = Math.min(calculatedDefaultK, practicalMaxK);
 
                 let valueToSet = calculatedDefaultK;
                 if (!feasible.includes(valueToSet)) {
@@ -1147,6 +1114,36 @@
         // ═══════════════════════════════════════════════════════════════
 
 
+        // ルール対応の再ペアリングヘルパー
+        // genderMix: 2M+2Fなら M+F vs M+F
+        // fixedPair: P1メンバーが2人いれば team1 = [P1,P1] vs team2 = [非P1,非P1]
+        function makeCourtRespectingGender(ps, groups, ruleType) {
+            const getGrp = p => groups[p] || 'default';
+            if (ruleType === 'genderMix') {
+                const ms = ps.filter(p => getGrp(p) === 'M');
+                const fs = ps.filter(p => getGrp(p) === 'F');
+                if (ms.length >= 2 && fs.length >= 2) {
+                    const team1 = [ms[0], fs[0]].sort((a, b) => a - b);
+                    const team2 = [ms[1], fs[1]].sort((a, b) => a - b);
+                    return { team1, team2, players: [...team1, ...team2].sort((a, b) => a - b) };
+                }
+            }
+            if (ruleType === 'fixedPair') {
+                const p1s = ps.filter(p => getGrp(p) === 'P1');
+                const others = ps.filter(p => getGrp(p) !== 'P1');
+                if (p1s.length >= 2 && others.length >= 2) {
+                    const team1 = [p1s[0], p1s[1]].sort((a, b) => a - b);
+                    const team2 = [others[0], others[1]].sort((a, b) => a - b);
+                    return { team1, team2, players: [...team1, ...team2].sort((a, b) => a - b) };
+                }
+            }
+            return {
+                team1: [ps[0], ps[1]].sort((a, b) => a - b),
+                team2: [ps[2], ps[3]].sort((a, b) => a - b),
+                players: ps.slice().sort((a, b) => a - b)
+            };
+        }
+
         // ── 近傍解生成（4種類の操作からランダムに選択） ──
         function generateNeighbor(matches, settings) {
             const neighbor = JSON.parse(JSON.stringify(matches));
@@ -1166,7 +1163,10 @@
                 const m = neighbor[mi];
                 if (!m.courts || m.courts.length < 2) {
                     // 1コートしかない場合は操作3（休憩交換）に切り替え
-                    return doSwapWithRest(neighbor, n, startIdx);
+                    const _rt1fb = settings.ruleType || 'none';
+                    const _grp1fb = settings.groups || appState.groups || {};
+                    const _getGrp1fb = i => _grp1fb[i] || 'default';
+                    return doSwapWithRest(neighbor, n, startIdx, _rt1fb, _getGrp1fb);
                 }
                 let c1 = Math.floor(Math.random() * m.courts.length);
                 let c2 = Math.floor(Math.random() * m.courts.length);
@@ -1179,16 +1179,10 @@
                 const tmp = players1[p1Idx];
                 players1[p1Idx] = players2[p2Idx];
                 players2[p2Idx] = tmp;
-                m.courts[c1] = {
-                    team1: [players1[0], players1[1]].sort((a, b) => a - b),
-                    team2: [players1[2], players1[3]].sort((a, b) => a - b),
-                    players: players1.slice().sort((a, b) => a - b)
-                };
-                m.courts[c2] = {
-                    team1: [players2[0], players2[1]].sort((a, b) => a - b),
-                    team2: [players2[2], players2[3]].sort((a, b) => a - b),
-                    players: players2.slice().sort((a, b) => a - b)
-                };
+                const _grp1 = settings.groups || appState.groups || {};
+                const _rt1 = settings.ruleType || 'none';
+                m.courts[c1] = makeCourtRespectingGender(players1, _grp1, _rt1);
+                m.courts[c2] = makeCourtRespectingGender(players2, _grp1, _rt1);
                 m.playersThisRound = m.courts.flatMap(c => c.players.slice());
 
             } else if (op < 0.65) {
@@ -1202,15 +1196,25 @@
                     [[ps[0], ps[2]], [ps[1], ps[3]]],
                     [[ps[0], ps[3]], [ps[1], ps[2]]]
                 ];
-                // genderMixの場合: 両チームがミックスになるペアリングのみ選択
+                // genderMix/fixedPairの場合: 適切なペアリングのみ選択
                 const ruleType = settings.ruleType || 'none';
                 const groups = settings.groups || appState.groups || {};
                 const getGrp = i => groups[i] || 'default';
                 const isValidPairing = (t1, t2) => {
-                    if (ruleType !== 'genderMix') return true;
-                    const t1m = t1.some(p => getGrp(p) === 'M'), t1f = t1.some(p => getGrp(p) === 'F');
-                    const t2m = t2.some(p => getGrp(p) === 'M'), t2f = t2.some(p => getGrp(p) === 'F');
-                    return t1m && t1f && t2m && t2f;
+                    if (ruleType === 'genderMix') {
+                        const t1m = t1.some(p => getGrp(p) === 'M'), t1f = t1.some(p => getGrp(p) === 'F');
+                        const t2m = t2.some(p => getGrp(p) === 'M'), t2f = t2.some(p => getGrp(p) === 'F');
+                        return t1m && t1f && t2m && t2f;
+                    }
+                    if (ruleType === 'fixedPair') {
+                        // P1メンバーがコートに2人いる場合: 必ず同じチームに揃える
+                        const t1AllP1 = t1.every(p => getGrp(p) === 'P1');
+                        const t2AllP1 = t2.every(p => getGrp(p) === 'P1');
+                        const allP1Count = t1.filter(p => getGrp(p) === 'P1').length + t2.filter(p => getGrp(p) === 'P1').length;
+                        if (allP1Count >= 2) return t1AllP1 || t2AllP1;
+                        return true;
+                    }
+                    return true;
                 };
                 const validPairings = pairings.filter(([t1, t2]) => isValidPairing(t1, t2));
                 if (validPairings.length === 0) return null;
@@ -1280,11 +1284,8 @@
             m.restingPlayers = m.restingPlayers.slice();
             m.restingPlayers[restOrigIdx] = oldPlayer;
             m.restingPlayers.sort((a, b) => a - b);
-            m.courts[ci] = {
-                team1: [ps[0], ps[1]].sort((a, b) => a - b),
-                team2: [ps[2], ps[3]].sort((a, b) => a - b),
-                players: ps.slice().sort((a, b) => a - b)
-            };
+            const _grpRst = (ruleType && getGrp) ? (appState.groups || {}) : {};
+            m.courts[ci] = makeCourtRespectingGender(ps, _grpRst, ruleType || 'none');
             m.playersThisRound = m.courts.flatMap(c => c.players.slice());
             // 整合性チェック
             const seen = new Set();
@@ -1316,7 +1317,7 @@
             const _isStrictEval = _rtRest === 'genderMix' && !isGenderMixBestEffort(_grpEval, _scEval);
             let mixBonus = 0;
             if (_rtRest === 'genderMix' && !_isStrictEval) {
-                // best-effortモード: ミックス率をボーナスとして加算（ペナルティなし）
+                // best-effortモード: ミックス率をボーナスとして加算（SAがミックスを強く優先するよう重みを大きく）
                 let mixCourts = 0, totalCourts = 0;
                 for (const m of matches) {
                     for (const c of m.courts) {
@@ -1324,7 +1325,23 @@
                         if (isCandidateCorrectType(c)) mixCourts++;
                     }
                 }
-                mixBonus = totalCourts > 0 ? (mixCourts / totalCourts) * 30 : 0;
+                mixBonus = totalCourts > 0 ? (mixCourts / totalCourts) * 150 : 0;
+            } else if (_rtRest === 'fixedPair') {
+                // fixedPair best-effort: P1が2人揃っているコートだけを分母にする
+                // 「片方が休憩」のコートを分母に入れると達成可能上限が40%程度になりSAの勾配が弱くなる
+                const _grpFPmix = settings.groups || appState.groups || {};
+                let okCourts = 0, relevantCourts = 0;
+                for (const m of matches) {
+                    for (const c of m.courts) {
+                        const _p1On = c.players.filter(p => (_grpFPmix[p] || 'default') === 'P1').length;
+                        if (_p1On >= 2) {
+                            relevantCourts++;
+                            if (isCandidateCorrectType(c)) okCourts++;
+                        }
+                    }
+                }
+                // P1が同時出場するコートがない場合は制約自明で満点（ボーナス不要だが勾配が消えないよう満点付与）
+                mixBonus = relevantCourts > 0 ? (okCourts / relevantCourts) * 150 : 150;
             } else {
                 // strictモードまたは他ルール: ルール違反は即失格
                 for (const m of matches) {
@@ -1354,17 +1371,16 @@
             }
             const restInfo = checkConsecutiveRests(matches, settings.members);
             // 仕様1-2-3/2-2: 連続休憩ペナルティ
-            // genderMix best-effortは+1余裕(仕様2-2-3)、他は設定値+1まで許容(仕様2-2-2)
+            // 連続休憩は高優先で回避: 表示上限(maxConsecutiveLimit-1)を超えたら厳しくペナルティ
             const _maxRest = settings.maxConsecutiveLimit || appState.maxConsecutiveLimit || 2;
-            const _restTol = (_rtRest === 'genderMix' && !_isStrictEval) ? _maxRest + 1 : _maxRest;
-            // playersInfoがある場合は個別チェック、ない場合はmaxStreakで代用
+            const _restTol = Math.max(1, _maxRest - 1); // 表示上限と一致させる
             // 仕様1-2-3/2-2: 上限超過ペナルティ
             if (restInfo.maxStreak > _restTol) {
-                penalty -= (restInfo.maxStreak - _restTol) * 20;
+                penalty -= (restInfo.maxStreak - _restTol) * 80;
             }
-            // genderMix以外は連続休憩ほぼなし
-            if (restInfo.maxStreak > 1 && _rtRest !== 'genderMix') {
-                penalty -= 30;
+            // 連続休憩２以上: ソフトペナルティ（全ルール共通、SAが無視できない大きさに）
+            if (restInfo.maxStreak > 1) {
+                penalty -= 120;
             }
             // プレイヤー間の連続休憩ストリーク差ペナルティ（公平性）
             const _mcLen2 = settings.members ? settings.members.length : appState.currentTotalMemberCount;
@@ -1398,6 +1414,45 @@
                 if (_pcDiff > 1) penalty -= (_pcDiff - 1) * 60;
             }
 
+            // genderMixモード: 2M+2FいるのにF+FペアになっているコートにSAが避けるよう重いペナルティ
+            if (_rtRest === 'genderMix') {
+                const _grpP = settings.groups || appState.groups || {};
+                const _getGrpP = p => _grpP[p] || 'default';
+                for (const m of matches) {
+                    for (const c of m.courts) {
+                        const allGrps = c.players.map(_getGrpP);
+                        if (allGrps.some(g => g === 'F') && allGrps.some(g => g === 'M')) {
+                            const t1AllF = c.team1.map(_getGrpP).every(g => g === 'F');
+                            const t2AllF = c.team2.map(_getGrpP).every(g => g === 'F');
+                            if (t1AllF || t2AllF) penalty -= 200;
+                        }
+                    }
+                }
+            }
+            // fixedPairモード: P1ペアが揃ってコートにいるのに分離されているコートに重いペナルティ
+            if (_rtRest === 'fixedPair') {
+                const _grpFP = settings.groups || appState.groups || {};
+                const _getGrpFP = p => _grpFP[p] || 'default';
+                for (const m of matches) {
+                    for (const c of m.courts) {
+                        const _p1Count = c.players.filter(p => _getGrpFP(p) === 'P1').length;
+                        const _nonP1Count = c.players.filter(p => _getGrpFP(p) !== 'P1').length;
+                        if (_p1Count >= 2 && _nonP1Count >= 2) {
+                            const _t1AllP1 = c.team1.every(p => _getGrpFP(p) === 'P1');
+                            const _t2AllP1 = c.team2.every(p => _getGrpFP(p) === 'P1');
+                            if (!_t1AllP1 && !_t2AllP1) penalty -= 200;
+                        }
+                    }
+                }
+            }
+            // 第1試合は表示名順の先頭4人が出場しなければ大ペナルティ
+            if (matches.length > 0 && settings.firstMatchPlayers) {
+                const _fmp = settings.firstMatchPlayers;
+                const _fmActual = matches[0].playersThisRound;
+                let _fmOk = true;
+                for (const p of _fmp) { if (!_fmActual.includes(p)) { _fmOk = false; break; } }
+                if (!_fmOk) penalty -= 500;
+            }
             // メインスコア
             const allPairs = settings.allPossiblePairs || appState.allPossiblePairs;
             const excl = settings.exclusions != null ? settings.exclusions : appState.exclusions;
@@ -1477,8 +1532,8 @@
             const surfaces = appState.currentSurfaceCount;
             const memberCount = appState.currentTotalMemberCount;
 
-            // グループ情報（members[i] は文字列の名前そのもの）
-            const groupInfo = members.map((m, i) => `  [${i}] ${m || (i + 1)}: ${groups[i] || 'default'}`).join('\n');
+            // グループ情報
+            const groupInfo = members.map((m, i) => `  [${i}] ${m.name || ('P' + (i + 1))}: ${groups[i] || 'default'}`).join('\n');
 
             // genderMix用の分類
             const males = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'M');
@@ -1533,9 +1588,21 @@
                         if (seen.has(p)) dup = true;
                         seen.add(p);
                     }
-                    const ruleLabel = validRule ? 'ruleOK=true'
-                        : isBE2 ? 'ruleOK=false（best-effort: 正常）'
-                            : 'ruleOK=false ⚠️';
+                    let ruleLabel;
+                    if (validRule) {
+                        ruleLabel = 'ruleOK=true';
+                    } else if (isBE2) {
+                        ruleLabel = 'ruleOK=false（best-effort: 正常）';
+                    } else if (ruleType === 'fixedPair') {
+                        // P1が2人同時出場しているコートがあるか確認
+                        const hasP1Pair = m.courts.some(c => {
+                            const p1count = c.players.filter(p => (groups[p] || 'default') === 'P1').length;
+                            return p1count >= 2;
+                        });
+                        ruleLabel = hasP1Pair ? 'ruleOK=false ⚠️（P1ペア分離）' : 'ruleOK=N/A（P1片方休憩中・制約対象外）';
+                    } else {
+                        ruleLabel = 'ruleOK=false ⚠️';
+                    }
                     return `第${i + 1}試合: ${ruleLabel} dup=${dup}`;
                 });
                 matchValidation = results.join('\n');
@@ -1544,6 +1611,18 @@
                     const mixRate = Math.round(mixCount / appState.matches.length * 100);
                     matchValidation += `\n※ best-effortモードでは非ミックス試合は許容（仕様3-1-2）`;
                     matchValidation += `\n  ミックス試合率: ${mixCount}/${appState.matches.length}試合 (${mixRate}%)`;
+                }
+                if (ruleType === 'fixedPair') {
+                    const p1Matches = appState.matches.filter(m => m.courts.some(c => {
+                        const p1count = c.players.filter(p => (groups[p] || 'default') === 'P1').length;
+                        return p1count >= 2;
+                    }));
+                    const p1OkMatches = p1Matches.filter(m => m.courts.every(c => isCandidateCorrectType(c)));
+                    if (p1Matches.length > 0) {
+                        matchValidation += `\n※ fixedPair同時出場試合: ${p1OkMatches.length}/${p1Matches.length}試合で同チーム（全${appState.matches.length}試合中${p1Matches.length}試合が制約対象）`;
+                    } else {
+                        matchValidation += `\n※ fixedPair: P1の2人が同時出場する試合なし`;
+                    }
                 }
             }
 
@@ -1573,7 +1652,7 @@
                 playRestStats = members.map((m, i) => {
                     const playNG = maxPlay[i] > playLimit ? ' ⚠️NG' : '';
                     const restNG = maxRest[i] > restLimit ? ' ⚠️NG' : '';
-                    return `  [${i}] ${m || (i + 1)}: 最大連続プレイ=${maxPlay[i]}${playNG}(上限${playLimit}) 最大連続休憩=${maxRest[i]}${restNG}(上限${restLimit})`;
+                    return `  [${i}] ${m.name || 'P' + (i + 1)}: 最大連続プレイ=${maxPlay[i]}${playNG}(上限${playLimit}) 最大連続休憩=${maxRest[i]}${restNG}(上限${restLimit})`;
                 }).join('\n');
                 if (maxRestAll - minRestAll > 1) {
                     playRestStats += `\n  ⚠️ 連続休憩の偏り: 最大${maxRestAll} - 最小${minRestAll} = 差${maxRestAll - minRestAll}（仕様上は差1以内推奨）`;
@@ -1606,38 +1685,6 @@
                 '',
                 '【現在のマッチ検証(最初の5試合)】',
                 matchValidation,
-                '',
-                '【第1試合リナンバー検証】',
-                (() => {
-                    if (!appState.matches || appState.matches.length === 0) return 'マッチなし';
-                    const m0 = appState.matches[0];
-                    const p0 = [...(m0.playersThisRound || [])].sort((a, b) => a - b);
-                    const r0 = [...(m0.restingPlayers || [])].sort((a, b) => a - b);
-                    const expected = Array.from({ length: memberCount }, (_, i) => i);
-                    const ord = [...p0, ...r0];
-                    const ordOk = ord.length === expected.length && ord.every((v, i) => v === expected[i]);
-                    const namesShown = members.map((n, i) => `[${i}]"${n}"`).join(', ');
-                    const allDefaultStrict = members.every((n, i) => n === `${i + 1}`);
-                    // 数字名の順不同集合判定（新ロジック）
-                    const isNumericPerm = (() => {
-                        const seen = new Set();
-                        for (const name of members) {
-                            const num = parseInt(name, 10);
-                            if (!Number.isInteger(num) || `${num}` !== String(name) || num < 1 || num > memberCount || seen.has(num)) return false;
-                            seen.add(num);
-                        }
-                        return seen.size === memberCount;
-                    })();
-                    return [
-                        `第1試合 playing(sorted)=[${p0.join(',')}] resting(sorted)=[${r0.join(',')}]`,
-                        `連結=[${ord.join(',')}] ／ 期待値=[${expected.join(',')}] ／ 一致=${ordOk}${ordOk ? ' ✅' : ' ❌'}`,
-                        `members配列: ${namesShown}`,
-                        `判定: 厳密一致(順番含む)=${allDefaultStrict} ／ 数字集合一致(順不同)=${isNumericPerm}`,
-                        ordOk && isNumericPerm && allDefaultStrict ? '✅ 第1試合は "1,2,3,..." と表示されているはず' : '',
-                        ordOk && isNumericPerm && !allDefaultStrict ? '⚠️ 数字名だが順不同 → 次回探索で正規化されるはず' : '',
-                        ordOk ? '' : '⚠️ indices が [0..N-1] 順になっていない → リナンバー処理に問題',
-                    ].filter(Boolean).join('\n');
-                })(),
                 '',
                 '【連続プレイ・連続休憩の実績（全メンバー）】',
                 playRestStats,
@@ -1701,29 +1748,6 @@
                 return;
             }
 
-            // 名前正規化: members が "1"〜"N" の集合（順不同）なら正規順に直す
-            // 旧バグで localStorage に並び替えられた状態が残っているケースを吸収
-            {
-                const _N = appState.members.length;
-                const _seen = new Set();
-                let _isNumericPerm = _N > 0;
-                for (const name of appState.members) {
-                    const num = parseInt(name, 10);
-                    if (!Number.isInteger(num) || `${num}` !== String(name) || num < 1 || num > _N || _seen.has(num)) {
-                        _isNumericPerm = false;
-                        break;
-                    }
-                    _seen.add(num);
-                }
-                if (_isNumericPerm && _seen.size === _N) {
-                    const _canonical = Array.from({ length: _N }, (_, i) => `${i + 1}`);
-                    const _alreadyCanonical = appState.members.every((n, i) => n === _canonical[i]);
-                    if (!_alreadyCanonical) {
-                        appState.members = _canonical;
-                    }
-                }
-            }
-
             const userAttempts = parseInt(document.getElementById('attemptCountSelect').value, 10);
             const timeLimitSec = parseInt(document.getElementById('timeLimitSelect')?.value || '30');
             // 目標スコア = 条件別上限スコアを自動計算
@@ -1751,9 +1775,23 @@
                 currentTotalMemberCount: appState.currentTotalMemberCount,
                 maxConsecutiveLimit: appState.maxConsecutiveLimit,
                 groups: JSON.parse(JSON.stringify(appState.groups)),
-                ruleType: document.querySelector('input[name=\"ruleType\"]:checked').value,
+                ruleType: document.querySelector('input[name="ruleType"]:checked').value,
                 members: [...appState.members],
             };
+            // 第1試合に出場すべきプレイヤー（表示名順の先頭4人）を事前計算して settings に保持
+            {
+                const _ms = originalSettings.members;
+                const _sf = originalSettings.currentSurfaceCount;
+                const _n = originalSettings.currentTotalMemberCount;
+                const _sorted = Array.from({ length: _n }, (_, i) => i).sort((a, b) => {
+                    const na = parseInt(_ms[a], 10), nb = parseInt(_ms[b], 10);
+                    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                    return String(_ms[a]).localeCompare(String(_ms[b]));
+                });
+                originalSettings.firstMatchPlayers = new Set(_sorted.slice(0, _sf * 4));
+                originalSettings.firstMatchRest = _sorted.slice(_sf * 4);
+                originalSettings.firstMatchSortedTop4 = _sorted.slice(0, _sf * 4);
+            }
 
             regenerateAllPossiblePairs();
 
@@ -1813,23 +1851,32 @@
                 }
                 if (targetRate === 0 && restart >= RESTART_COUNT) break;
 
-                const restartLabel = targetRate > 0
-                    ? `再開${restart + 1}回目 | 経過${elapsedSoFar.toFixed(0)}秒/${timeLimitSec}秒`
-                    : `再開 ${restart + 1}/${RESTART_COUNT}`;
                 const _remaining = Math.max(0, timeLimitSec - elapsedSoFar).toFixed(0);
-                dom.loadingMessage.textContent = `🤔 考え中... あと最大${_remaining}秒`;
+                dom.loadingMessage.textContent = `🔥 探索中... あと最大${_remaining}秒`;
                 await new Promise(r => setTimeout(r, 0));
 
                 let current = await generateInitialSolution(targetMatchCount, originalSettings);
                 if (!current || current.length < targetMatchCount) { restart++; continue; }
+                // genderMix/fixedPair: 初期解の不適切なペアリングを修正（パターン由来のF+F/P1分離を除去）
+                if (originalSettings.ruleType === 'genderMix' || originalSettings.ruleType === 'fixedPair') {
+                    const _grpFix = originalSettings.groups || appState.groups || {};
+                    for (const _m of current) {
+                        for (let _ci = 0; _ci < _m.courts.length; _ci++) {
+                            const _ps = [..._m.courts[_ci].team1, ..._m.courts[_ci].team2];
+                            _m.courts[_ci] = makeCourtRespectingGender(_ps, _grpFix, originalSettings.ruleType);
+                        }
+                    }
+                }
                 let currentScore = evaluateFullSolution(current, originalSettings);
                 let bestScoreThisRestart = currentScore;  // このリスタートのベスト
 
+                // 変更後
                 if (currentScore > bestScore) {
                     bestScore = currentScore;
                     bestSolution = JSON.parse(JSON.stringify(current));
                     lastImprovement = totalIters;
                     lastImprovementRestart = restart;
+                    // ★ mixBonusキャッシュ更新
                     cachedMixBonus = _calcMixBonus(current, originalSettings);
                 }
                 //const itersPerRes
@@ -1843,8 +1890,10 @@
                     totalIters++;
                     if (i % 500 === 0) {
                         const _rem = Math.max(0, timeLimitSec - (performance.now() - startTime) / 1000).toFixed(0);
-                        dom.loadingMessage.textContent = `🤔 考え中... あと最大${_rem}秒`;
+                        dom.loadingMessage.textContent = `🔥 探索中... あと最大${_rem}秒`;
                         await new Promise(r => setTimeout(r, 0));
+
+                        // 時間制限チェック（内側ループでも）
                         if ((performance.now() - startTime) / 1000 >= timeLimitSec) break;
                     }
 
@@ -1857,11 +1906,13 @@
                     if (delta > 0 || Math.random() < Math.exp(delta / T)) {
                         current = neighbor;
                         currentScore = neighborScore;
+                        // 変更後
                         if (currentScore > bestScore) {
                             bestScore = currentScore;
                             bestSolution = JSON.parse(JSON.stringify(current));
                             lastImprovement = totalIters;
                             lastImprovementRestart = restart;
+                            // ★ mixBonusキャッシュ更新
                             cachedMixBonus = _calcMixBonus(current, originalSettings);
                         }
                     }
@@ -1885,13 +1936,14 @@
                 }
 
                 // 改善停止チェック（時間ベース: 制限時間の80%を使ってから初めて有効化）
-                // ユーザーが10秒指定したら基本10秒は探索する。早期終了は真の収束(3-in-a-row)に任せる
+                // ユーザーが指定した思考時間は基本的に使い切る。早期終了は真の収束(3-in-a-row)に任せる
                 const _elapsedFracEnd = (performance.now() - startTime) / 1000 / timeLimitSec;
                 if (_elapsedFracEnd >= 0.8 && allScores.length >= 5 && restart - lastImprovementRestart >= 20) {
                     dom.loadingMessage.textContent = `✅ 収束 - ${restart}回探索して改善なし (経過${(_elapsedFracEnd*100).toFixed(0)}%)`;
                     await new Promise(r => setTimeout(r, 200));
                     break;
                 }
+
                 // 目標なしの場合: イテレーション停止チェック
                 if (targetRate === 0 && totalIters - lastImprovement > 500) {
                     dom.loadingMessage.textContent = `✅ 改善停止 - 早期終了 (${totalIters}回)`;
@@ -1904,8 +1956,9 @@
             if (bestSolution && originalSettings.ruleType !== 'genderMix') {
                 const _p0 = [...bestSolution[0].playersThisRound].sort((a, b) => a - b);
                 const _r0 = [...bestSolution[0].restingPlayers].sort((a, b) => a - b);
-                const _ord = [..._p0, ..._r0];
-                if (!_ord.every((v, i) => v === i)) {
+                const _ord = [..._p0, ..._r0]; // 第1試合参加者が先頭（低い番号）になる順
+                console.log('[renumber] p0=', _p0, 'r0=', _r0, 'ord=', _ord, 'alreadySorted=', _ord.every((v, i) => v === i));
+                if (!_ord.every((v, i) => v === i)) { // すでに順番通りなら何もしない
                     const _perm = new Array(_ord.length);
                     _ord.forEach((oldIdx, newIdx) => { _perm[oldIdx] = newIdx; });
                     bestSolution = bestSolution.map(m => ({
@@ -1916,32 +1969,16 @@
                             ...c,
                             team1: c.team1.map(i => _perm[i]),
                             team2: c.team2.map(i => _perm[i]),
-                            players: c.players.map(i => _perm[i]),
                         })),
                     }));
-                    // デフォルト名判定: "1","2",..."N" の集合と順不同で一致するか
-                    // （旧バグで並び替えられた状態も「数字名の集合」として吸収して正規化する）
-                    const _N = originalSettings.members.length;
-                    const _isNumericPermutation = (() => {
-                        const seen = new Set();
-                        for (const name of originalSettings.members) {
-                            const num = parseInt(name, 10);
-                            if (!Number.isInteger(num) || `${num}` !== String(name) || num < 1 || num > _N || seen.has(num)) {
-                                return false;
-                            }
-                            seen.add(num);
-                        }
-                        return seen.size === _N;
-                    })();
-                    if (_isNumericPermutation) {
-                        // 数字名の集合 → キャノニカル順 "1","2",..."N" に戻す
-                        // 結果: 第1試合 indices=[0,1,2,3] が表示名 "1","2","3","4" となる
-                        const _canonical = Array.from({ length: _N }, (_, i) => `${i + 1}`);
-                        originalSettings.members = _canonical;
-                        appState.members = [..._canonical];
-                    } else {
-                        // カスタム名: 名前も並び替えてプレイヤー同一性を保持
-                        const _newMembers = new Array(_N);
+                    // デフォルト名（P1...PN）の場合: 名前は並び替えない
+                    // → 新インデックス0はP1のまま、2はP3のまま → 第1試合がP1,P2,...と表示される
+                    // カスタム名の場合: 名前も並び替えてプレイヤー同一性を保持（見た目は変わらないが整合性維持）
+                    console.log('[renumber] perm=', _perm, 'round1after=', bestSolution[0].playersThisRound);
+                    const _allDefault = originalSettings.members.every((n, i) => n === `P${i + 1}`);
+                    console.log('[renumber] allDefault=', _allDefault);
+                    if (!_allDefault) {
+                        const _newMembers = new Array(originalSettings.members.length);
                         _ord.forEach((oldIdx, newIdx) => { _newMembers[newIdx] = originalSettings.members[oldIdx]; });
                         originalSettings.members = _newMembers;
                         appState.members = [..._newMembers];
@@ -1950,6 +1987,32 @@
             }
 
             if (bestSolution) {
+                // 最終安全処理: genderMix/fixedPairで不適切なペアリングが残っていたら強制修正
+                if (originalSettings.ruleType === 'genderMix' || originalSettings.ruleType === 'fixedPair') {
+                    const _grpFF = originalSettings.groups || appState.groups || {};
+                    const _getGrpFF = p => _grpFF[p] || 'default';
+                    for (const _m of bestSolution) {
+                        for (let _ci = 0; _ci < _m.courts.length; _ci++) {
+                            const _c = _m.courts[_ci];
+                            let _needFix = false;
+                            if (originalSettings.ruleType === 'genderMix') {
+                                const _t1AllF = _c.team1.every(p => _getGrpFF(p) === 'F');
+                                const _t2AllF = _c.team2.every(p => _getGrpFF(p) === 'F');
+                                _needFix = (_t1AllF || _t2AllF) && _c.players.some(p => _getGrpFF(p) === 'M');
+                            } else if (originalSettings.ruleType === 'fixedPair') {
+                                const _p1Count = _c.players.filter(p => _getGrpFF(p) === 'P1').length;
+                                const _nonP1Count = _c.players.filter(p => _getGrpFF(p) !== 'P1').length;
+                                const _t1AllP1 = _c.team1.every(p => _getGrpFF(p) === 'P1');
+                                const _t2AllP1 = _c.team2.every(p => _getGrpFF(p) === 'P1');
+                                _needFix = _p1Count >= 2 && _nonP1Count >= 2 && !_t1AllP1 && !_t2AllP1;
+                            }
+                            if (_needFix) {
+                                const _ps = [..._c.team1, ..._c.team2];
+                                _m.courts[_ci] = makeCourtRespectingGender(_ps, _grpFF, originalSettings.ruleType);
+                            }
+                        }
+                    }
+                }
                 appState.matches = bestSolution;
                 appState.generationSettings = { groups: originalSettings.groups, ruleType: originalSettings.ruleType };
 
@@ -1984,48 +2047,22 @@
                     stdDev: stdDev,
                     converged: converged,
                     reachedTarget: reachedTarget,
-                    conclusionText: `⚡ 最適化完了：${totalIters}回の評価を ${elapsed}秒で実行 / 達成率: ${calcAchievementRate(metaScore).toFixed(1)}%${reachedTarget ? ' 🎯目標達成' : ''}${converged ? ' ✅収束済み' : ''} `,
+                    conclusionText: `⚡ アニーリング探索完了：${totalIters}回の評価を ${elapsed}秒で実行 / 達成率: ${calcAchievementRate(metaScore).toFixed(1)}%${reachedTarget ? ' 🎯目標達成' : ''}${converged ? ' ✅収束済み' : ''} `,
                     bestResult: { matches: bestSolution, stats: stats, metaScore: metaScore, settings: originalSettings },
                     method: 'sa',
                     iterations: totalIters,
                     elapsedSec: elapsed
                 };
 
-                const ruleMap = { none: 'なし', fixedPair: '固定ペア', genderMix: '男女ミックス' };
-                const frpPair = calculateFirstRepetitionMatch(bestSolution, 'pair');
-                const frpGroup = calculateFirstRepetitionMatch(bestSolution, 'group');
-
-                // 総合グレード計算（reportText生成前）
+                // 総合グレード計算
                 const gradeForReport = calcOverallGrade(stats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus);
-                const reportText = `
-【⚡ アニーリング探索結果】
-探索条件: ${originalSettings.currentSurfaceCount}面${originalSettings.currentTotalMemberCount}人 / ${bestSolution.length}試合 / 最大${originalSettings.maxConsecutiveLimit}連続 / ルール: ${ruleMap[originalSettings.ruleType]}
 
-【総合評価】
-グレード: ${gradeForReport.grade} ${gradeForReport.total}点 ${gradeForReport.stars} (${gradeForReport.label})
-評価回数: ${totalIters}回 (${elapsed}秒)
-結論: ${appState.lastRunAnalysis.conclusionText}
-
-【各指標スコア (0〜100点)】
-プレイ公平性: ${gradeForReport.scores.playCount}点
-ペア多様性: ${gradeForReport.scores.pairCoverage}点
-グループ多様性: ${gradeForReport.scores.cardCoverage}点
-対戦カード多様性: ${gradeForReport.scores.opponentCoverage}点
-ペア公平性: ${gradeForReport.scores.pairFairness}点
-対戦公平性: ${gradeForReport.scores.matchupFairness}点
-序盤多様性: ${gradeForReport.scores.earlyDiversity}点
-
-【詳細統計値】
-プレイ回数の最大差: ${stats.maxPlayCountDiff}回
-ペアの実現率: ${(stats.pairCoverage.ratio * 100).toFixed(1)}% (${stats.pairCoverage.used}/${stats.pairCoverage.total})
-カードの実現率: ${(stats.cardCoverage.ratio * 100).toFixed(1)}%
-対戦相手の実現率: ${(stats.opponentCoverage.ratio * 100).toFixed(1)}%
-ペア結成の公平性(CV): ${stats.pairFairness.cv.toFixed(3)}
-対戦の公平性(CV): ${stats.matchupFairness.cv.toFixed(3)}
-初重複ペア: ${frpPair > 0 ? `第${frpPair}試合` : 'なし'}
-初重複グループ: ${frpGroup > 0 ? `第${frpGroup}試合` : 'なし'}
-`;
-                appState.lastRunAnalysis.reportText = reportText;
+                appState.lastRunAnalysis.reportText = `グレード: ${gradeForReport.grade} ${gradeForReport.total}点 / ${elapsed}秒 / ${totalIters}回評価`;
+                appState.dataSource = '⚡ アニーリング探索';
+                appState.areAnalysisSectionsVisible = false;
+                regenerateAllPossiblePairs();
+                pushStateToHistory();
+                updateAllUI();
 
                 // ── 簡潔な結果ダイアログ ─────────────────────────────────────
                 const _pct = targetRate > 0 ? gradeForReport.total / targetRate : 1;
@@ -2040,19 +2077,15 @@
 
                 let _verdict, _action, _verdictColor;
                 if (reachedTarget) {
-                    _verdict = '🎯 最良解達成';
-                    _action = '再実行しても改善の見込みはありません。';
+                    _verdict = '✅ 収束済み — これが最良解です';
+                    _action = 'このままご利用いただけます。';
                     _verdictColor = '#16a34a';
-                } else if (converged || _pct >= 0.95) {
-                    _verdict = '✅ 収束済み';
-                    _action = 'これが最良解の可能性が高く、再実行しても大幅改善は見込めません。';
+                } else if (_pctInt >= 88) {
+                    _verdict = '🔄 もう1〜2回試すとさらに良くなる可能性があります';
+                    _action = '再度実行して比較してみてください。';
                     _verdictColor = '#2563eb';
-                } else if (_pct >= 0.80) {
-                    _verdict = '🔄 改善の余地あり';
-                    _action = '再実行で改善できる可能性があります（目安2〜3回）。';
-                    _verdictColor = '#d97706';
                 } else {
-                    _verdict = '⚠️ スコアが低い';
+                    _verdict = '⚠️ まだ改善の余地があります。再試行を推奨します';
                     _action = '設定の連続制限や試合数を緩和することで大きく改善する可能性があります。';
                     _verdictColor = '#dc2626';
                 }
@@ -2082,15 +2115,9 @@
   </p>
   <p class="text-xs text-gray-400 text-center">${elapsed}秒 / ${totalIters}回評価 — 詳細はデバッグログ参照</p>
 </div>`;
-
-                appState.dataSource = '⚡ AI最適化';
-                appState.areAnalysisSectionsVisible = false;
-                regenerateAllPossiblePairs();
-                pushStateToHistory();
-                updateAllUI();
-                showDialog('完成！', null, null, _dialogHtml);
+                showDialog('探索完了', null, null, _dialogHtml);
             } else {
-                showDialog('生成失敗', '有効な組み合わせが見つかりませんでした。条件を変更してください。');
+                showDialog('探索失敗', '有効な組み合わせが見つかりませんでした。条件を変更してください。');
             }
             dom.loadingIndicator.style.display = 'none';
         }
@@ -2106,14 +2133,23 @@
                 return result;
             }
 
+            // 第1試合: 表示名順の先頭4人（settings.firstMatchSortedTop4）で固定
+            const _fmTop4 = settings.firstMatchSortedTop4;
+            const _fmRest = settings.firstMatchRest;
+            let fixedFirstMatch = null;
+            if (_fmTop4 && _fmTop4.length === (settings.currentSurfaceCount || appState.currentSurfaceCount) * 4) {
+                const _grpFM = settings.groups || appState.groups || {};
+                const _rtFM = ruleType;
+                const _fmCourt = makeCourtRespectingGender([..._fmTop4], _grpFM, _rtFM);
+                fixedFirstMatch = { courts: [_fmCourt], playersThisRound: [..._fmTop4], restingPlayers: [...(_fmRest || [])] };
+            }
+
             const MAX_RETRIES = 8;
             for (let retry = 0; retry < MAX_RETRIES; retry++) {
                 appState.matches = [];
-                // 仕様1-2-4: 第1試合は必ずP1,P2,P3,P4...（メンバー番号順、面数×4人）
-                // 決定的な「左から小さい順」の組み方を強制する
-                const firstMatch = createDeterministicFirstMatch();
-                if (!firstMatch || firstMatch.courts.length === 0) continue;
-                appState.matches.push(firstMatch);
+                const firstMatch = fixedFirstMatch || generateRandomSingleMatch(0);
+                if (!firstMatch) continue;
+                appState.matches.push(JSON.parse(JSON.stringify(firstMatch)));
 
                 let success = true;
                 for (let i = 1; i < targetCount; i++) {
@@ -2234,57 +2270,12 @@
             }
             if (allPatterns.length === 0) return null;
 
-            // 仕様1-2-4: 最初の試合は決定的に「男女それぞれ若番から」で構築
-            //   strict       : 男の若番 totalM 人 ＋ 女の若番 totalF 人、canonical pairing
-            //   best-effort  : 番号順に lowest surfaces*4 人。可能ならコート内ミックス
-            // canonical pairing: 各コート (m_a, f_a) vs (m_b, f_b)（ランダム化しない）
-            let canonicalFirstMatch = null;
-            if (!isBestEffort && males.length >= totalM && females.length >= totalF) {
-                const playingM = males.slice(0, totalM);
-                const playingF = females.slice(0, totalF);
-                const courts = [];
-                for (let c = 0; c < surfaces; c++) {
-                    const mPair = [playingM[c * 2], playingM[c * 2 + 1]];
-                    const fPair = [playingF[c * 2], playingF[c * 2 + 1]];
-                    const team1 = [mPair[0], fPair[0]].sort((a, b) => a - b);
-                    const team2 = [mPair[1], fPair[1]].sort((a, b) => a - b);
-                    courts.push({
-                        team1, team2,
-                        players: [...mPair, ...fPair].sort((a, b) => a - b)
-                    });
-                }
-                const playersThisRound = courts.flatMap(c => c.players).sort((a, b) => a - b);
-                const restingPlayers = members.filter(p => !playersThisRound.includes(p)).sort((a, b) => a - b);
-                canonicalFirstMatch = { courts, playersThisRound, restingPlayers };
-            } else if (isBestEffort) {
-                // best-effort: 番号順 lowest surfaces*4 人を使う
-                const playing = members.slice(0, surfaces * 4);
-                const restingPlayers = members.slice(surfaces * 4);
-                const courts = [];
-                for (let c = 0; c < surfaces; c++) {
-                    const cp = playing.slice(c * 4, (c + 1) * 4);
-                    const cpM = cp.filter(p => (groups[p] || 'default') === 'M');
-                    const cpF = cp.filter(p => (groups[p] || 'default') === 'F');
-                    if (cpM.length >= 2 && cpF.length >= 2) {
-                        // ミックス可: canonical mixed pairing
-                        const team1 = [cpM[0], cpF[0]].sort((a, b) => a - b);
-                        const team2 = [cpM[1], cpF[1]].sort((a, b) => a - b);
-                        courts.push({
-                            team1, team2,
-                            players: [...team1, ...team2].sort((a, b) => a - b)
-                        });
-                    } else {
-                        // ミックス不可: 番号順分割
-                        courts.push({
-                            team1: [cp[0], cp[1]].sort((a, b) => a - b),
-                            team2: [cp[2], cp[3]].sort((a, b) => a - b),
-                            players: cp.slice().sort((a, b) => a - b)
-                        });
-                    }
-                }
-                const playersThisRound = courts.flatMap(c => c.players).sort((a, b) => a - b);
-                canonicalFirstMatch = { courts, playersThisRound, restingPlayers };
-            }
+            // 仕様: 最初の試合は選手0,1,2,3（P1,P2,P3,P4）の組み合わせを使用
+            const firstPlayers = [0, 1, 2, 3].slice(0, surfaces * 4);
+            const firstPatternIdx = allPatterns.findIndex(pat =>
+                firstPlayers.every(p => pat.playersThisRound.includes(p)) &&
+                pat.playersThisRound.length === surfaces * 4
+            );
 
             // グリーディ順序付け: 連続プレイ・連続休憩の両方を制御
             const _maxC = settings ? (settings.maxConsecutiveLimit || appState.maxConsecutiveLimit || 99) : (appState.maxConsecutiveLimit || 99);
@@ -2294,23 +2285,15 @@
             const _streaksG = new Array(_mCount).fill(0); // 連続プレイ
             const _restStreaksG = new Array(_mCount).fill(0); // 連続休憩
             const pool = shuffle([...allPatterns]);
+            // 最初の試合パターンをプールの先頭に移動
+            if (firstPatternIdx >= 0) {
+                const fp = allPatterns[firstPatternIdx];
+                const fpInPool = pool.findIndex(p => p === fp || JSON.stringify(p.playersThisRound) === JSON.stringify(fp.playersThisRound));
+                if (fpInPool > 0) pool.unshift(pool.splice(fpInPool, 1)[0]);
+            }
             const matches = [];
 
-            // 第1試合は canonical を直接 push し、ストリークを更新
-            if (canonicalFirstMatch) {
-                matches.push(canonicalFirstMatch);
-                for (let p = 0; p < _mCount; p++) {
-                    if (canonicalFirstMatch.playersThisRound.includes(p)) {
-                        _streaksG[p]++;
-                        _restStreaksG[p] = 0;
-                    } else {
-                        _restStreaksG[p]++;
-                        _streaksG[p] = 0;
-                    }
-                }
-            }
-
-            for (let i = matches.length; i < targetCount; i++) {
+            for (let i = 0; i < targetCount; i++) {
                 // pool が尽きたら補充（再シャッフル）
                 if (pool.length === 0) pool.push(...shuffle(allPatterns));
 
@@ -2416,7 +2399,7 @@
             regenerateAllPossiblePairs();
 
             for (let i = 1; i <= attempts; i++) {
-                dom.loadingMessage.textContent = `🤔 考え中... (${i} / ${attempts}回)`;
+                dom.loadingMessage.textContent = `ベストな組み合わせを探索中... (${i} / ${attempts}回)`;
                 await new Promise(resolve => setTimeout(resolve, 0));
 
                 const generatedMatches = await generateMatchesInBackground(targetMatchCount, originalSettings);
@@ -2444,7 +2427,7 @@
                     bestMetaScore = metaScore;
                     bestResult = { matches: generatedMatches, stats: stats, metaScore: metaScore, settings: originalSettings };
                     lastBestScoreUpdateAttempt = i;
-                    dom.loadingMessage.textContent = `🤔 考え中... (${i} / ${attempts}回) - 新記録！ スコア: ${bestMetaScore.toFixed(2)}`;
+                    dom.loadingMessage.textContent = `ベストな組み合わせを探索中... (${i} / ${attempts}回) - 新記録！ スコア: ${bestMetaScore.toFixed(2)}`;
                 }
             }
 
@@ -2881,25 +2864,26 @@ ${conclusionText}</pre>
             const scorePairCoverage = stats.pairCoverage.ratio;
             const scoreCardCoverage = stats.cardCoverage.ratio;
             const scoreOpponentCoverage = stats.opponentCoverage.ratio;
+            // CV(変動係数)は0に近いほど良いので、1から引く。値が大きくなりすぎないように調整。
             const scorePairFairness = 1 - Math.min(1, stats.pairFairness.cv);
-            const scoreMatchupFairness = 1 - Math.min(1, stats.matchupFairness?.cv ?? 0);
 
-            // 重要度に応じた重み付け（calcOverallGradeと指標を揃える）
+            // 重要度に応じた重み付け
             const weights = {
                 playCount: 35,
                 pairCoverage: 20,
                 cardCoverage: 10,
                 opponentCoverage: 15,
-                pairFairness: 15,
-                matchupFairness: 5,
+                pairFairness: 20
             };
 
-            return (scorePlayCount * weights.playCount) +
-                   (scorePairCoverage * weights.pairCoverage) +
-                   (scoreCardCoverage * weights.cardCoverage) +
-                   (scoreOpponentCoverage * weights.opponentCoverage) +
-                   (scorePairFairness * weights.pairFairness) +
-                   (scoreMatchupFairness * weights.matchupFairness);
+            const metaScore =
+                (scorePlayCount * weights.playCount) +
+                (scorePairCoverage * weights.pairCoverage) +
+                (scoreCardCoverage * weights.cardCoverage) +
+                (scoreOpponentCoverage * weights.opponentCoverage) +
+                (scorePairFairness * weights.pairFairness);
+
+            return metaScore;
         }
 
         // ▼▼▼ 既存の generateMatchesInBackground 関数を、以下のコードにまるごと置き換えてください ▼▼▼
@@ -3602,7 +3586,13 @@ ${conclusionText}</pre>
             }
 
             const isMixRule = ruleType === 'genderMix';
-            const namesHtml = pairIndices.map(idx => {
+            // 表示順: 表示名の数値順にソート（インデックス順ではなく "1 & 2" が "2 & 1" にならないよう）
+            const _displaySorted = [...pairIndices].sort((a, b) => {
+                const na = parseInt(appState.members[a], 10), nb = parseInt(appState.members[b], 10);
+                if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                return String(appState.members[a]).localeCompare(String(appState.members[b]));
+            });
+            const namesHtml = _displaySorted.map(idx => {
                 const name = appState.members[idx];
                 if (isMixRule && generationGroups[idx] === 'F') {
                     return `<span class="female-pill">${name}</span>`;
@@ -4137,14 +4127,18 @@ ${conclusionText}</pre>
             const gapFromCeil = Math.max(0, ceilScore - curScore); // 上限超えは0として扱う
             // 上限との差が1点以内 → 実質上限到達（計算誤差・丸め誤差を吸収）
             const reachedCeiling = gapFromCeil <= 1.0;
-            // 上限到達時は絶対グレードをSに統一（ダイアログの相対グレードと一致させる）
-            const dispGradeData = reachedCeiling
-                ? { ...gradeData, grade: 'S', stars: '★★★★★', color: '#16a34a', label: '条件最良' }
-                : gradeData;
+
+            // 上限に到達している場合はグレードをS（最高）に昇格
+            if (reachedCeiling) {
+                gradeData.grade = 'S';
+                gradeData.stars = '★★★★★';
+                gradeData.color = '#16a34a';
+                gradeData.label = '最高 (条件上限)';
+            }
 
             let convergeBadge;
             if (reachedCeiling) {
-                // 上限との差0.5点以内 = 真のベスト
+                // 上限との差1点以内 = 真のベスト
                 convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ 最良解 — 再試行不要 (上限${ceilScore}点)</div>`;
             } else if (isTargetReached) {
                 // 目標達成（上限未到達でも十分）
@@ -4155,16 +4149,16 @@ ${conclusionText}</pre>
                 convergeBadge = `<div style="display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🔄 上限まであと${gapFromCeil.toFixed(1)}点 — 再試行できます（${reason}）</div>`;
             }
             const gradeTileHtml = `
-            <div style="background:linear-gradient(135deg,${dispGradeData.color}18,${dispGradeData.color}08);border:2px solid ${dispGradeData.color};border-radius:12px;padding:16px;text-align:center;grid-column:1/-1;">
+            <div style="background:linear-gradient(135deg,${gradeData.color}18,${gradeData.color}08);border:2px solid ${gradeData.color};border-radius:12px;padding:16px;text-align:center;grid-column:1/-1;">
                 <div style="font-size:11px;color:#6b7280;font-weight:600;letter-spacing:0.05em;margin-bottom:6px;">総合評価</div>
                 <div style="display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;">
                     <div style="text-align:center;">
-                        <div style="font-size:52px;font-weight:900;color:${dispGradeData.color};line-height:1;">${dispGradeData.grade}</div>
-                        <div style="font-size:12px;color:${dispGradeData.color};font-weight:600;">${dispGradeData.label}</div>
+                        <div style="font-size:52px;font-weight:900;color:${gradeData.color};line-height:1;">${gradeData.grade}</div>
+                        <div style="font-size:12px;color:${gradeData.color};font-weight:600;">${gradeData.label}</div>
                     </div>
                     <div style="text-align:left;">
-                        <div style="font-size:22px;letter-spacing:2px;color:${dispGradeData.color};">${dispGradeData.stars}</div>
-                        <div style="font-size:28px;font-weight:700;color:${dispGradeData.color};">${gradeData.total}<span style="font-size:14px;font-weight:400;color:#9ca3af;">/100点</span></div>
+                        <div style="font-size:22px;letter-spacing:2px;color:${gradeData.color};">${gradeData.stars}</div>
+                        <div style="font-size:28px;font-weight:700;color:${gradeData.color};">${gradeData.total}<span style="font-size:14px;font-weight:400;color:#9ca3af;">/100点</span></div>
                     </div>
                     <div style="text-align:left;font-size:12px;color:#6b7280;border-left:1px solid #e5e7eb;padding-left:16px;">
                         <div>プレイ公平性: <b>${gradeData.scores.playCount}点</b></div>
@@ -4277,7 +4271,15 @@ ${conclusionText}</pre>
             const headers = ['メンバー', '最大連続プレイ', '最大連続休憩', ...matches.map((_, i) => `第${i + 1}試合`), '合計'];
             let tableHTML = generateTableShell(headers);
 
-            members.forEach((name, memberIdx) => {
+            const _sortedMembers4Table = members
+                .map((name, index) => ({ name, index }))
+                .sort((a, b) => {
+                    const na = parseInt(a.name, 10), nb = parseInt(b.name, 10);
+                    if (!isNaN(na) && !isNaN(nb) && `${na}` === String(a.name) && `${nb}` === String(b.name)) return na - nb;
+                    return String(a.name).localeCompare(String(b.name));
+                });
+
+            _sortedMembers4Table.forEach(({ name, index: memberIdx }) => {
                 let cumulativePlays = 0;
                 let consecutivePlayStreak = 0, maxPlayStreak = 0;
                 let consecutiveRestStreak = 0, maxRestStreak = 0;
@@ -5785,15 +5787,27 @@ ${conclusionText}</pre>
                 const currentP1 = fixedPairPlayer1.value;
                 const currentP2 = fixedPairPlayer2.value;
 
+                // 表示順を名前でソート（数値名なら数値順、それ以外は文字列順）
+                // 配列順序は過去のリナンバー処理で並び替わっている可能性があるため、表示時にソート
+                const _sortedMembers = appState.members
+                    .map((name, index) => ({ name, index }))
+                    .sort((a, b) => {
+                        const na = parseInt(a.name, 10), nb = parseInt(b.name, 10);
+                        if (!isNaN(na) && !isNaN(nb) && `${na}` === String(a.name) && `${nb}` === String(b.name)) {
+                            return na - nb;
+                        }
+                        return String(a.name).localeCompare(String(b.name));
+                    });
+
                 // ★★★ 修正点：value属性を正しく設定するため、appState.membersの現在のインデックスを使用します ★★★
-                const optionsHTML = '<option value="-1">--</option>' + appState.members.map((name, index) => `<option value="${index}">${name}</option>`).join('');
+                const optionsHTML = '<option value="-1">--</option>' + _sortedMembers.map(({ name, index }) => `<option value="${index}">${name}</option>`).join('');
 
                 fixedPairPlayer1.innerHTML = optionsHTML;
                 fixedPairPlayer2.innerHTML = optionsHTML;
                 fixedPairPlayer1.value = currentP1;
                 fixedPairPlayer2.value = currentP2;
 
-                femalePlayersContainer.innerHTML = appState.members.map((name, index) => {
+                femalePlayersContainer.innerHTML = _sortedMembers.map(({ name, index }) => {
                     // ★★★ 修正点：appState.groupsのキーは新しいメンバー配列のインデックスに対応するため、直接indexで参照します ★★★
                     const isFemale = appState.groups[index] === 'F';
                     return `
@@ -5869,17 +5883,17 @@ ${conclusionText}</pre>
             saveState();
         }
 
-        function
-            updateExclusionUI() {
-            dom.dropoutPlayerSelect.innerHTML
-                =
-                appState.members.map((name,
-                    index) => `
-                                                                                                        <option
-                                                                                                            value="${index}">
-                                                                                                            ${name}
-                                                                                                        </option>
-                                                                                                        `).join('');
+        function updateExclusionUI() {
+            const _dropoutSorted = appState.members
+                .map((name, index) => ({ name, index }))
+                .sort((a, b) => {
+                    const na = parseInt(a.name, 10), nb = parseInt(b.name, 10);
+                    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+                    return String(a.name).localeCompare(String(b.name));
+                });
+            dom.dropoutPlayerSelect.innerHTML = _dropoutSorted
+                .map(({ name, index }) => `<option value="${index}">${name}</option>`)
+                .join('');
             dom.dropoutMatchNumberInput.value
                 = '';
             dom.dropoutMatchNumberInput.max
@@ -6167,11 +6181,8 @@ ${conclusionText}</pre>
                 const statsSnap = calculateSummaryStats(appState.matches, appState.members, appState.allPossiblePairs);
                 const gradeSnap = calcOverallGrade(statsSnap, appState.matches, appState.members, appState.allPossiblePairs);
                 const ceilInfo2 = calcConditionCeiling(appState.currentSurfaceCount, appState.currentTotalMemberCount, appState.matches.length);
-                const _ceilReached2 = (ceilInfo2.totalBase ?? ceilInfo2.total) - gradeSnap.total <= 1.0;
-                const retryIcon = _ceilReached2 ? ' ✅' : ' 🔄';
-                const dispSnap = _ceilReached2 ? { grade: 'S', color: '#16a34a', stars: '★★★★★' } : gradeSnap;
-                const badgeStyle = `display:inline-block;background:${dispSnap.color}22;color:${dispSnap.color};border:1px solid ${dispSnap.color}66;border-radius:12px;padding:1px 8px;font-weight:700;font-size:13px;margin-left:8px;`;
-                summaryParts.push(`<span style="${badgeStyle}">${dispSnap.grade} ${gradeSnap.total}点 ${dispSnap.stars}${retryIcon}</span>`);
+                const retryIcon = (ceilInfo2.totalBase ?? ceilInfo2.total) - gradeSnap.total <= 1.0 ? ' ✅' : ' 🔄'; const badgeStyle = `display:inline-block;background:${gradeSnap.color}22;color:${gradeSnap.color};border:1px solid ${gradeSnap.color}66;border-radius:12px;padding:1px 8px;font-weight:700;font-size:13px;margin-left:8px;`;
+                summaryParts.push(`<span style="${badgeStyle}">${gradeSnap.grade} ${gradeSnap.total}点 ${gradeSnap.stars}${retryIcon}</span>`);
             }
             container.innerHTML = summaryParts.join('<span class="mx-2 text-gray-300">|</span>');
         }
@@ -6476,25 +6487,4 @@ ${conclusionText}</pre>
 
 
         //ダブルス組合せてみっかv4.6t2.html ベース
-
-// ── Node.js test exports ──────────────────────────────────────────────────────
-if (typeof module !== 'undefined') {
-    module.exports = {
-        appState, dom,
-        findBestBySimulatedAnnealing,
-        generateInitialSolution,
-        generateNeighbor,
-        evaluateFullSolution,
-        calcAchievementRate,
-        calcConditionCeiling,
-        calcOverallGrade,
-        calculateMetaScore,
-        calculateSummaryStats,
-        isPlayCountRuleViolated,
-        isConsecutivePlayLimitViolated,
-        regenerateAllPossiblePairs,
-        findBestMatchCandidate,
-        generateRandomSingleMatch,
-        checkConsecutiveRests,
-    };
-}
+    
