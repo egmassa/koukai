@@ -49,6 +49,29 @@
             return mCount <= surfaces * 2 || fCount <= surfaces * 2;
         }
 
+        const LS_KEY_PW = LS_KEY + '_pw';
+        const PENALTY_DEFAULTS = {
+            maxPlayStreak:   40,   // 連続プレイ上限超過 (超過1につき)
+            restHard:        80,   // 連続休憩超過 (超過1につき)
+            restSoft:       120,   // 連続休憩ソフト (streak>1で固定加算)
+            restVariance:    25,   // 連続休憩差・選手間 (差1超過につき)
+            playVariance:   120,   // 連続プレイ差・選手間 (差1超過につき)
+            playCount:      150,   // 合計プレイ数差 (差1超過につき)
+            genderMixPair:  200,   // genderMix F+F同士ペア (コートにつき)
+            fixedPairSplit: 200,   // fixedPairペア分離 (コートにつき)
+            firstMatch:     500,   // 第1試合固定
+            saIter:         200,   // SAリスタートあたりイテレーション数
+            saConverge:       5,   // 収束判定: 連続同点リスタート数
+            saMinRestart:    10,   // 収束判定: 最低リスタート数
+            saMinTime:      0.4,   // 収束判定: 最低経過時間割合 (0〜1)
+        };
+        (function _initPw() {
+            try {
+                const _saved = localStorage.getItem(LS_KEY_PW);
+                appState.pw = _saved ? { ...PENALTY_DEFAULTS, ...JSON.parse(_saved) } : { ...PENALTY_DEFAULTS };
+            } catch (_) { appState.pw = { ...PENALTY_DEFAULTS }; }
+        })();
+
         const SCORE_SETTINGS = {
             GENERATION_ATTEMPTS: 5000,          // 組み合わせの試行回数
             PENALTY_CARD_DUPLICATION: 1000,     // 対戦カード重複の基本ペナルティ
@@ -150,7 +173,7 @@
                 'resetAllButton', 'undoButton', 'redoButton', // ← undoButtonとredoButtonを追加
                 'resetAllButton', 'customDialog', 'dialogTitle', 'dialogMessage', 'dialogMessageContainer', 'dialogContent',
                 'dialogCancelButton', 'dialogConfirmButton', 'currentYear',
-                'graphToggleButton', 'graphIconShow', 'graphIconHide', 'algorithmInsights',
+                'graphToggleButton', 'graphIconShow', 'graphIconHide',
                 'favoritesSelect', 'saveFavoriteButton', 'exportCsvButton', 'summaryStatsCard', 'summaryStatsGrid',
                 'exportJsonButton', 'importJsonButton', 'json-importer',
                 'detailedStatsCard', 'detailedStatsTabButtons', 'detailedStatsTablesContainer',
@@ -367,8 +390,49 @@
             dom.saveMatchButton.addEventListener('click', saveMatchEdit);
             dom.applyDropoutButton.addEventListener('click', handleApplyExclusion);
             dom.expandScheduleBtn.addEventListener('click', toggleScheduleExpansion);
-            document.getElementById('debugLogBtn').addEventListener('click', collectDebugLog);
+            (function _debugBtnSetup() {
+                const _dbBtn = document.getElementById('debugLogBtn');
+                let _dbLongPressTimer = null;
+                _dbBtn.addEventListener('click', (e) => {
+                    if (e.shiftKey) { showPenaltySettingsDialog(); } else { collectDebugLog(); }
+                });
+                _dbBtn.addEventListener('touchstart', (e) => {
+                    _dbLongPressTimer = setTimeout(() => {
+                        _dbLongPressTimer = null;
+                        e.preventDefault();
+                        showPenaltySettingsDialog();
+                    }, 800);
+                }, { passive: false });
+                _dbBtn.addEventListener('touchend', () => {
+                    if (_dbLongPressTimer) { clearTimeout(_dbLongPressTimer); _dbLongPressTimer = null; }
+                });
+                _dbBtn.addEventListener('touchmove', () => {
+                    if (_dbLongPressTimer) { clearTimeout(_dbLongPressTimer); _dbLongPressTimer = null; }
+                });
+            })();
             document.getElementById('specBtn').addEventListener('click', showSpecDialog);
+            document.getElementById('dropoutHelpBtn')?.addEventListener('click', () => {
+                showDialog('途中離脱と再生成', null, null, `
+<div style="font-size:0.9rem;line-height:1.7;">
+<p style="margin-bottom:10px;">試合の途中で参加できなくなったメンバーが出た場合、残りのメンバーで公平な試合を自動的に作り直せます。</p>
+<ol style="padding-left:1.2em;space-y:8px;">
+<li style="margin-bottom:8px;"><strong>離脱するメンバー</strong>をドロップダウンから選択</li>
+<li style="margin-bottom:8px;"><strong>何試合目から</strong>離脱するかを入力（例: 5試合目から不参加なら「5」）</li>
+<li style="margin-bottom:8px;">「<strong>離脱を適用して再生成</strong>」ボタンをタップ</li>
+</ol>
+<p style="margin-top:10px;font-size:0.8rem;color:#6b7280;">指定試合以降が自動で再計算され、残ったメンバーのプレイ回数が均等になるよう調整されます。</p>
+</div>`);
+            });
+            document.getElementById('scheduleHelpBtn')?.addEventListener('click', () => {
+                showDialog('試合スケジュールの操作', null, null, `
+<div style="font-size:0.9rem;line-height:1.7;">
+<p style="margin-bottom:10px;font-weight:bold;">✏️ メンバー交代（コートごと）</p>
+<p style="margin-bottom:10px;">各コートの右端にある ✏️ をタップすると、その試合のメンバーを手動で入れ替えられます。変更後は以降の試合が自動的に再計算されます。</p>
+<p style="margin-bottom:10px;font-weight:bold;">☑️ 試合の進行チェック</p>
+<p style="margin-bottom:10px;">各試合の左側のチェックボックスをタップすると、その試合を「完了」としてマークできます。進行状況バーに反映されます。</p>
+<p style="font-size:0.8rem;color:#6b7280;">💡 ✏️ ボタンで変更できるのは1コートずつです。全体を作り直すには「ベストな組み合わせを探す」を再実行してください。</p>
+</div>`);
+            });
 
             // ★★★★★★★★★★★★★★★★★★★★★★★★★★★
             // ★★★  ここが今回の修正点です  ★★★
@@ -814,6 +878,10 @@
                     // 古いデータ形式との互換性を保つため、generationSettingsがなければ空のオブジェクトとして初期化する
                     appState.generationSettings = appState.generationSettings || {};
                 }
+                try {
+                    const _pwSaved = localStorage.getItem(LS_KEY_PW);
+                    appState.pw = _pwSaved ? { ...PENALTY_DEFAULTS, ...JSON.parse(_pwSaved) } : { ...PENALTY_DEFAULTS };
+                } catch (_) { appState.pw = { ...PENALTY_DEFAULTS }; }
             } catch (e) { console.error("Failed to load state:", e); localStorage.removeItem(LS_KEY); }
         }
 
@@ -1027,7 +1095,6 @@
             if (dom.analysisSection) dom.analysisSection.classList.toggle('hidden', !hasMatches);
             if (dom.dropoutSettingsWrapper) dom.dropoutSettingsWrapper.classList.toggle('hidden', !hasMatches);
             // if (dom.configurationHub) dom.configurationHub.open = !hasMatches; // ← この行をコメントアウトして無効化
-            if (dom.algorithmInsights) dom.algorithmInsights.classList.toggle('hidden', !hasMatches);
 
 
             if (hasMatches) {
@@ -1300,6 +1367,7 @@
 
         // ── 解全体を評価（メタスコア計算） ──
         function evaluateFullSolution(matches, settings) {
+            const pw = appState.pw || PENALTY_DEFAULTS;
             // 整合性チェック: 各試合内でプレイヤー番号が重複していないか
             for (const m of matches) {
                 const seen = new Set();
@@ -1361,7 +1429,7 @@
                         if (m.playersThisRound.includes(p)) {
                             _streaks[p]++;
                             if (_streaks[p] > _maxConsec) {
-                                penalty -= (_streaks[p] - _maxConsec) * 40;
+                                penalty -= (_streaks[p] - _maxConsec) * pw.maxPlayStreak;
                             }
                         } else {
                             _streaks[p] = 0;
@@ -1376,11 +1444,11 @@
             const _restTol = Math.max(1, _maxRest - 1); // 表示上限と一致させる
             // 仕様1-2-3/2-2: 上限超過ペナルティ
             if (restInfo.maxStreak > _restTol) {
-                penalty -= (restInfo.maxStreak - _restTol) * 80;
+                penalty -= (restInfo.maxStreak - _restTol) * pw.restHard;
             }
             // 連続休憩２以上: ソフトペナルティ（全ルール共通、SAが無視できない大きさに）
             if (restInfo.maxStreak > 1) {
-                penalty -= 120;
+                penalty -= pw.restSoft;
             }
             // プレイヤー間の連続休憩ストリーク差ペナルティ（公平性）
             const _mcLen2 = settings.members ? settings.members.length : appState.currentTotalMemberCount;
@@ -1396,11 +1464,38 @@
                     }
                 }
             }
-            const _restStrMax = Math.max(..._maxIndivRest);
-            const _restStrMin = Math.min(..._maxIndivRest);
-            if (_restStrMax - _restStrMin > 1) {
-                // 差が2以上: -25点/超過分
-                penalty -= (_restStrMax - _restStrMin - 1) * 25;
+            const _exclForRest = settings.exclusions != null ? settings.exclusions : appState.exclusions;
+            const _activeRestStreaks = _maxIndivRest.filter((_, p) => !(_exclForRest[p] && matches.length >= _exclForRest[p]));
+            if (_activeRestStreaks.length > 1) {
+                const _restStrMax = Math.max(..._activeRestStreaks);
+                const _restStrMin = Math.min(..._activeRestStreaks);
+                if (_restStrMax - _restStrMin > 1) {
+                    // 差が2以上: -25点/超過分
+                    penalty -= (_restStrMax - _restStrMin - 1) * pw.restVariance;
+                }
+            }
+            // 選手間の最大連続プレイ差ペナルティ（公平性：連続プレイのばらつきは最高優先）
+            const _pcLen3 = settings.members ? settings.members.length : appState.currentTotalMemberCount;
+            const _indivPlayStreak = new Array(_pcLen3).fill(0);
+            const _maxIndivPlayStreak = new Array(_pcLen3).fill(0);
+            for (const m of matches) {
+                for (let p = 0; p < _pcLen3; p++) {
+                    if (m.playersThisRound.includes(p)) {
+                        _indivPlayStreak[p]++;
+                        if (_indivPlayStreak[p] > _maxIndivPlayStreak[p]) _maxIndivPlayStreak[p] = _indivPlayStreak[p];
+                    } else {
+                        _indivPlayStreak[p] = 0;
+                    }
+                }
+            }
+            const _exclForPlay = settings.exclusions != null ? settings.exclusions : appState.exclusions;
+            const _activePlayStreaks = _maxIndivPlayStreak.filter((_, p) => !(_exclForPlay[p] && matches.length >= _exclForPlay[p]));
+            if (_activePlayStreaks.length > 1) {
+                const _playStrMax = Math.max(..._activePlayStreaks);
+                const _playStrMin = Math.min(..._activePlayStreaks);
+                if (_playStrMax - _playStrMin > 1) {
+                    penalty -= (_playStrMax - _playStrMin - 1) * pw.playVariance;
+                }
             }
             // プレイ回数バランスペナルティ（軽量・早期フィードバック）
             const _pcLen = settings.members ? settings.members.length : appState.currentTotalMemberCount;
@@ -1408,10 +1503,11 @@
             for (const m of matches) {
                 m.playersThisRound.forEach(p => { if (p < _pcLen) _playCnts[p]++; });
             }
-            const _activePc = _playCnts.filter((_, i) => !(appState.exclusions[i] && matches.length >= appState.exclusions[i]));
+            const _exclForPc = settings.exclusions != null ? settings.exclusions : appState.exclusions;
+            const _activePc = _playCnts.filter((_, i) => !(_exclForPc[i] && matches.length >= _exclForPc[i]));
             if (_activePc.length > 1) {
                 const _pcDiff = Math.max(..._activePc) - Math.min(..._activePc);
-                if (_pcDiff > 1) penalty -= (_pcDiff - 1) * 60;
+                if (_pcDiff > 1) penalty -= (_pcDiff - 1) * pw.playCount;
             }
 
             // genderMixモード: 2M+2FいるのにF+FペアになっているコートにSAが避けるよう重いペナルティ
@@ -1424,7 +1520,7 @@
                         if (allGrps.some(g => g === 'F') && allGrps.some(g => g === 'M')) {
                             const t1AllF = c.team1.map(_getGrpP).every(g => g === 'F');
                             const t2AllF = c.team2.map(_getGrpP).every(g => g === 'F');
-                            if (t1AllF || t2AllF) penalty -= 200;
+                            if (t1AllF || t2AllF) penalty -= pw.genderMixPair;
                         }
                     }
                 }
@@ -1440,7 +1536,7 @@
                         if (_p1Count >= 2 && _nonP1Count >= 2) {
                             const _t1AllP1 = c.team1.every(p => _getGrpFP(p) === 'P1');
                             const _t2AllP1 = c.team2.every(p => _getGrpFP(p) === 'P1');
-                            if (!_t1AllP1 && !_t2AllP1) penalty -= 200;
+                            if (!_t1AllP1 && !_t2AllP1) penalty -= pw.fixedPairSplit;
                         }
                     }
                 }
@@ -1451,7 +1547,7 @@
                 const _fmActual = matches[0].playersThisRound;
                 let _fmOk = true;
                 for (const p of _fmp) { if (!_fmActual.includes(p)) { _fmOk = false; break; } }
-                if (!_fmOk) penalty -= 500;
+                if (!_fmOk) penalty -= pw.firstMatch;
             }
             // メインスコア
             const allPairs = settings.allPossiblePairs || appState.allPossiblePairs;
@@ -1474,6 +1570,70 @@
 
 
         // ─── 制約仕様書表示 ───────────────────────────────────────────────────
+        function showPenaltySettingsDialog() {
+            const pw = appState.pw || { ...PENALTY_DEFAULTS };
+            const rows = [
+                { key: 'playCount',       label: '合計プレイ数差',          unit: '点/差1超過' },
+                { key: 'playVariance',    label: '連続プレイ差・選手間',    unit: '点/差1超過' },
+                { key: 'restVariance',    label: '連続休憩差・選手間',      unit: '点/差1超過' },
+                { key: 'restHard',        label: '連続休憩超過',            unit: '点/回超過' },
+                { key: 'restSoft',        label: '連続休憩ソフト(固定)',    unit: '点(streak>1)' },
+                { key: 'maxPlayStreak',   label: '連続プレイ上限超過',      unit: '点/回超過' },
+                { key: 'genderMixPair',   label: 'genderMix F+Fペア',      unit: '点/コート' },
+                { key: 'fixedPairSplit',  label: 'fixedPairペア分離',       unit: '点/コート' },
+                { key: 'firstMatch',      label: '第1試合固定',              unit: '点' },
+                { key: 'saIter',          label: 'SAイテレーション/再起動', unit: '回' },
+                { key: 'saConverge',      label: 'SA収束判定・連続回数',    unit: '回' },
+                { key: 'saMinRestart',    label: 'SA収束判定・最低再起動',  unit: '回' },
+                { key: 'saMinTime',       label: 'SA収束判定・最低時間割合', unit: '(0〜1)' },
+            ];
+            const rowsHtml = rows.map(({ key, label, unit }) => `
+<tr style="border-bottom:1px solid #f3f4f6;">
+  <td style="padding:4px 8px 4px 0;font-size:12px;color:#374151;">${label}</td>
+  <td style="padding:4px;font-size:11px;color:#9ca3af;text-align:right;">${PENALTY_DEFAULTS[key]}</td>
+  <td style="padding:4px;"><input type="number" id="_pw_${key}" value="${pw[key]}"
+    step="${key === 'saMinTime' ? 0.05 : key.startsWith('sa') ? 1 : 5}"
+    style="border:1px solid #d1d5db;border-radius:4px;padding:2px 4px;font-size:12px;width:70px;text-align:right;"></td>
+  <td style="padding:4px 0 4px 4px;font-size:11px;color:#9ca3af;">${unit}</td>
+</tr>`).join('');
+            const html = `
+<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">⚙️ デバッグボタンをShift+クリックで開く上級設定です。変更はlocalStorageに保存されます。</div>
+<table style="border-collapse:collapse;width:100%;">
+  <thead><tr>
+    <th style="text-align:left;font-size:11px;color:#6b7280;padding-bottom:4px;">項目</th>
+    <th style="text-align:right;font-size:11px;color:#9ca3af;padding-right:4px;padding-bottom:4px;">デフォ</th>
+    <th style="text-align:right;font-size:11px;color:#6b7280;padding-bottom:4px;">現在値</th>
+    <th style="padding-bottom:4px;"></th>
+  </tr></thead>
+  <tbody>${rowsHtml}</tbody>
+</table>
+<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+  <button id="_pw_reset" style="background:#6b7280;color:white;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;">リセット</button>
+  <button id="_pw_save" style="background:#2563eb;color:white;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;">保存して閉じる</button>
+</div>`;
+            showDialog('⚙️ ペナルティ調整（上級）', null, null, html);
+            setTimeout(() => {
+                document.getElementById('_pw_reset')?.addEventListener('click', () => {
+                    rows.forEach(({ key }) => {
+                        const el = document.getElementById(`_pw_${key}`);
+                        if (el) el.value = PENALTY_DEFAULTS[key];
+                    });
+                });
+                document.getElementById('_pw_save')?.addEventListener('click', () => {
+                    const newPw = { ...PENALTY_DEFAULTS };
+                    rows.forEach(({ key }) => {
+                        const el = document.getElementById(`_pw_${key}`);
+                        if (!el) return;
+                        newPw[key] = key === 'saMinTime' ? parseFloat(el.value) : parseInt(el.value, 10);
+                        if (isNaN(newPw[key])) newPw[key] = PENALTY_DEFAULTS[key];
+                    });
+                    appState.pw = newPw;
+                    try { localStorage.setItem(LS_KEY_PW, JSON.stringify(newPw)); } catch (_) {}
+                    dom.customDialog.classList.add('hidden');
+                });
+            }, 50);
+        }
+
         function showSpecDialog() {
             const specHtml = `
 <div style="font-size:0.8rem;text-align:left;max-height:70vh;overflow-y:auto;padding:0 4px;">
@@ -1520,6 +1680,10 @@
 <tr><td style="padding:3px 6px;">カード多様性</td><td style="padding:3px 6px;text-align:center;">3-4</td><td style="padding:3px 6px;text-align:center;">10点</td></tr>
 <tr style="background:#f9fafb;"><td style="padding:3px 6px;">ミックスボーナス（best-effort）</td><td style="padding:3px 6px;text-align:center;">3-1-2</td><td style="padding:3px 6px;text-align:center;">+30点</td></tr>
 </table>
+<h4 style="font-weight:bold;margin:10px 0 4px;color:#374151;">5. 用語集</h4>
+<b>best-effort</b>: 絶対条件ではなくスコア最大化で近似するモード。genderMix・fixedPairで採用。<br>
+<b>グレード</b>: この条件での達成率（スコア÷上限×100%）でS/A/B/C/Dを表示。上限到達時は常にS。<br>
+<span style="font-size:0.75rem;color:#9ca3af;">※ ペア・対戦グループ・対戦カードの定義はサマリー各指標の ❓ ボタンを参照</span>
 </div>`;
             showDialog('📋 制約仕様書', null, null, specHtml);
         }
@@ -1763,7 +1927,7 @@
             // （mixBonusは条件依存で上限まで届かないため）
             const targetRate = ceilingData.totalBase ?? ceilingData.total;
             // 時間制限まで探索し続ける（収束したら早期終了）
-            const ITER_PER_RESTART = 200;
+            const ITER_PER_RESTART = appState.pw?.saIter ?? 200;
             const TOTAL_ITERATIONS = Infinity;
             const RESTART_COUNT = Infinity;
 
@@ -1921,12 +2085,16 @@
                 allScores.push(bestScoreThisRestart);  // 最終スコアでなくリスタート中のベストを記録
                 restart++;
 
-                // 収束判定：直近3リスタートが全てグローバルbestScoreに到達→収束
-                const CONVERGE_COUNT = 3;
-                const CONVERGE_EPS = Math.max(0.1, Math.abs(bestScore) * 0.005); // 相対0.5%または0.1の大きい方
-                if (allScores.length >= CONVERGE_COUNT) {
+                // 収束判定：直近N回が同スコア かつ 時間・リスタート数の最低ラインを超えた場合のみ
+                const CONVERGE_COUNT = appState.pw?.saConverge ?? 5;
+                const MIN_RESTARTS_CONVERGE = appState.pw?.saMinRestart ?? 10;
+                const MIN_TIME_FRAC_CONVERGE = appState.pw?.saMinTime ?? 0.4;
+                const _elapsedFracConv = (performance.now() - startTime) / 1000 / timeLimitSec;
+                const CONVERGE_EPS = Math.max(0.1, Math.abs(bestScore) * 0.005);
+                if (allScores.length >= CONVERGE_COUNT
+                    && allScores.length >= MIN_RESTARTS_CONVERGE
+                    && _elapsedFracConv >= MIN_TIME_FRAC_CONVERGE) {
                     const recent = allScores.slice(-CONVERGE_COUNT);
-                    // 全リスタートがグローバルベストに到達している場合のみ収束
                     const converged = recent.every(s => Math.abs(s - bestScore) < CONVERGE_EPS);
                     if (converged) {
                         dom.loadingMessage.textContent = `✅ 収束検出 - ${CONVERGE_COUNT}回連続で同じ結果(${bestScore.toFixed(1)}点) → これが最良解`;
@@ -2075,9 +2243,13 @@
                 else if (_pctInt >= 65) { _relGrade = 'C'; _relColor = '#d97706'; _relStars = '★★☆☆☆'; }
                 else { _relGrade = 'D'; _relColor = '#dc2626'; _relStars = '★☆☆☆☆'; }
 
+                const _reachedCeilDialog = targetRate > 0 && (targetRate - gradeForReport.total) <= 1.0;
+                if (_reachedCeilDialog && _relGrade !== 'S') {
+                    _relGrade = 'S'; _relColor = '#16a34a'; _relStars = '★★★★★';
+                }
                 let _verdict, _action, _verdictColor;
-                if (reachedTarget) {
-                    _verdict = '✅ 収束済み — これが最良解です';
+                if (reachedTarget || _reachedCeilDialog) {
+                    _verdict = '✅ この条件での最高スコア — 再試行不要';
                     _action = 'このままご利用いただけます。';
                     _verdictColor = '#16a34a';
                 } else if (_pctInt >= 88) {
@@ -2101,7 +2273,6 @@
 <div class="px-1">
   ${_ceilRow}
   <div class="text-center py-3">
-    <div class="text-xs text-gray-400 mb-1">この条件での達成率</div>
     <div class="text-5xl font-bold leading-none" style="color:${_relColor}">${_relGrade}</div>
     <div class="text-2xl font-semibold mt-1">${_pctInt}% ${_relStars}</div>
   </div>
@@ -2109,11 +2280,6 @@
     ${_verdict}
   </div>
   <p class="mt-2 text-sm text-gray-600 text-center">${_action}</p>
-  <p class="mt-3 text-xs text-gray-400 text-center">
-    絶対スコア: ${gradeForReport.grade} ${gradeForReport.total}点
-    ${gradeForReport.grade !== _relGrade ? `（S基準は上限の95%以上）` : ''}
-  </p>
-  <p class="text-xs text-gray-400 text-center">${elapsed}秒 / ${totalIters}回評価 — 詳細はデバッグログ参照</p>
 </div>`;
                 showDialog('探索完了', null, null, _dialogHtml);
             } else {
@@ -2133,15 +2299,19 @@
                 return result;
             }
 
-            // 第1試合: 表示名順の先頭4人（settings.firstMatchSortedTop4）で固定
+            // 第1試合: 表示名順の先頭(surfaces×4)人で固定、コート数=surfaces分作成
             const _fmTop4 = settings.firstMatchSortedTop4;
             const _fmRest = settings.firstMatchRest;
+            const _fmSurfaces = settings.currentSurfaceCount || appState.currentSurfaceCount;
             let fixedFirstMatch = null;
-            if (_fmTop4 && _fmTop4.length === (settings.currentSurfaceCount || appState.currentSurfaceCount) * 4) {
+            if (_fmTop4 && _fmTop4.length === _fmSurfaces * 4) {
                 const _grpFM = settings.groups || appState.groups || {};
                 const _rtFM = ruleType;
-                const _fmCourt = makeCourtRespectingGender([..._fmTop4], _grpFM, _rtFM);
-                fixedFirstMatch = { courts: [_fmCourt], playersThisRound: [..._fmTop4], restingPlayers: [...(_fmRest || [])] };
+                const _fmCourts = [];
+                for (let _c = 0; _c < _fmSurfaces; _c++) {
+                    _fmCourts.push(makeCourtRespectingGender(_fmTop4.slice(_c * 4, (_c + 1) * 4), _grpFM, _rtFM));
+                }
+                fixedFirstMatch = { courts: _fmCourts, playersThisRound: [..._fmTop4], restingPlayers: [...(_fmRest || [])] };
             }
 
             const MAX_RETRIES = 8;
@@ -2801,9 +2971,8 @@ ${conclusionText}</pre>
             if (members < 4) { info.innerHTML = ''; return; }
 
             const ceiling = calcConditionCeiling(surfaces, members, matches);
-            info.innerHTML = `この条件での上限: <b style="color:${ceiling.color}">${ceiling.grade}/${ceiling.totalBase ?? ceiling.total}点</b>                <span style="font-size:10px;color:#9ca3af;margin-left:4px;">
-                  (プレイ公平${ceiling.scores.playCount}・ペア多様${ceiling.scores.pairCoverage}・カード多様${ceiling.scores.cardCoverage}・序盤多様${ceiling.scores.earlyDiversity})
-                </span>`;
+            const _ceilScore = ceiling.totalBase ?? ceiling.total;
+            info.innerHTML = `この条件での上限: <b style="color:#15803d;">${_ceilScore}点</b> <span style="font-size:10px;color:#6b7280;">（${_ceilScore}点到達で再試行不要）</span><span style="font-size:10px;color:#9ca3af;margin-left:4px;">(プレイ公平${ceiling.scores.playCount}・ペア多様${ceiling.scores.pairCoverage}・カード多様${ceiling.scores.cardCoverage}・序盤多様${ceiling.scores.earlyDiversity})</span>`;
         }
 
         function calcOverallGrade(statsData, matches, members, allPossiblePairs, precomputedMixBonus) {
@@ -4138,15 +4307,15 @@ ${conclusionText}</pre>
 
             let convergeBadge;
             if (reachedCeiling) {
-                // 上限との差1点以内 = 真のベスト
-                convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ 最良解 — 再試行不要 (上限${ceilScore}点)</div>`;
+                // 上限との差1点以内 = 真のベスト（この条件で出せる最高の結果）
+                convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ この条件での最高スコア (${ceilScore}点) — 再試行不要</div>`;
             } else if (isTargetReached) {
                 // 目標達成（上限未到達でも十分）
-                convergeBadge = `<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🎯 目標達成 — 再試行不要 (上限${ceilScore}点まであと${gapFromCeil.toFixed(1)}点)</div>`;
+                convergeBadge = `<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🎯 目標達成 — 再試行不要 (最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点)</div>`;
             } else {
                 // 上限未到達 = 収束の有無にかかわらず改善余地あり
                 const reason = isConverged ? '同じ結果が繰り返されています（局所最適の可能性）' : '時間切れ';
-                convergeBadge = `<div style="display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🔄 上限まであと${gapFromCeil.toFixed(1)}点 — 再試行できます（${reason}）</div>`;
+                convergeBadge = `<div style="display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🔄 最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点 — 再試行できます（${reason}）</div>`;
             }
             const gradeTileHtml = `
             <div style="background:linear-gradient(135deg,${gradeData.color}18,${gradeData.color}08);border:2px solid ${gradeData.color};border-radius:12px;padding:16px;text-align:center;grid-column:1/-1;">
@@ -5651,7 +5820,7 @@ ${conclusionText}</pre>
             applyAnalysisVisibility();
         }
         function applyAnalysisVisibility() {
-            const { analysisSection, graphToggleButton, graphIconShow, graphIconHide, algorithmInsights } = dom;
+            const { analysisSection, graphToggleButton, graphIconShow, graphIconHide } = dom;
             const isVisible = appState.areAnalysisSectionsVisible;
 
             // ボタンアイコンの状態を更新
@@ -5660,16 +5829,10 @@ ${conclusionText}</pre>
             if (graphIconHide) graphIconHide.style.display = isVisible ? 'block' : 'none';
 
             if (isVisible) {
-                // ★重要：まず先に「hidden」クラスを外して表示状態にする
                 analysisSection.classList.remove('hidden');
-                algorithmInsights.classList.remove('hidden');
-
-                // ★重要：表示状態になったコンテナに対して、グラフ描画を実行する
                 renderAnalysisCharts();
             } else {
-                // 非表示にする場合はクラスを追加するだけ
                 analysisSection.classList.add('hidden');
-                algorithmInsights.classList.add('hidden');
             }
         }
 
@@ -6159,9 +6322,11 @@ ${conclusionText}</pre>
 
             // データ元の情報を表示
             if (dataSource) {
-                const label = dataSource === '新規生成'
-                    ? '新規生成'
-                    : `お気に入り: <span class="font-normal">${dataSource}</span>`;
+                const _isSA = dataSource && dataSource.includes('アニーリング');
+                const _isFav = dataSource && !_isSA && dataSource !== '新規生成';
+                const label = _isSA ? 'AI最適化'
+                    : _isFav ? `お気に入り: <span class="font-normal">${dataSource}</span>`
+                    : dataSource;
                 summaryParts.push(`<strong>データ元:</strong> <span class="text-blue-600 font-semibold">${label}</span>`);
             }
 
@@ -6181,8 +6346,29 @@ ${conclusionText}</pre>
                 const statsSnap = calculateSummaryStats(appState.matches, appState.members, appState.allPossiblePairs);
                 const gradeSnap = calcOverallGrade(statsSnap, appState.matches, appState.members, appState.allPossiblePairs);
                 const ceilInfo2 = calcConditionCeiling(appState.currentSurfaceCount, appState.currentTotalMemberCount, appState.matches.length);
-                const retryIcon = (ceilInfo2.totalBase ?? ceilInfo2.total) - gradeSnap.total <= 1.0 ? ' ✅' : ' 🔄'; const badgeStyle = `display:inline-block;background:${gradeSnap.color}22;color:${gradeSnap.color};border:1px solid ${gradeSnap.color}66;border-radius:12px;padding:1px 8px;font-weight:700;font-size:13px;margin-left:8px;`;
-                summaryParts.push(`<span style="${badgeStyle}">${gradeSnap.grade} ${gradeSnap.total}点 ${gradeSnap.stars}${retryIcon}</span>`);
+                const _ceilScore2 = ceilInfo2.totalBase ?? ceilInfo2.total;
+                const _reachedCeil2 = Math.max(0, _ceilScore2 - gradeSnap.total) <= 1.0;
+                // サマリーパネルと同様に上限到達時はSへ昇格
+                if (_reachedCeil2) {
+                    gradeSnap.grade = 'S';
+                    gradeSnap.stars = '★★★★★';
+                    gradeSnap.color = '#16a34a';
+                }
+                // ステータスバーも達成率ベースの相対グレードを使用（ダイアログと一致させる）
+                let _sb_grade = gradeSnap.grade, _sb_color = gradeSnap.color, _sb_stars = gradeSnap.stars;
+                if (_reachedCeil2) {
+                    _sb_grade = 'S'; _sb_color = '#16a34a'; _sb_stars = '★★★★★';
+                } else if (_ceilScore2 > 0) {
+                    const _sbPct = Math.round(gradeSnap.total / _ceilScore2 * 100);
+                    if (_sbPct >= 95) { _sb_grade = 'S'; _sb_color = '#16a34a'; _sb_stars = '★★★★★'; }
+                    else if (_sbPct >= 88) { _sb_grade = 'A'; _sb_color = '#2563eb'; _sb_stars = '★★★★☆'; }
+                    else if (_sbPct >= 78) { _sb_grade = 'B'; _sb_color = '#7c3aed'; _sb_stars = '★★★☆☆'; }
+                    else if (_sbPct >= 65) { _sb_grade = 'C'; _sb_color = '#d97706'; _sb_stars = '★★☆☆☆'; }
+                    else { _sb_grade = 'D'; _sb_color = '#dc2626'; _sb_stars = '★☆☆☆☆'; }
+                }
+                const retryIcon = _reachedCeil2 ? ' ✅' : ' 🔄';
+                const badgeStyle = `display:inline-block;background:${_sb_color}22;color:${_sb_color};border:1px solid ${_sb_color}66;border-radius:12px;padding:1px 8px;font-weight:700;font-size:13px;margin-left:8px;`;
+                summaryParts.push(`<span style="${badgeStyle}">${_sb_grade} ${gradeSnap.total}点 ${_sb_stars}${retryIcon}</span>`);
             }
             container.innerHTML = summaryParts.join('<span class="mx-2 text-gray-300">|</span>');
         }

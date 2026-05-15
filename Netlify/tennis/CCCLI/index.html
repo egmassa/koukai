@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>インタラクティブ・ダブルスダッシュボード</title>
+    <title>テニペアガチャ</title>
     <!--
         ダブルス組合せてみっか
         v7.0 : Undo/Redo・印刷・CSV/JSON対応・お気に入り機能（オリジナル）
@@ -554,7 +554,7 @@
 <body class="antialiased">
     <div class="container mx-auto p-4 md:p-6 max-w-6xl">
         <header class="mb-8 text-center">
-            <h1 class="text-3xl md:text-4xl font-bold">🎾 インタラクティブ・ダブルスダッシュボード 🏆</h1>
+            <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
         </header>
 
@@ -750,9 +750,6 @@
                                     disabled>
                                     ＋10試合追加
                                 </button>
-                                <button id="scoreInfoBtn"
-                                    class="score-info-btn button-secondary p-2 rounded-full flex items-center justify-center w-8 h-8"
-                                    title="スコア計算方法の詳細">?</button>
                                 <button id="debugLogBtn"
                                     class="button-secondary p-2 rounded-full flex items-center justify-center w-8 h-8 text-xs font-bold"
                                     title="デバッグログをコピー" style="background:#f3f4f6;border:1px solid #d1d5db;">🪲</button>
@@ -797,7 +794,9 @@
                 </details>
                 <section id="dropoutSettingsWrapper" class="mb-8 hidden">
                     <div class="card">
-                        <h2 class="text-2xl font-semibold mb-4">2. 途中離脱設定</h2>
+                        <h2 class="text-2xl font-semibold mb-4">2. 途中離脱設定
+                            <button id="dropoutHelpBtn" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;font-size:15px;cursor:pointer;vertical-align:middle;margin-left:8px;" title="使い方">ℹ️</button>
+                        </h2>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div>
                                 <label for="dropoutPlayerSelect"
@@ -829,7 +828,9 @@
 
                 <section id="resultsDashboard" class="mb-8 hidden">
                     <div id="matchScheduleCard" class="card mb-6">
-                        <h3 class="text-xl font-semibold">試合スケジュール</h3>
+                        <h3 class="text-xl font-semibold">試合スケジュール
+                            <button id="scheduleHelpBtn" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;font-size:15px;cursor:pointer;vertical-align:middle;margin-left:8px;" title="使い方">ℹ️</button>
+                        </h3>
                         <div id="generationSummaryContainer"
                             class="text-xs text-gray-600 bg-gray-50 p-2 rounded-md my-3 border"></div>
                         <button id="printScheduleBtn"
@@ -927,128 +928,13 @@
                     </div>
                 </section>
 
-                <section id="algorithmInsights" class="hidden">
-                    <div class="card">
-                        <h2 class="text-2xl font-semibold mb-4">3. 生成ロジックと機能の概要</h2>
-                        <h3 class="text-xl font-semibold mb-3 mt-6">スコアリングの優先順位</h3>
-                        <p class="text-gray-700 mb-6">
-                            試合を一つ追加するごとに、内部で多数（数百回）のランダムな組み合わせ候補を作成し、その中から最もスコアが高くなる最適な候補を一つ選択しています。スコアは以下のルールに基づいて計算されます。
-                        </p>
-                        <ol class="list-decimal list-inside space-y-2 text-gray-700">
-                            <li>
-                                <strong>対戦カードの重複を避ける（最優先・ペナルティ大）</strong><br>
-                                <span class="text-sm pl-4">過去に一度組まれた4人での対戦（例：A&B vs
-                                    C&D）は、可能な限り避けます。重複するたびに、スコアに大きなマイナス点が加算されます。</span>
-                            </li>
-                            <li>
-                                <strong>連続プレイ上限の遵守（必須条件）</strong><br>
-                                <span
-                                    class="text-sm pl-4">各メンバーの連続プレイ回数が、設定された「最大連続プレイ数」を超えないようにします。このルールに違反した組み合わせ候補は、スコアが-∞（マイナス無限大）となり、決して採用されません。</span>
-                            </li>
-                            <li>
-                                <strong>直前のペアの連続を避ける（ペナルティ中）</strong><br>
-                                <span class="text-sm pl-4">あるペア（例：A&B）が試合に出た場合、その次の試合で再び同じペアが組まれることを避けます。</span>
-                            </li>
-
-                            <li>
-                                <strong>特定プレイヤー vs 特定ペアの対戦重複を避ける（ペナルティ中）</strong><br>
-                                <span
-                                    class="text-sm pl-4">「Aさん」が「CさんとDさんのペア」と何度も対戦する、といった状況を避けるためのルールです。同じプレイヤーが同じ相手ペアと対戦する回数が増えるほど、大きなマイナス点が加算されます。</span>
-                            </li>
-                            <li>
-                                <strong>総プレイ回数の均等化（ペナルティ中）</strong><br>
-                                <span
-                                    class="text-sm pl-4">全メンバーの総プレイ回数が、できるだけ均等になるように調整します。メンバー間のプレイ回数の差が広がるほど、スコアが低くなります。</span>
-                            </li>
-                            <li>
-                                <strong>特別ルールの遵守（ボーナス/ペナルティ）</strong><br>
-                                <span
-                                    class="text-sm pl-4">「固定ペア」や「男女ミックス」の設定に合致する試合にはボーナス点が、合致しない試合にはペナルティが加算されます。これにより、希望の試合形式が優先的に組まれます。</span>
-                            </li>
-                            <li>
-                                <strong>休憩明けメンバーの優先（ボーナス点）</strong><br>
-                                <span class="text-sm pl-4">直前の試合で休憩していたメンバーを、次の試合に優先的に出場させます。これにより、長時間の連続休憩を防ぎます。</span>
-                            </li>
-                            <li>
-                                <strong>ペアの登場回数の均等化（ペナルティ小）</strong><br>
-                                <span class="text-sm pl-4">特定のペアだけが頻繁に組まれることがないよう、全ペアの登場回数も均等になるように調整します。※
-                                    ペア結成の公平性の評価に影響します。</span>
-                            </li>
-                        </ol>
-
-                        <h3 class="text-xl font-semibold mb-3 mt-8">特別ルールの活用法</h3>
-                        <p class="text-gray-700 mb-4">
-                            「特別ルール」セクションの設定を組み合わせることで、より柔軟な組み合わせ生成が可能になります。
-                        </p>
-                        <ul class="list-disc list-inside space-y-3 text-gray-700">
-                            <li>
-                                <strong>例1：「Aさん」と「Bさん」を固定ペアにしたい</strong><br>
-                                <span
-                                    class="text-sm pl-4">「特別ルール」で「固定ペア」を選択し、「固定ペア設定」のドロップダウンから「Aさん」と「Bさん」を選びます。これにより、アルゴリズムはこの2人がペアになる組み合わせを優先的に探します。</span>
-                            </li>
-                            <li>
-                                <strong>例2：男女ミックスで公平性を保ちたい (男性4人、女性2人の場合など)</strong><br>
-                                <span
-                                    class="text-sm pl-4">「特別ルール」で「男女ミックス」を選択し、「女子メンバーを選択」の欄で女子メンバー全員のチェックボックスをオンにします。これにより、アルゴリズムは４人が２面同時に出場するとき、両ペアとも男女混合（いわゆる「ミックスペア
-                                    vs ミックスペア」）になる組み合わせを最優先で探します。 *
-                                    男女比が偏っていてミックスペアが組めないラウンドでは、男子同士／女子同士のペアが混ざることがあります。</span>
-                            </li>
-                        </ul>
-                        <h3 class="text-xl font-semibold mb-3 mt-8">試合の途中離脱と再生成</h3>
-                        <p class="text-gray-700 mb-4">
-                            試合の途中で参加できなくなったメンバーが出た場合、手動で一試合ずつ編集する代わりに、「途中離脱設定」機能を使うことで、残りのメンバーで公平な試合を簡単に再生成できます。
-                        </p>
-                        <ul class="list-disc list-inside space-y-3 text-gray-700">
-                            <li>
-                                <strong>設定方法:</strong><br>
-                                <span
-                                    class="text-sm pl-4">試合結果が表示された後、「途中離脱/参加設定」セクションから離脱するメンバーと、参加できなくなる試合番号（例：5試合目から不参加なら「5」）を入力し、「離脱を適用して再生成」ボタンを押します。</span>
-                            </li>
-                            <li>
-                                <strong>動作:</strong><br>
-                                <span
-                                    class="text-sm pl-4">指定された試合番号以降のすべての組み合わせが、離脱したメンバーを除いて自動的に作り直されます。その際、残ったメンバーのプレイ回数がなるべく均等になるように再計算されます。</span>
-                            </li>
-                        </ul>
-                        </ul>
-
-                        <h3 class="text-xl font-semibold mb-3 mt-8">用語集</h3>
-                        <div class="space-y-4 text-gray-700 text-sm border-t pt-6 mt-6">
-                            <div>
-                                <strong class="font-semibold text-gray-800">ペア (Pair)</strong>
-                                <p class="pl-4">
-                                    ダブルスの試合で一緒に組む2人のプレイヤーのこと。（例: Aさん & Bさん）
-                                </p>
-                            </div>
-                            <div>
-                                <strong class="font-semibold text-gray-800">対戦グループ (4人組)</strong>
-                                <p class="pl-4">
-                                    1つのコートで試合をする4人のプレイヤーの集合のこと。ペアの組み方（誰と誰が組むか）は問いません。<br>
-                                    <span class="text-xs text-gray-500">（例: コートにいるのがA,B,C,Dの4人であれば、`A&B vs
-                                        C&D`でも`A&C vs
-                                        B&D`でも、同じ**{A,B,C,D}**という1つの対戦グループです）</span><br>
-                                    主に「対戦グループの多様性/公平性」で使われる指標です。
-                                </p>
-                            </div>
-                            <div>
-                                <strong class="font-semibold text-gray-800">対戦カード (Match Card / Matchup)</strong>
-                                <p class="pl-4">
-                                    具体的な「ペア vs ペア」の組み合わせのこと。同じ4人でも、ペアの組み方が異なれば、別の対戦カードとして扱われます。<br>
-                                    <span class="text-xs text-gray-500">（例: `A&B vs C&D`と`A&C vs
-                                        B&D`は、**異なる2つの対戦カード**としてカウントされます）</span><br>
-                                    主に「対戦カードの多様性」で使われる指標です。
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
     </div>
     </section>
     </div>
     </main>
 
     <footer class="mt-12 text-center text-sm text-gray-500">
-        <p>&copy; <span id="currentYear"></span> インタラクティブ・ダブルスダッシュボード. All rights reserved.</p>
+        <p>&copy; <span id="currentYear"></span> テニペアガチャ. All rights reserved.</p>
         <button id="theme-toggle" title="テーマを切り替え" class="p-2 rounded-full hover:bg-gray-200">
             <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
