@@ -6149,7 +6149,6 @@ ${conclusionText}</pre>
             appState.editingMatch = { matchIndex, courtIndex };
             const match = appState.matches[matchIndex];
             const courtToEdit = match.courts[courtIndex];
-            const playersOnThisCourt = [...courtToEdit.players];
 
             // ▼▼▼ ここからが新しいロジック ▼▼▼
             // 同じ試合の、編集対象「以外」のコートでプレイしている全プレイヤーを特定する
@@ -6174,9 +6173,12 @@ ${conclusionText}</pre>
                 </div>`;
             dom.editMatchForm.innerHTML = formContent;
 
-            playersOnThisCourt.forEach((playerIndex, i) => {
-                document.getElementById(`edit-player-${i}`).value = playerIndex;
-            });
+            const _t1 = courtToEdit.team1 || [];
+            const _t2 = courtToEdit.team2 || [];
+            document.getElementById('edit-player-0').value = _t1[0];
+            document.getElementById('edit-player-1').value = _t1[1];
+            document.getElementById('edit-player-2').value = _t2[0];
+            document.getElementById('edit-player-3').value = _t2[1];
 
             // プルダウンの選択肢を無効化するヘルパー関数を修正
             function refreshEditSelect() {
@@ -6191,9 +6193,10 @@ ${conclusionText}</pre>
                         // ▼▼▼ 無効化の条件を修正 ▼▼▼
                         o.disabled = isLocked || isChosenInOtherModalDropdown;
 
-                        // 無効化された理由を分かりやすく表示
                         if (isLocked) {
-                            o.textContent = `${appState.members[o.value]} (他コートでプレイ中)`;
+                            o.textContent = `✗ ${appState.members[o.value]} (他コートでプレイ中)`;
+                        } else if (isChosenInOtherModalDropdown) {
+                            o.textContent = `✗ ${appState.members[o.value]} (他の枠で選択中)`;
                         } else {
                             o.textContent = appState.members[o.value];
                         }
@@ -6237,18 +6240,7 @@ ${conclusionText}</pre>
             };
             matchToTest.playersThisRound = matchToTest.courts.flatMap(c => c.players);
 
-            // --- 3. 編集した試合自体がルール違反でないか、厳密にチェック ---
-            // 連続プレイ回数のチェック
-            if (isConsecutivePlayLimitViolated(matchToTest, tempMatches.slice(0, matchIndex), appState.maxConsecutiveLimit)) {
-                showDialog('ルール違反', 'この変更により、最大連続プレイ回数を超えてしまうメンバーがいます。');
-                return; // 問題があれば、メッセージを表示して処理を中断
-            }
-
-            // プレイ回数の差のチェック
-            if (isPlayCountRuleViolated(tempMatches.slice(0, matchIndex + 1), -1)) {
-                showDialog('ルール違反', 'この変更により、メンバー間のプレイ回数の差が開きすぎてしまいます。');
-                return; // 問題があれば、メッセージを表示して処理を中断
-            }
+            // 手動編集はルールチェックを行わない（遅刻・任意交代など意図した操作を妨げないため）
 
             // --- 4. ルール上問題なければ、後続の試合の再生成を試みる ---
             const originalMatchesBackup = JSON.parse(JSON.stringify(appState.matches)); // 失敗時に復元するためのバックアップ
