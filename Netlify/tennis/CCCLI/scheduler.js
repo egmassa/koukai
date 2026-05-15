@@ -1093,7 +1093,8 @@
 
             // 各要素が存在するかを確認してから、表示を切り替えるように修正
             if (dom.resultsDashboard) dom.resultsDashboard.classList.toggle('hidden', !hasMatches);
-            if (dom.analysisSection) dom.analysisSection.classList.toggle('hidden', !hasMatches);
+            // 分析パネルはareAnalysisSectionsVisibleフラグに従う（hasMatchesだけで開かない）
+            if (dom.analysisSection) dom.analysisSection.classList.toggle('hidden', !hasMatches || !appState.areAnalysisSectionsVisible);
             if (dom.dropoutSettingsWrapper) dom.dropoutSettingsWrapper.classList.toggle('hidden', !hasMatches);
             // if (dom.configurationHub) dom.configurationHub.open = !hasMatches; // ← この行をコメントアウトして無効化
 
@@ -2288,8 +2289,12 @@
                 if (_relGrade === 'S' || _reachedCeilDialog) {
                     dom.dialogConfirmButton.addEventListener('click', () => {
                         setTimeout(() => {
-                            document.getElementById('resultsDashboard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }, 150);
+                            const _el = document.getElementById('resultsDashboard');
+                            if (_el) {
+                                const _top = _el.getBoundingClientRect().top + window.pageYOffset - 8;
+                                window.scrollTo({ top: _top, behavior: 'smooth' });
+                            }
+                        }, 350);
                     }, { once: true });
                 }
             } else {
