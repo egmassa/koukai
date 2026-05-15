@@ -878,6 +878,7 @@
                     // 古いデータ形式との互換性を保つため、generationSettingsがなければ空のオブジェクトとして初期化する
                     appState.generationSettings = appState.generationSettings || {};
                 }
+                appState.areAnalysisSectionsVisible = false; // 常に閉じた状態で起動
                 try {
                     const _pwSaved = localStorage.getItem(LS_KEY_PW);
                     appState.pw = _pwSaved ? { ...PENALTY_DEFAULTS, ...JSON.parse(_pwSaved) } : { ...PENALTY_DEFAULTS };
@@ -2248,11 +2249,13 @@
                     _relGrade = 'S'; _relColor = '#16a34a'; _relStars = '★★★★★';
                 }
                 let _verdict, _action, _verdictColor;
-                if (reachedTarget || _reachedCeilDialog) {
-                    _verdict = '✅ この条件での最高スコア — 再試行不要';
+                if (_relGrade === 'S') {
+                    _verdict = _reachedCeilDialog
+                        ? '✅ この条件での最高スコア — 再試行不要'
+                        : '✅ S評価達成 — 再試行不要';
                     _action = 'このままご利用いただけます。';
                     _verdictColor = '#16a34a';
-                } else if (_pctInt >= 88) {
+                } else if (_pctInt >= 78) {
                     _verdict = '🔄 もう1〜2回試すとさらに良くなる可能性があります';
                     _action = '再度実行して比較してみてください。';
                     _verdictColor = '#2563eb';
@@ -2282,6 +2285,13 @@
   <p class="mt-2 text-sm text-gray-600 text-center">${_action}</p>
 </div>`;
                 showDialog('探索完了', null, null, _dialogHtml);
+                if (_relGrade === 'S' || _reachedCeilDialog) {
+                    dom.dialogConfirmButton.addEventListener('click', () => {
+                        setTimeout(() => {
+                            document.getElementById('resultsDashboard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 150);
+                    }, { once: true });
+                }
             } else {
                 showDialog('探索失敗', '有効な組み合わせが見つかりませんでした。条件を変更してください。');
             }
@@ -3684,6 +3694,7 @@ ${conclusionText}</pre>
                 checkbox.id = `match-${matchIdx}`;
                 checkbox.dataset.matchIndex = matchIdx;
                 checkbox.checked = appState.completedMatches.has(matchIdx);
+                if (checkbox.checked) { item.style.opacity = '0.38'; item.style.transition = 'opacity 0.3s'; }
 
                 titleLabel.htmlFor = `match-${matchIdx}`;
                 titleLabel.textContent = `第${matchIdx + 1}試合`;
@@ -3715,8 +3726,14 @@ ${conclusionText}</pre>
                 // 8. チェックボックスのクリックイベントを設定する
                 checkbox.addEventListener('change', e => {
                     const idx = +e.target.dataset.matchIndex;
-                    if (e.target.checked) appState.completedMatches.add(idx);
-                    else appState.completedMatches.delete(idx);
+                    item.style.transition = 'opacity 0.3s';
+                    if (e.target.checked) {
+                        appState.completedMatches.add(idx);
+                        item.style.opacity = '0.38';
+                    } else {
+                        appState.completedMatches.delete(idx);
+                        item.style.opacity = '1';
+                    }
                     updateProgressIndicator();
                     saveState();
                 });

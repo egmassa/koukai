@@ -614,6 +614,14 @@
                             </button>
                         </div>
                         <input type="file" id="json-importer" class="hidden" accept="application/json">
+                        <div class="mt-4 pt-4 border-t border-gray-100 flex gap-2">
+                            <button id="debugLogBtn"
+                                class="button-secondary flex-1 py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1"
+                                style="background:#f3f4f6;border:1px solid #d1d5db;">🪲 デバッグログ</button>
+                            <button id="specBtn"
+                                class="button-secondary flex-1 py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1"
+                                style="background:#f3f4f6;border:1px solid #d1d5db;">📋 制約仕様書</button>
+                        </div>
                     </div>
                 </details>
                 <details id="configurationHub" class="mb-8 group" open>
@@ -750,12 +758,6 @@
                                     disabled>
                                     ＋10試合追加
                                 </button>
-                                <button id="debugLogBtn"
-                                    class="button-secondary p-2 rounded-full flex items-center justify-center w-8 h-8 text-xs font-bold"
-                                    title="デバッグログをコピー" style="background:#f3f4f6;border:1px solid #d1d5db;">🪲</button>
-                                <button id="specBtn"
-                                    class="button-secondary p-2 rounded-full flex items-center justify-center w-8 h-8 text-xs font-bold"
-                                    title="制約仕様書を表示" style="background:#f3f4f6;border:1px solid #d1d5db;">📋</button>
                             </div>
                             <button id="resetProgressButton"
                                 class="button-secondary font-semibold py-2 px-4 rounded-md shadow-sm">進行状況リセット</button>
@@ -767,12 +769,12 @@
                                     <path stroke-linecap="round" stroke-linejoin="round"
                                         d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
                                 </svg>
-                                元に戻す
+                                組合せを戻す
                             </button>
                             <button id="redoButton"
                                 class="button-secondary font-semibold py-2 px-4 rounded-md shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled>
-                                やり直す
+                                組合せをやり直す
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5 inline-block -mr-1 ml-1">
                                     <path stroke-linecap="round" stroke-linejoin="round"
