@@ -234,7 +234,6 @@
             applyTheme(newTheme);
         }
         // --- Initialization ---
-        // ▼▼▼ この関数を置き換えてください ▼▼▼
         function initializeApp() {
             const savedTheme = localStorage.getItem('theme') || 'light';
             applyTheme(savedTheme);
@@ -254,18 +253,8 @@
             updateUndoRedoButtons();
             updateTargetScoreUI(); // 条件別上限スコアを初期表示
         }
-        // ▼▼▼ここから、initializeApp関数の下に追加▼▼▼
-
         // --- Undo/Redo History Management ---
 
-        /**
-         * 現在のアプリ状態を履歴スタックに保存する
-         */
-        // ▼▼▼ この関数をまるごと置き換えてください ▼▼▼
-
-        /**
-         * 現在のアプリ状態を履歴スタックに保存する
-         */
         function pushStateToHistory() {
             // 現在の履歴ポインタ以降の「やり直し」履歴を削除
             appState.history.splice(appState.historyIndex + 1);
@@ -309,12 +298,6 @@
 
             const stateToLoad = JSON.parse(JSON.stringify(appState.history[index]));
 
-            // 正常な配列かを確認
-            const completedArr = Array.isArray(stateToLoad.completedMatches)
-                ? stateToLoad.completedMatches
-                : [];
-            // 現在のappStateを復元した状態で上書き
-            // completedMatches が本当に配列かどうかを厳密にチェック
             const arr = Array.isArray(stateToLoad.completedMatches)
                 ? stateToLoad.completedMatches
                 : [];
@@ -359,7 +342,6 @@
 
         // --- End of Undo/Redo ---
 
-        // ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
         function setupEventListeners() {
             dom.surfaceCountSelect.addEventListener('change', handleSurfaceOrMemberCountChange);
             dom.totalMemberCountSelect.addEventListener('change', handleSurfaceOrMemberCountChange);
@@ -528,12 +510,6 @@
                     const matchIndex = parseInt(btn.dataset.matchIndex, 10);
                     const courtIndex = parseInt(btn.dataset.courtIndex, 10);
                     openEditMatchModal(matchIndex, courtIndex);
-                }
-            });
-            dom.favoritesManagerDialog.addEventListener('click', e => {
-                const actionTarget = e.target.closest('.edit-fav-btn, .save-fav-btn, .cancel-edit-fav-btn, .delete-fav-btn');
-                if (actionTarget) {
-                    handleFavoritesManagerActions(e);
                 }
             });
             const managerDialog = dom.favoritesManagerDialog;
@@ -886,7 +862,6 @@
             } catch (e) { console.error("Failed to load state:", e); localStorage.removeItem(LS_KEY); }
         }
 
-        // ▼▼▼ 以下の関数を、既存のものとまるごと置き換えてください ▼▼▼
         function updateAllUI() {
             appState.members = Array.from({ length: appState.currentTotalMemberCount }, (_, i) => appState.members[i] || `${i + 1}`);
             updateMemberCountOptions();
@@ -905,14 +880,12 @@
                 dom.maxConsecutiveSelect.value = savedValue;
             }
 
-            updateGenerateButtonsState();
             updateSaveFavoriteButtonState();
             updateExportCsvButtonState();
             renderFavoritesList();
             applyDisplayLogicBasedOnState();
         }
 
-        // ▼▼▼ 以下の関数を、既存のものとまるごと置き換えてください ▼▼▼
         function handleSurfaceOrMemberCountChange() {
             const prevSurface = appState.currentSurfaceCount;
             appState.currentSurfaceCount = +dom.surfaceCountSelect.value;
@@ -1027,11 +1000,6 @@
             }
         }
 
-        // ▼▼▼ この関数を、以下のコードにまるごと置き換えてください ▼▼▼
-
-        // ▼▼▼ この関数を、以下のコードにまるごと置き換えてください ▼▼▼
-
-        // ▼▼▼ 以下の関数を、既存のものとまるごと置き換えてください ▼▼▼
         function updateMaxConsecutiveOptions() {
             const sel = dom.maxConsecutiveSelect;
             const P = appState.currentSurfaceCount * 4;
@@ -1083,9 +1051,6 @@
                 }
             }
             updateMaxConsecWarning();
-        }
-
-        function updateGenerateButtonsState() {
         }
 
         function applyDisplayLogicBasedOnState() {
@@ -1171,12 +1136,6 @@
 
 
 
-        /**
-         * 指定回数だけ試合生成を繰り返し、ベストな結果を探すメイン関数
-// ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
-/**
- * 指定回数だけ試合生成を繰り返し、ベストな結果を探すメイン関数
- */
 
         // ═══════════════════════════════════════════════════════════════
         // ⚡ Simulated Annealing による高速探索
@@ -1392,21 +1351,20 @@
                 for (const m of matches) {
                     for (const c of m.courts) {
                         totalCourts++;
-                        if (isCandidateCorrectType(c)) mixCourts++;
+                        if (isCandidateCorrectType(c, _rtRest, _grpEval)) mixCourts++;
                     }
                 }
                 mixBonus = totalCourts > 0 ? (mixCourts / totalCourts) * 150 : 0;
             } else if (_rtRest === 'fixedPair') {
                 // fixedPair best-effort: P1が2人揃っているコートだけを分母にする
                 // 「片方が休憩」のコートを分母に入れると達成可能上限が40%程度になりSAの勾配が弱くなる
-                const _grpFPmix = settings.groups || appState.groups || {};
                 let okCourts = 0, relevantCourts = 0;
                 for (const m of matches) {
                     for (const c of m.courts) {
-                        const _p1On = c.players.filter(p => (_grpFPmix[p] || 'default') === 'P1').length;
+                        const _p1On = c.players.filter(p => (_grpEval[p] || 'default') === 'P1').length;
                         if (_p1On >= 2) {
                             relevantCourts++;
-                            if (isCandidateCorrectType(c)) okCourts++;
+                            if (isCandidateCorrectType(c, _rtRest, _grpEval)) okCourts++;
                         }
                     }
                 }
@@ -1416,7 +1374,7 @@
                 // strictモードまたは他ルール: ルール違反は即失格
                 for (const m of matches) {
                     for (const c of m.courts) {
-                        if (!isCandidateCorrectType(c)) return -100000;
+                        if (!isCandidateCorrectType(c, _rtRest, _grpEval)) return -100000;
                     }
                 }
             }
@@ -1699,7 +1657,7 @@
             const memberCount = appState.currentTotalMemberCount;
 
             // グループ情報
-            const groupInfo = members.map((m, i) => `  [${i}] ${m.name || ('P' + (i + 1))}: ${groups[i] || 'default'}`).join('\n');
+            const groupInfo = members.map((m, i) => `  [${i}] ${m || ('P' + (i + 1))}: ${groups[i] || 'default'}`).join('\n');
 
             // genderMix用の分類
             const males = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'M');
@@ -1818,7 +1776,7 @@
                 playRestStats = members.map((m, i) => {
                     const playNG = maxPlay[i] > playLimit ? ' ⚠️NG' : '';
                     const restNG = maxRest[i] > restLimit ? ' ⚠️NG' : '';
-                    return `  [${i}] ${m.name || 'P' + (i + 1)}: 最大連続プレイ=${maxPlay[i]}${playNG}(上限${playLimit}) 最大連続休憩=${maxRest[i]}${restNG}(上限${restLimit})`;
+                    return `  [${i}] ${m || 'P' + (i + 1)}: 最大連続プレイ=${maxPlay[i]}${playNG}(上限${playLimit}) 最大連続休憩=${maxRest[i]}${restNG}(上限${restLimit})`;
                 }).join('\n');
                 if (maxRestAll - minRestAll > 1) {
                     playRestStats += `\n  ⚠️ 連続休憩の偏り: 最大${maxRestAll} - 最小${minRestAll} = 差${maxRestAll - minRestAll}（仕様上は差1以内推奨）`;
@@ -1944,16 +1902,11 @@
                 ruleType: document.querySelector('input[name="ruleType"]:checked').value,
                 members: [...appState.members],
             };
-            // 第1試合に出場すべきプレイヤー（表示名順の先頭4人）を事前計算して settings に保持
+            // 第1試合に出場すべきプレイヤー（登録順の先頭4人）を事前計算して settings に保持
             {
-                const _ms = originalSettings.members;
                 const _sf = originalSettings.currentSurfaceCount;
                 const _n = originalSettings.currentTotalMemberCount;
-                const _sorted = Array.from({ length: _n }, (_, i) => i).sort((a, b) => {
-                    const na = parseInt(_ms[a], 10), nb = parseInt(_ms[b], 10);
-                    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-                    return String(_ms[a]).localeCompare(String(_ms[b]));
-                });
+                const _sorted = Array.from({ length: _n }, (_, i) => i);
                 originalSettings.firstMatchPlayers = new Set(_sorted.slice(0, _sf * 4));
                 originalSettings.firstMatchRest = _sorted.slice(_sf * 4);
                 originalSettings.firstMatchSortedTop4 = _sorted.slice(0, _sf * 4);
@@ -1970,7 +1923,7 @@
                 for (const m of solution) {
                     for (const c of m.courts) {
                         totalCourts++;
-                        if (isCandidateCorrectType(c)) mixCourts++;
+                        if (isCandidateCorrectType(c, settings.ruleType, settings.groups)) mixCourts++;
                     }
                 }
                 return totalCourts > 0 ? (mixCourts / totalCourts) * 30 : 0;
@@ -2257,9 +2210,15 @@
                     _action = 'このままご利用いただけます。';
                     _verdictColor = '#16a34a';
                 } else if (_pctInt >= 78) {
-                    _verdict = '🔄 もう1〜2回試すとさらに良くなる可能性があります';
-                    _action = '再度実行して比較してみてください。';
-                    _verdictColor = '#2563eb';
+                    if (converged && _pctInt >= 88) {
+                        _verdict = '✅ この条件での上限付近です — 再試行しても大きな改善は見込めません';
+                        _action = '試合数を増やすか、人数を増やすとSランクが出やすくなります。';
+                        _verdictColor = '#059669';
+                    } else {
+                        _verdict = '🔄 もう1〜2回試すとさらに良くなる可能性があります';
+                        _action = '再度実行して比較してみてください。';
+                        _verdictColor = '#2563eb';
+                    }
                 } else {
                     _verdict = '⚠️ まだ改善の余地があります。再試行を推奨します';
                     _action = '設定の連続制限や試合数を緩和することで大きく改善する可能性があります。';
@@ -2727,7 +2686,6 @@ ${conclusionText}</pre>
 
 
 
-        // ▼▼▼ この関数を calculateMetaScore 関数の近くに追加してください ▼▼▼
 
         /**
          * 配列の標準偏差を計算する関数
@@ -3070,7 +3028,6 @@ ${conclusionText}</pre>
             return metaScore;
         }
 
-        // ▼▼▼ 既存の generateMatchesInBackground 関数を、以下のコードにまるごと置き換えてください ▼▼▼
         async function generateMatchesInBackground(targetCount, settings) {
             // 処理開始時にグローバルなappState.matchesをクリーンな状態にする
             appState.matches = [];
@@ -3354,10 +3311,11 @@ ${conclusionText}</pre>
             return { courts, restingPlayers, playersThisRound };
         }
 
-        function isCandidateCorrectType(court) {
-            const ruleType = document.querySelector('input[name="ruleType"]:checked').value;
+        function isCandidateCorrectType(court, ruleType, groups) {
+            if (ruleType === undefined) ruleType = document.querySelector('input[name="ruleType"]:checked').value;
+            if (groups === undefined) groups = appState.groups;
             if (ruleType === 'none') return true;
-            const getGroup = (index) => appState.groups[index] || 'default';
+            const getGroup = (index) => groups[index] || 'default';
             if (ruleType === 'fixedPair') {
                 const team1IsFixed = getGroup(court.team1[0]) === 'P1' && getGroup(court.team1[1])
                     === 'P1';
@@ -4034,7 +3992,6 @@ ${conclusionText}</pre>
             return counts;
         }
 
-        // ▼▼▼ この関数をまるごと追加してください ▼▼▼
         function calculateMaxConsecutiveRestsPerMember(matches, totalMembers) {
             const playerMaxStreaks = {};
             for (let pIdx = 0; pIdx < totalMembers; pIdx++) {
@@ -4233,7 +4190,6 @@ ${conclusionText}</pre>
 
 
 
-        // ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
         function renderSummaryStats() {
             dom.summaryStatsGrid.innerHTML = '';
             if (appState.matches.length === 0) return;
@@ -4778,8 +4734,6 @@ ${conclusionText}</pre>
             return counts;
         }
 
-        // ▼▼▼ 以下の関数をまるごと置き換えてください ▼▼▼
-
         function renderPairVsPairHeatmap() {
             const container = dom.pairVsPairHeatmapContainer;
             container.innerHTML = ''; // まず中身をクリア
@@ -5081,7 +5035,6 @@ ${conclusionText}</pre>
 
 
 
-        // ▼▼▼ この関数をまるごと置き換えてください ▼▼▼
         function exportDataToCsv(favoriteData) {
             if (!favoriteData || !favoriteData.matches || favoriteData.matches.length === 0) {
                 showDialog('エラー', 'エクスポート可能な試合データがありません。');
@@ -5485,7 +5438,6 @@ ${conclusionText}</pre>
         }
 
 
-        // ▼▼▼ この関数をまるごと置き換えてください ▼▼▼
         function handleExportJson() {
             try {
                 const stateToSave = {
@@ -5656,8 +5608,6 @@ ${conclusionText}</pre>
             return rows.join('\r\n');
         }
 
-        // ▼▼▼ この関数を置き換えてください ▼▼▼
-
         function formatMemberDetailForCSV(favorite) {
             const { members, matches } = favorite;
             if (members.length === 0) return "";
@@ -5753,7 +5703,6 @@ ${conclusionText}</pre>
             return rows.join('\r\n');
         }
 
-        // ▼▼▼ 既存の downloadCSV 関数を、この triggerDownload 関数に置き換えてください ▼▼▼
         function triggerDownload(blob, fileName) {
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
@@ -5765,8 +5714,6 @@ ${conclusionText}</pre>
             // メモリリークを避けるためにオブジェクトURLを解放します
             setTimeout(() => URL.revokeObjectURL(url), 100);
         }
-
-        // ▼▼▼ この関数を、以下のコードにまるごと置き換えてください ▼▼▼
 
         function confirmAndReset(type) {
             showDialog('確認',
@@ -5834,7 +5781,6 @@ ${conclusionText}</pre>
                     'yes');
             }, 4000);
         }
-        // ▼▼▼ 以下の関数をまるごと追加してください ▼▼▼
 
         function toggleAnalysisVisibility() {
             appState.areAnalysisSectionsVisible = !appState.areAnalysisSectionsVisible;
@@ -5963,7 +5909,6 @@ ${conclusionText}</pre>
             appState.dialogCallback = null;
         }
 
-        // ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
         function updateSpecialRulesUI() {
             const { specialRulesWrapper, fixedPairPlayer1, fixedPairPlayer2, femalePlayersContainer } = dom;
             if (appState.currentTotalMemberCount > 0) {
@@ -6093,7 +6038,6 @@ ${conclusionText}</pre>
                     `1〜${appState.matches.length}の範囲で選択できます。`;
         }
 
-        // ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
         async function handleApplyExclusion() {
             // 入力値を取得
             const playerIndex = parseInt(dom.dropoutPlayerSelect.value, 10);
@@ -6212,7 +6156,6 @@ ${conclusionText}</pre>
             dom.editMatchModal.classList.remove('hidden');
         }
 
-        // ▼▼▼ この関数を、下記のコードでまるごと置き換えてください ▼▼▼
         async function saveMatchEdit() {
             const { matchIndex, courtIndex } = appState.editingMatch;
 
@@ -6321,8 +6264,6 @@ ${conclusionText}</pre>
                     }
                 });
         }
-
-        // ▼▼▼ この関数を、以下のコードにまるごと置き換えてください ▼▼▼
 
         function renderGenerationSummary() {
             const { currentSurfaceCount, currentTotalMemberCount, members, exclusions, dataSource } = appState;

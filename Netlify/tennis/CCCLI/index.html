@@ -41,46 +41,32 @@
         }
 
         body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
             background-color: var(--color-bg);
             color: var(--color-text);
-            /* ... 他のスタイル ... */
         }
 
         .card {
             background-color: var(--color-card-bg);
-            border-color: var(--color-card-border);
-            /* ... 他のスタイル ... */
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--color-card-border);
         }
 
         h1,
         h2,
         h3 {
             color: var(--color-text);
-            /* #2c3e50 から変更 */
         }
 
         .heatmap-table th,
         .play-pattern-table th {
             background-color: var(--color-subtle-bg);
-            /* ... 他のスタイル ... */
         }
 
         .card-view .card-item-row-label {
             color: var(--color-subtle-text);
-        }
-
-        body {
-            font-family: 'Inter', 'Noto Sans JP', sans-serif;
-            background-color: #f8f7f4;
-            color: #333333;
-        }
-
-        .card {
-            background-color: #ffffff;
-            border-radius: 0.75rem;
-            padding: 1.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border: 1px solid #E0E0E0;
         }
 
         .button-primary {
@@ -451,11 +437,12 @@
             }
         }
 
-        button,
-        input,
-        select,
-        textarea {
-            @apply focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:outline-none;
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #3b82f6;
         }
 
         /* ▼▼▼ パターン識別のためのCSSを追加 ▼▼▼ */
