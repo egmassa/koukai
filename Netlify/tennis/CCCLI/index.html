@@ -13,6 +13,12 @@
           - UIで「アニーリング(高速)」「ランダム(従来)」を切替可能
           - 4種類の近傍操作（プレイヤー交換・ペア組替・休憩交換・順序入替）
           - 早期打ち切り・複数リスタート対応
+        v7.2 : バグ修正 (2026-07-08)
+          - isCandidateCorrectType: SA実行中のDOM/appState直読みを修正
+          - 離脱再生成で離脱者が対象試合に混入するバグを修正
+          - 第1試合の選手選択を表示名順→登録順に修正
+          - 試合0件時の最大連続推奨値が離脱残留データで狂う問題を修正
+          - CSS: body/.card二重定義・@apply・badge二重定義を整理
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -171,13 +177,14 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 0.5rem 0.75rem;
+            padding: 0.4rem 0.65rem;
             height: 2.0rem;
             font-weight: 600;
             font-size: 0.875rem;
             color: #fff;
             border-radius: .5rem;
             box-shadow: 0 1px 2px rgba(0, 0, 0, .1);
+            border: 2px solid transparent;
         }
 
 
@@ -262,12 +269,6 @@
         }
 
         /* ピンク */
-
-        h1,
-        h2,
-        h3 {
-            color: var(--color-text);
-        }
 
         #graphToggleButton {
             position: fixed;
@@ -448,24 +449,6 @@
         /* ▼▼▼ パターン識別のためのCSSを追加 ▼▼▼ */
 
 
-        /* ▼▼▼ 枠線識別のためのCSSをここに追加 ▼▼▼ */
-        .badge {
-            /* badgeの基本スタイルにも少し手を加えます */
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0.4rem 0.65rem;
-            /* パディングを少し調整 */
-            height: 2.0rem;
-            font-weight: 600;
-            font-size: 0.875rem;
-            color: #fff;
-            border-radius: .5rem;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, .1);
-            border: 2px solid transparent;
-            /* 枠線分のスペースを確保 */
-        }
-
         /* 枠線のスタイルを定義 */
         .border-dashed {
             border-style: dashed;
@@ -543,6 +526,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
+            <p class="text-gray-400 text-xs mt-1">v7.2</p>
         </header>
 
         <main>

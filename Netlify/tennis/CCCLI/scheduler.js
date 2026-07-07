@@ -6073,10 +6073,6 @@ ${conclusionText}</pre>
                         appState.maxConsecutiveLimit = newLimit;
                         dom.maxConsecutiveSelect.value = String(newLimit);
                         saveState();
-                        showDialog(
-                            '連続プレイ上限を自動調整',
-                            `残り人数では「最大連続 ${newLimit} 回」以上でないと組めません。\n上限を ${newLimit} に上げて再生成します。`
-                        );
                     }
 
                     // 再生成フラグを立てて、試合を再生成
