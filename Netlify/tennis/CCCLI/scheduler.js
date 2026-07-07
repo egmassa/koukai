@@ -952,7 +952,8 @@
         function updateMaxConsecWarning() {
             if (!dom.maxConsecWarning) return;
             const P = appState.currentSurfaceCount * 4;
-            const N = appState.currentTotalMemberCount - Object.keys(appState.exclusions).length;
+            const _exclCount = appState.matches.length > 0 ? Object.keys(appState.exclusions).length : 0;
+            const N = appState.currentTotalMemberCount - _exclCount;
             if (P === 0 || N <= P) { dom.maxConsecWarning.classList.add('hidden'); return; }
             const Kmin = Math.ceil(P / (N - P));
             const selected = appState.maxConsecutiveLimit;
@@ -1003,7 +1004,8 @@
         function updateMaxConsecutiveOptions() {
             const sel = dom.maxConsecutiveSelect;
             const P = appState.currentSurfaceCount * 4;
-            const N = appState.currentTotalMemberCount - Object.keys(appState.exclusions).length;
+            const _exclCount = appState.matches.length > 0 ? Object.keys(appState.exclusions).length : 0;
+            const N = appState.currentTotalMemberCount - _exclCount;
             sel.innerHTML = '';
             sel.disabled = false;
             appState.forcedInfinity = false;
