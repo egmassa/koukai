@@ -3085,7 +3085,7 @@ ${conclusionText}</pre>
             };
             updateExclusionUI();
             regenerateAllPossiblePairs();
-            if (appState.members.length >= appState.currentSurfaceCount * 4) {
+            if (!isRegenerate && appState.members.length >= appState.currentSurfaceCount * 4) {
                 appState.matches.push(createDeterministicFirstMatch());
             }
 
