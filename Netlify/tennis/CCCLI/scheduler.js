@@ -1663,6 +1663,13 @@
             // グループ情報
             const groupInfo = members.map((m, i) => `  [${i}] ${m || ('P' + (i + 1))}: ${groups[i] || 'default'}`).join('\n');
 
+            // 離脱情報
+            const exclusions = appState.exclusions || {};
+            const exclusionEntries = Object.entries(exclusions);
+            const exclusionInfo = exclusionEntries.length > 0
+                ? exclusionEntries.map(([idx, fromMatch]) => `  [${idx}] ${members[idx] || ('P' + (Number(idx) + 1))}: 第${fromMatch}試合から離脱`).join('\n')
+                : '  なし';
+
             // genderMix用の分類
             const males = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'M');
             const females = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'F');
@@ -1804,6 +1811,9 @@
                 `男性(M): [${males.join(',')}]`,
                 `女性(F): [${females.join(',')}]`,
                 `default(未設定): [${Array.from({ length: memberCount }, (_, i) => i).filter(i => !groups[i] || groups[i] === 'default').join(',')}]`,
+                '',
+                '【離脱情報】',
+                exclusionInfo,
                 '',
                 '【isCandidateCorrectTypeテスト】',
                 `ruleType取得: ${ruleType}`,
