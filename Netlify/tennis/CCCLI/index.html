@@ -19,6 +19,11 @@
           - 第1試合の選手選択を表示名順→登録順に修正
           - 試合0件時の最大連続推奨値が離脱残留データで狂う問題を修正
           - CSS: body/.card二重定義・@apply・badge二重定義を整理
+        v7.3 : バグ修正・全体再監査 (2026-07-08)
+          - doSwapWithRest: SA実行中のgroups/面数のライブappState直読みを修正
+          - リナンバー処理: デフォルト名判定の不一致を修正、groupsが
+            プレイヤー入替に追従していなかった不整合を修正（固定ペア対象者の
+            取り違えを防止）
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -526,7 +531,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.2</p>
+            <p class="text-gray-400 text-xs mt-1">v7.3</p>
         </header>
 
         <main>

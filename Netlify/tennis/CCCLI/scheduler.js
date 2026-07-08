@@ -1196,7 +1196,7 @@
                     const _rt1fb = settings.ruleType || 'none';
                     const _grp1fb = settings.groups || appState.groups || {};
                     const _getGrp1fb = i => _grp1fb[i] || 'default';
-                    return doSwapWithRest(neighbor, n, startIdx, _rt1fb, _getGrp1fb);
+                    return doSwapWithRest(neighbor, n, startIdx, _rt1fb, _getGrp1fb, settings);
                 }
                 let c1 = Math.floor(Math.random() * m.courts.length);
                 let c2 = Math.floor(Math.random() * m.courts.length);
@@ -1258,7 +1258,7 @@
                 const ruleType2 = settings.ruleType || 'none';
                 const groups2 = settings.groups || appState.groups || {};
                 const getGrp2 = i => groups2[i] || 'default';
-                return doSwapWithRest(neighbor, n, startIdx, ruleType2, getGrp2);
+                return doSwapWithRest(neighbor, n, startIdx, ruleType2, getGrp2, settings);
 
             } else {
                 // 操作4: 試合順序入れ替え（第1試合以外）
@@ -1282,7 +1282,7 @@
             return neighbor;
         }
 
-        function doSwapWithRest(neighbor, n, startIdx, ruleType, getGrp) {
+        function doSwapWithRest(neighbor, n, startIdx, ruleType, getGrp, settings) {
             const mi = startIdx + Math.floor(Math.random() * (n - startIdx));
             const m = neighbor[mi];
             if (!m.restingPlayers || m.restingPlayers.length === 0) return null;
@@ -1291,14 +1291,16 @@
             const ps = [...m.courts[ci].team1, ...m.courts[ci].team2];
             const oldPlayer = ps[playerIdx];
 
+            // 呼び出し元のsettingsスナップショットを優先し、実行中のライブappState変更に影響されないようにする
+            const _grpSnapshot = (settings && settings.groups) || appState.groups || {};
+            const _scSnapshot = (settings && settings.currentSurfaceCount) || appState.currentSurfaceCount;
+
             // genderMix strictモードのみ: 同性の休憩者のみ選択候補にする
             let candidates = m.restingPlayers;
             if (ruleType === 'genderMix' && getGrp) {
-                const _grpSwap = appState.groups || {};
-                const _mSw = Object.values(_grpSwap).filter(g => g === 'M').length;
-                const _fSw = Object.values(_grpSwap).filter(g => g === 'F').length;
-                const _scSw = appState.currentSurfaceCount;
-                const _isStrictSw = _mSw > _scSw * 2 && _fSw > _scSw * 2;
+                const _mSw = Object.values(_grpSnapshot).filter(g => g === 'M').length;
+                const _fSw = Object.values(_grpSnapshot).filter(g => g === 'F').length;
+                const _isStrictSw = _mSw > _scSnapshot * 2 && _fSw > _scSnapshot * 2;
                 if (_isStrictSw) {
                     const oldGroup = getGrp(oldPlayer);
                     candidates = m.restingPlayers.filter(p => getGrp(p) === oldGroup);
@@ -1314,7 +1316,7 @@
             m.restingPlayers = m.restingPlayers.slice();
             m.restingPlayers[restOrigIdx] = oldPlayer;
             m.restingPlayers.sort((a, b) => a - b);
-            const _grpRst = (ruleType && getGrp) ? (appState.groups || {}) : {};
+            const _grpRst = (ruleType && getGrp) ? _grpSnapshot : {};
             m.courts[ci] = makeCourtRespectingGender(ps, _grpRst, ruleType || 'none');
             m.playersThisRound = m.courts.flatMap(c => c.players.slice());
             // 整合性チェック
@@ -2096,11 +2098,22 @@
                             team2: c.team2.map(i => _perm[i]),
                         })),
                     }));
-                    // デフォルト名（P1...PN）の場合: 名前は並び替えない
-                    // → 新インデックス0はP1のまま、2はP3のまま → 第1試合がP1,P2,...と表示される
+                    // groups（性別・固定ペア等のインデックス依存データ）はプレイヤーの入れ替えに
+                    // 必ず追従させる。追従させないと、リナンバー後にP1/M/F等のタグが
+                    // 別人に付いてしまう（固定ペア判定・混合ペア判定が壊れる）。
+                    if (originalSettings.groups && Object.keys(originalSettings.groups).length > 0) {
+                        const _newGroups = {};
+                        Object.entries(originalSettings.groups).forEach(([oldIdxStr, g]) => {
+                            _newGroups[_perm[Number(oldIdxStr)]] = g;
+                        });
+                        originalSettings.groups = _newGroups;
+                        appState.groups = { ..._newGroups };
+                    }
+                    // デフォルト名（1...N、Pなしの連番）の場合: 名前は並び替えない
+                    // → 新インデックス0は"1"のまま、2は"3"のまま → 第1試合が1,2,...と表示される
                     // カスタム名の場合: 名前も並び替えてプレイヤー同一性を保持（見た目は変わらないが整合性維持）
                     console.log('[renumber] perm=', _perm, 'round1after=', bestSolution[0].playersThisRound);
-                    const _allDefault = originalSettings.members.every((n, i) => n === `P${i + 1}`);
+                    const _allDefault = originalSettings.members.every((n, i) => n === `${i + 1}`);
                     console.log('[renumber] allDefault=', _allDefault);
                     if (!_allDefault) {
                         const _newMembers = new Array(originalSettings.members.length);
