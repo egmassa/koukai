@@ -51,6 +51,13 @@
             ならなかった（違反ゼロは達成したが「同じ4人ばかり
             休む」という本来の課題が未解決だった）。
             pairFairnessと同格の重みに引き上げ
+        v7.9 : 休憩交換の近傍操作を追加 (2026-07-20)
+          - 重みを上げても休憩の組み合わせが全く変わらない問題を確認。
+            ブロックローテーション解は連続記録が上限ぎりぎりで
+            噛み合っており、既存の「1試合内で交換」する操作では
+            動かした瞬間に必ず違反になっていたことが原因
+          - 「2試合間で休憩者を交換」する新しい近傍操作を追加。
+            各人のトータル休憩回数を変えずに組み合わせだけ変更できる
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -558,7 +565,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.8</p>
+            <p class="text-gray-400 text-xs mt-1">v7.9</p>
         </header>
 
         <main>

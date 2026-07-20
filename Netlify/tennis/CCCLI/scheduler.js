@@ -1252,13 +1252,21 @@
                 m.courts[ci].team1 = sel[0].slice().sort((a, b) => a - b);
                 m.courts[ci].team2 = sel[1].slice().sort((a, b) => a - b);
 
-            } else if (op < 0.9) {
+            } else if (op < 0.75) {
                 // 操作3: プレイヤーと休憩者を交換
                 // genderMixの場合: 同性同士のみ交換（性別バランスを維持）
                 const ruleType2 = settings.ruleType || 'none';
                 const groups2 = settings.groups || appState.groups || {};
                 const getGrp2 = i => groups2[i] || 'default';
                 return doSwapWithRest(neighbor, n, startIdx, ruleType2, getGrp2, settings);
+
+            } else if (op < 0.9) {
+                // 操作5: 2試合間で休憩者を交換（各人のトータル休憩回数を変えずに
+                // 休憩の組み合わせだけを変える。1試合内の交換より違反を起こしにくい）
+                const ruleType3 = settings.ruleType || 'none';
+                const groups3 = settings.groups || appState.groups || {};
+                const getGrp3 = i => groups3[i] || 'default';
+                return doSwapRestAcrossRounds(neighbor, n, startIdx, ruleType3, getGrp3, settings);
 
             } else {
                 // 操作4: 試合順序入れ替え（第1試合以外）
@@ -1325,6 +1333,74 @@
                 for (const p of c.players) {
                     if (seen.has(p)) return null;
                     seen.add(p);
+                }
+            }
+            return neighbor;
+        }
+
+        // 2試合間で休憩者を入れ替える（各人のトータル休憩回数は変わらないため、
+        // 連続プレイ・連続休憩の記録を崩さずに「誰と誰が一緒に休むか」だけを変更できる）
+        function doSwapRestAcrossRounds(neighbor, n, startIdx, ruleType, getGrp, settings) {
+            if (n - startIdx < 2) return null;
+            const pick = () => startIdx + Math.floor(Math.random() * (n - startIdx));
+            const mi1 = pick();
+            let mi2 = pick();
+            while (mi2 === mi1) mi2 = pick();
+            const m1 = neighbor[mi1], m2 = neighbor[mi2];
+            if (!m1.restingPlayers.length || !m2.restingPlayers.length) return null;
+
+            // m1で休憩・m2でプレイ中の選手候補
+            let cand1 = m1.restingPlayers.filter(p => m2.playersThisRound.includes(p));
+            const _grpSnapshot = (settings && settings.groups) || appState.groups || {};
+            const _scSnapshot = (settings && settings.currentSurfaceCount) || appState.currentSurfaceCount;
+            const _mSw = Object.values(_grpSnapshot).filter(g => g === 'M').length;
+            const _fSw = Object.values(_grpSnapshot).filter(g => g === 'F').length;
+            const _isStrictSw = ruleType === 'genderMix' && _mSw > _scSnapshot * 2 && _fSw > _scSnapshot * 2;
+            if (cand1.length === 0) return null;
+            const p1 = cand1[Math.floor(Math.random() * cand1.length)];
+
+            // m2で休憩・m1でプレイ中の選手候補（genderMix strictでは同性のみ）
+            let cand2 = m2.restingPlayers.filter(p => m1.playersThisRound.includes(p) && p !== p1);
+            if (_isStrictSw && getGrp) {
+                cand2 = cand2.filter(p => getGrp(p) === getGrp(p1));
+            }
+            if (cand2.length === 0) return null;
+            const p2 = cand2[Math.floor(Math.random() * cand2.length)];
+
+            // m1: p2(プレイ中)をp1に置き換え
+            for (const c of m1.courts) {
+                const idx = [...c.team1, ...c.team2].indexOf(p2);
+                if (idx === -1) continue;
+                const ps = [...c.team1, ...c.team2];
+                ps[idx] = p1;
+                const _grpRst = (ruleType && getGrp) ? _grpSnapshot : {};
+                Object.assign(c, makeCourtRespectingGender(ps, _grpRst, ruleType || 'none'));
+                break;
+            }
+            m1.restingPlayers = m1.restingPlayers.map(p => p === p1 ? p2 : p).sort((a, b) => a - b);
+            m1.playersThisRound = m1.courts.flatMap(c => c.players.slice());
+
+            // m2: p1(プレイ中)をp2に置き換え
+            for (const c of m2.courts) {
+                const idx = [...c.team1, ...c.team2].indexOf(p1);
+                if (idx === -1) continue;
+                const ps = [...c.team1, ...c.team2];
+                ps[idx] = p2;
+                const _grpRst = (ruleType && getGrp) ? _grpSnapshot : {};
+                Object.assign(c, makeCourtRespectingGender(ps, _grpRst, ruleType || 'none'));
+                break;
+            }
+            m2.restingPlayers = m2.restingPlayers.map(p => p === p2 ? p1 : p).sort((a, b) => a - b);
+            m2.playersThisRound = m2.courts.flatMap(c => c.players.slice());
+
+            // 整合性チェック
+            for (const m of [m1, m2]) {
+                const seen = new Set();
+                for (const c of m.courts) {
+                    for (const p of c.players) {
+                        if (seen.has(p)) return null;
+                        seen.add(p);
+                    }
                 }
             }
             return neighbor;
