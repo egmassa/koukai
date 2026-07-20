@@ -33,6 +33,13 @@
             理論上限計算(calcConditionCeiling)には未反映で、探索が
             「目標達成」判定により改善前に早期終了してしまう問題を修正
           - デバッグログに休憩ペアCV値・全試合の休憩者一覧を追加
+        v7.6 : SAが局所解にはまる問題を修正 (2026-07-20)
+          - 2面12人・連続2などの条件で、違反ゼロの解が数学的に
+            存在するのにSAが51リスタートしても同じ違反入りの解に
+            収束し続ける問題を確認。近傍操作だけでは休憩グループの
+            大規模な組み替えを発見しにくいことが原因
+          - 条件が合う場合、最初のリスタートの初期解を数学的に導出した
+            ブロックローテーションでシードするよう変更
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -540,7 +547,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.5</p>
+            <p class="text-gray-400 text-xs mt-1">v7.6</p>
         </header>
 
         <main>

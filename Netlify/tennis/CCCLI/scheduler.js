@@ -2003,7 +2003,10 @@
                 dom.loadingMessage.textContent = `🔥 探索中... あと最大${_remaining}秒`;
                 await new Promise(r => setTimeout(r, 0));
 
-                let current = await generateInitialSolution(targetMatchCount, originalSettings);
+                let current = (restart === 0)
+                    ? generateBlockRotationSeed(targetMatchCount, originalSettings)
+                    : null;
+                if (!current) current = await generateInitialSolution(targetMatchCount, originalSettings);
                 if (!current || current.length < targetMatchCount) { restart++; continue; }
                 // genderMix/fixedPair: 初期解の不適切なペアリングを修正（パターン由来のF+F/P1分離を除去）
                 if (originalSettings.ruleType === 'genderMix' || originalSettings.ruleType === 'fixedPair') {
@@ -2300,6 +2303,56 @@
                 showDialog('探索失敗', '有効な組み合わせが見つかりませんでした。条件を変更してください。');
             }
             dom.loadingIndicator.style.display = 'none';
+        }
+
+        // 数学的に連続プレイ・連続休憩の上限を超えない「ブロックローテーション」初期解を生成
+        // （SAが局所解にはまり込むのを防ぐため、条件が合う場合のみ最初のリスタートの種として使う）
+        function generateBlockRotationSeed(targetCount, settings) {
+            const ruleType = settings.ruleType || 'none';
+            if (ruleType !== 'none') return null; // genderMix/fixedPairは非対応（既存の探索に任せる）
+
+            const excl = settings.exclusions || appState.exclusions || {};
+            if (Object.keys(excl).length > 0) return null; // 離脱ありは非対応
+
+            const surfaces = settings.currentSurfaceCount || appState.currentSurfaceCount;
+            const N = settings.currentTotalMemberCount || appState.currentTotalMemberCount;
+            const P = surfaces * 4;
+            const R = N - P;
+            if (R <= 0 || N % R !== 0) return null; // 休憩者0人 or 均等なグループに分割できない
+
+            const numGroups = N / R;
+            const maxConsec = settings.maxConsecutiveLimit || appState.maxConsecutiveLimit || Infinity;
+            if (!isFinite(maxConsec) || numGroups - 1 > maxConsec) return null; // このローテーションでも上限超過
+
+            // グループ0 = 第1試合で休む固定メンバー（登録順の後方R人、createDeterministicFirstMatchと一致させる）
+            const groups = [Array.from({ length: R }, (_, i) => P + i)];
+            for (let g = 1; g < numGroups; g++) {
+                groups.push(Array.from({ length: R }, (_, i) => (g - 1) * R + i));
+            }
+
+            const matches = [];
+            for (let r = 0; r < targetCount; r++) {
+                const restGroup = groups[r % numGroups];
+                const restSet = new Set(restGroup);
+                let playing = Array.from({ length: N }, (_, i) => i).filter(i => !restSet.has(i));
+                if (r > 0) {
+                    // 第1試合以外はペアの偏りを避けるためプレイ順をシャッフル（休憩の割当は変えない）
+                    for (let i = playing.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [playing[i], playing[j]] = [playing[j], playing[i]];
+                    }
+                }
+                const courts = [];
+                for (let c = 0; c < surfaces; c++) {
+                    const four = playing.slice(c * 4, c * 4 + 4);
+                    const team1 = [four[0], four[1]].sort((a, b) => a - b);
+                    const team2 = [four[2], four[3]].sort((a, b) => a - b);
+                    courts.push({ team1, team2, players: [...team1, ...team2].sort((a, b) => a - b) });
+                }
+                const playersThisRound = courts.flatMap(c => c.players);
+                matches.push({ courts, restingPlayers: [...restGroup].sort((a, b) => a - b), playersThisRound });
+            }
+            return matches;
         }
 
         async function generateInitialSolution(targetCount, settings) {
