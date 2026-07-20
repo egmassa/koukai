@@ -1799,6 +1799,18 @@
                 ? isGenderMixBestEffort(groups, surfaces)
                 : null;
 
+            // 休憩ペアの偏り（同じ顔ぶれが繰り返し一緒に休んでいないか）
+            let restPairInfo = 'マッチなし';
+            if (appState.matches && appState.matches.length > 0) {
+                const restPairUsage = calculateRestPairUsageCounts(appState.matches, memberCount, appState.exclusions);
+                const cvRestPair = calcCV(Object.values(restPairUsage));
+                const restRoster = appState.matches.map((m, i) => {
+                    const names = m.restingPlayers.map(p => members[p] || ('P' + (p + 1))).join(',');
+                    return `  第${i + 1}試合: [${names}]`;
+                }).join('\n');
+                restPairInfo = `変動係数(CV)=${cvRestPair.toFixed(3)}（0に近いほど休憩ペアが分散、大きいほど同じ顔ぶれが繰り返し休憩）\n${restRoster}`;
+            }
+
             const log = [
                 '=== デバッグログ ===',
                 `日時: ${new Date().toLocaleString()}`,
@@ -1826,6 +1838,9 @@
                 '',
                 '【連続プレイ・連続休憩の実績（全メンバー）】',
                 playRestStats,
+                '',
+                '【休憩ペアの偏り（全試合）】',
+                restPairInfo,
                 '',
                 '【lastRunAnalysis】',
                 appState.lastRunAnalysis ? JSON.stringify({
@@ -2826,7 +2841,8 @@ ${conclusionText}</pre>
             const getGroup = (i) => groups[i] || 'default';
             const weights = {
                 playCount: 30, pairCoverage: 20, cardCoverage: 10,
-                opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10
+                opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
+                restPairFairness: 5
             };
 
             // ★追加: genderMixモード判定
@@ -2925,11 +2941,19 @@ ${conclusionText}</pre>
             const frpGroupCeil = Math.min(Math.floor(validGroupCount / 3) + 1, matchCount + 1);
             const ceilEarlyDiv = Math.round(Math.min(100, (frpPairCeil + frpGroupCeil) / (matchCount * 2) * 200));
 
+            // (8) 休憩ペアの公平性（休憩を共にする顔ぶれの分散度）
+            const restPerRound = Math.max(0, members - surfaces * 4);
+            const restPairsPerRound = nCk(restPerRound, 2);
+            const totalRestPairSlots = restPairsPerRound * matchCount;
+            const totalRestPairTypes = nCk(members, 2);
+            const cvRestPair = minCV(totalRestPairSlots, totalRestPairTypes);
+            const ceilRestPairFairness = Math.max(0, Math.round((1 - cvRestPair) * 100));
+
             const scores = {
                 playCount: ceilPlayCount, pairCoverage: ceilPairCoverage,
                 cardCoverage: ceilCardCoverage, opponentCoverage: ceilOpponentCoverage,
                 pairFairness: ceilPairFairness, matchupFairness: ceilMatchupFairness,
-                earlyDiversity: ceilEarlyDiv
+                earlyDiversity: ceilEarlyDiv, restPairFairness: ceilRestPairFairness
             };
             let total = Object.keys(weights).reduce((sum, k) => sum + (scores[k] * weights[k] / 100), 0);
 
@@ -2977,6 +3001,7 @@ ${conclusionText}</pre>
             const weights = {
                 playCount: 30, pairCoverage: 20, cardCoverage: 10,
                 opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
+                restPairFairness: 5,
             };
             const scores = {};
             const diffPenalty = [100, 70, 30, 0];
@@ -2986,6 +3011,7 @@ ${conclusionText}</pre>
             scores.opponentCoverage = Math.round(statsData.opponentCoverage.ratio * 100);
             scores.pairFairness = Math.round(Math.max(0, (1 - statsData.pairFairness.cv)) * 100);
             scores.matchupFairness = Math.round(Math.max(0, (1 - Math.min(1, statsData.matchupFairness.cv))) * 100);
+            scores.restPairFairness = Math.round(Math.max(0, (1 - Math.min(1, statsData.restPairFairness.cv))) * 100);
             const frpPair = calculateFirstRepetitionMatch(matches, 'pair');
             const frpGroup = calculateFirstRepetitionMatch(matches, 'group');
             const n = matches.length;
