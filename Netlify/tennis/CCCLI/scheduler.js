@@ -3033,14 +3033,19 @@ ${conclusionText}</pre>
             const scoreOpponentCoverage = stats.opponentCoverage.ratio;
             // CV(変動係数)は0に近いほど良いので、1から引く。値が大きくなりすぎないように調整。
             const scorePairFairness = 1 - Math.min(1, stats.pairFairness.cv);
+            // 休憩を共にする顔ぶれの偏り（同じメンバーばかりが一緒に休むのを防ぐ）
+            const scoreRestPairFairness = 1 - Math.min(1, stats.restPairFairness.cv);
 
             // 重要度に応じた重み付け
+            // restPairFairnessは既存指標を犠牲にしないよう既存の重み(合計100)には手を付けず、
+            // 同点比較時のタイブレーカーとして小さく加算するのみに留める
             const weights = {
                 playCount: 35,
                 pairCoverage: 20,
                 cardCoverage: 10,
                 opponentCoverage: 15,
-                pairFairness: 20
+                pairFairness: 20,
+                restPairFairness: 5
             };
 
             const metaScore =
@@ -3048,7 +3053,8 @@ ${conclusionText}</pre>
                 (scorePairCoverage * weights.pairCoverage) +
                 (scoreCardCoverage * weights.cardCoverage) +
                 (scoreOpponentCoverage * weights.opponentCoverage) +
-                (scorePairFairness * weights.pairFairness);
+                (scorePairFairness * weights.pairFairness) +
+                (scoreRestPairFairness * weights.restPairFairness);
 
             return metaScore;
         }
@@ -4017,6 +4023,30 @@ ${conclusionText}</pre>
             return counts;
         }
 
+        // 休憩を共にした回数をペアごとに集計（同じ顔ぶれが繰り返し休憩する偏りを検出するため）
+        function calculateRestPairUsageCounts(matches, memberCount, exclusions) {
+            const counts = {};
+            for (let i = 0; i < memberCount; i++) {
+                for (let j = i + 1; j < memberCount; j++) {
+                    counts[`${i},${j}`] = 0;
+                }
+            }
+            const excl = exclusions || {};
+            matches.forEach((m, matchIdx) => {
+                const matchNumber = matchIdx + 1;
+                // 離脱済みメンバーは「常に休憩」扱いになり集計を歪めるため対象外にする
+                const activeResting = m.restingPlayers.filter(p => !(excl[p] && matchNumber >= excl[p]));
+                for (let a = 0; a < activeResting.length; a++) {
+                    for (let b = a + 1; b < activeResting.length; b++) {
+                        const i = Math.min(activeResting[a], activeResting[b]);
+                        const j = Math.max(activeResting[a], activeResting[b]);
+                        counts[`${i},${j}`]++;
+                    }
+                }
+            });
+            return counts;
+        }
+
         function calculateMaxConsecutiveRestsPerMember(matches, totalMembers) {
             const playerMaxStreaks = {};
             for (let pIdx = 0; pIdx < totalMembers; pIdx++) {
@@ -4202,6 +4232,10 @@ ${conclusionText}</pre>
 
             const matchupFairness = calculateMatchupFairness(matches, allPossiblePairs);
 
+            const restPairUsage = calculateRestPairUsageCounts(matches, members.length, exclusions);
+            const cvRestPair = calcCV(Object.values(restPairUsage));
+            const giniRestPair = calcGini(Object.values(restPairUsage));
+
             return {
                 maxPlayCountDiff: maxDiff,
                 pairCoverage: { ratio: pairCoverageRatio, used: usedPairTypes, total: totalPairTypes },
@@ -4210,6 +4244,7 @@ ${conclusionText}</pre>
                 pairFairness: { cv: cvPair, gini: giniPair },
                 cardFairness: { cv: cvCard, gini: giniCard },
                 matchupFairness: matchupFairness,
+                restPairFairness: { cv: cvRestPair, gini: giniRestPair },
             };
         }
 
