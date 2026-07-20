@@ -24,6 +24,10 @@
           - リナンバー処理: デフォルト名判定の不一致を修正、groupsが
             プレイヤー入替に追従していなかった不整合を修正（固定ペア対象者の
             取り違えを防止）
+        v7.4 : デバッグログ拡充・休憩公平性の改善 (2026-07-08)
+          - デバッグログに【離脱情報】セクションを追加
+          - SAスコアに休憩ペア多様性を追加（同じ顔ぶれが繰り返し
+            一緒に休憩する偏りを軽減。既存指標の重みは変更なし）
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -531,7 +535,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.3</p>
+            <p class="text-gray-400 text-xs mt-1">v7.4</p>
         </header>
 
         <main>
