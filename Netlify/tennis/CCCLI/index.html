@@ -45,6 +45,12 @@
             1-Math.min(1,cv)の式ではcv>=1で常に0点になり
             SAへの改善圧力が消えていた。1/(1+cv)に変更し
             上限計算・実測の3箇所を同じ式に統一
+        v7.8 : 休憩ペア公平性の重みを引き上げ (2026-07-20)
+          - 重み5では休憩ペアCVの差が最大2点程度にしかならず、
+            SAが安全な固定ブロックローテーションを崩す動機に
+            ならなかった（違反ゼロは達成したが「同じ4人ばかり
+            休む」という本来の課題が未解決だった）。
+            pairFairnessと同格の重みに引き上げ
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -552,7 +558,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.7</p>
+            <p class="text-gray-400 text-xs mt-1">v7.8</p>
         </header>
 
         <main>

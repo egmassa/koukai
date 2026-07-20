@@ -2895,7 +2895,7 @@ ${conclusionText}</pre>
             const weights = {
                 playCount: 30, pairCoverage: 20, cardCoverage: 10,
                 opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
-                restPairFairness: 5
+                restPairFairness: 15
             };
 
             // ★追加: genderMixモード判定
@@ -3055,7 +3055,7 @@ ${conclusionText}</pre>
             const weights = {
                 playCount: 30, pairCoverage: 20, cardCoverage: 10,
                 opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
-                restPairFairness: 5,
+                restPairFairness: 15,
             };
             const scores = {};
             const diffPenalty = [100, 70, 30, 0];
@@ -3120,14 +3120,16 @@ ${conclusionText}</pre>
 
             // 重要度に応じた重み付け
             // restPairFairnessは既存指標を犠牲にしないよう既存の重み(合計100)には手を付けず、
-            // 同点比較時のタイブレーカーとして小さく加算するのみに留める
+            // 加算のみに留める。重み5では休憩ペアCVの差が最大2点程度にしかならず
+            // SAが固定ブロックローテーションを崩す動機にならなかったため、
+            // pairFairnessと同格の20に引き上げて実効的な改善圧力を持たせる
             const weights = {
                 playCount: 35,
                 pairCoverage: 20,
                 cardCoverage: 10,
                 opponentCoverage: 15,
                 pairFairness: 20,
-                restPairFairness: 5
+                restPairFairness: 20
             };
 
             const metaScore =
