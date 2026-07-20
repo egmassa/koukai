@@ -3000,7 +3000,8 @@ ${conclusionText}</pre>
             const totalRestPairSlots = restPairsPerRound * matchCount;
             const totalRestPairTypes = nCk(members, 2);
             const cvRestPair = minCV(totalRestPairSlots, totalRestPairTypes);
-            const ceilRestPairFairness = Math.max(0, Math.round((1 - cvRestPair) * 100));
+            // 実測側(calcOverallGrade/calculateMetaScore)と同じ1/(1+cv)の式で揃え、比率の整合性を保つ
+            const ceilRestPairFairness = Math.round(100 / (1 + cvRestPair));
 
             const scores = {
                 playCount: ceilPlayCount, pairCoverage: ceilPairCoverage,
@@ -3064,7 +3065,8 @@ ${conclusionText}</pre>
             scores.opponentCoverage = Math.round(statsData.opponentCoverage.ratio * 100);
             scores.pairFairness = Math.round(Math.max(0, (1 - statsData.pairFairness.cv)) * 100);
             scores.matchupFairness = Math.round(Math.max(0, (1 - Math.min(1, statsData.matchupFairness.cv))) * 100);
-            scores.restPairFairness = Math.round(Math.max(0, (1 - Math.min(1, statsData.restPairFairness.cv))) * 100);
+            // 休憩ペアのCVは構造上1を超えやすいため、1で頭打ちにせず1/(1+cv)で滑らかに評価する
+            scores.restPairFairness = Math.round(100 / (1 + statsData.restPairFairness.cv));
             const frpPair = calculateFirstRepetitionMatch(matches, 'pair');
             const frpGroup = calculateFirstRepetitionMatch(matches, 'group');
             const n = matches.length;
@@ -3113,7 +3115,8 @@ ${conclusionText}</pre>
             // CV(変動係数)は0に近いほど良いので、1から引く。値が大きくなりすぎないように調整。
             const scorePairFairness = 1 - Math.min(1, stats.pairFairness.cv);
             // 休憩を共にする顔ぶれの偏り（同じメンバーばかりが一緒に休むのを防ぐ）
-            const scoreRestPairFairness = 1 - Math.min(1, stats.restPairFairness.cv);
+            // 休憩ペアのCVは構造上1を超えやすいため、1で頭打ちにせず1/(1+cv)で滑らかに評価する
+            const scoreRestPairFairness = 1 / (1 + stats.restPairFairness.cv);
 
             // 重要度に応じた重み付け
             // restPairFairnessは既存指標を犠牲にしないよう既存の重み(合計100)には手を付けず、
