@@ -614,9 +614,91 @@
                 );
             });
 
+            setupWakeLockToggle();
         }
 
+        // ─── 画面スリープ防止 (Screen Wake Lock API) ──────────────────────────
+        // コートサイドでスマホの画面を見ながら試合を進行するためのツールなので、
+        // ユーザーが明示的にONにしている間だけ画面の自動消灯を防ぐ。
+        // WakeLockSentinelはappStateに入れない（saveState/pushStateToHistoryが
+        // appStateをJSON化するため、シリアライズ不要なオブジェクトを巻き込まないようにする）。
+        let wakeLockSentinel = null;
+        let wakeLockEnabled = false; // localStorageには保存しない。毎回OFFで開始する
 
+        function isWakeLockSupported() {
+            return 'wakeLock' in navigator;
+        }
+
+        async function acquireWakeLock() {
+            try {
+                wakeLockSentinel = await navigator.wakeLock.request('screen');
+                wakeLockSentinel.addEventListener('release', () => {
+                    // タブ切替・ホーム画面復帰などブラウザ側の都合で自動解放された場合はsentinelだけ
+                    // クリアする。wakeLockEnabledはそのままにし、visible復帰時に再取得を試みる
+                    wakeLockSentinel = null;
+                });
+                return true;
+            } catch (err) {
+                console.warn('画面スリープ防止の取得に失敗しました:', err);
+                wakeLockSentinel = null;
+                return false;
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLockSentinel) {
+                wakeLockSentinel.release().catch(() => { });
+                wakeLockSentinel = null;
+            }
+        }
+
+        function updateWakeLockButtonUI() {
+            const btn = document.getElementById('wakeLockToggleBtn');
+            if (!btn) return;
+            if (wakeLockEnabled) {
+                btn.textContent = '☀️ 画面オンを維持';
+                btn.style.background = '#fef3c7';
+                btn.style.borderColor = '#f59e0b';
+                btn.style.color = '#92400e';
+            } else {
+                btn.textContent = '🌙 通常';
+                btn.style.background = '#f3f4f6';
+                btn.style.borderColor = '#d1d5db';
+                btn.style.color = '#374151';
+            }
+        }
+
+        function setupWakeLockToggle() {
+            const btn = document.getElementById('wakeLockToggleBtn');
+            if (!btn) return;
+            if (!isWakeLockSupported()) return; // 非対応ブラウザではボタンを表示しない（display:noneのまま）
+
+            btn.style.display = 'inline-flex';
+            btn.addEventListener('click', async () => {
+                if (!wakeLockEnabled) {
+                    // request()はユーザー操作起点でないと失敗するブラウザがあるため、
+                    // 必ずこのclickハンドラ内で直接呼び出す
+                    const ok = await acquireWakeLock();
+                    wakeLockEnabled = ok; // 失敗時はOFFのまま
+                } else {
+                    wakeLockEnabled = false;
+                    releaseWakeLock();
+                }
+                updateWakeLockButtonUI();
+            });
+
+            document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState === 'visible' && wakeLockEnabled && !wakeLockSentinel) {
+                    const ok = await acquireWakeLock();
+                    if (!ok) wakeLockEnabled = false;
+                    updateWakeLockButtonUI();
+                }
+            });
+
+            window.addEventListener('beforeunload', () => {
+                releaseWakeLock();
+            });
+        }
 
         function toBadgesForPrint(pairIndices, members, groups, ruleType, pairIdMap, pairColorMap) {
             const key = [...pairIndices].sort((a, b) => a - b).join(',');

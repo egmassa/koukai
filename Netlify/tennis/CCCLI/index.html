@@ -127,6 +127,13 @@
             理論上限に届かなくても「過去◯回の実測ベストと同等 —
             再試行不要」と判定できるようにした。ダイアログに
             実測ベスト行を追加表示
+        v7.16 : 画面スリープ防止機能を追加 (2026-07-21)
+          - コートサイドでスマホを見ながら試合進行するためのツール
+            なので、画面が自動消灯しないようにするトグルボタンを
+            試合スケジュールカードのヘッダーに追加(Screen Wake Lock
+            API使用)。試合が生成されているときのみ表示
+          - タブ切替・ホーム画面復帰で自動解放された場合は復帰時に
+            自動再取得。非対応ブラウザではボタン自体を非表示に
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -634,7 +641,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.15</p>
+            <p class="text-gray-400 text-xs mt-1">v7.16</p>
         </header>
 
         <main>
@@ -911,6 +918,7 @@
                     <div id="matchScheduleCard" class="card mb-6">
                         <h3 class="text-xl font-semibold">試合スケジュール
                             <button id="scheduleHelpBtn" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;font-size:15px;cursor:pointer;vertical-align:middle;margin-left:8px;" title="使い方">ℹ️</button>
+                            <button id="wakeLockToggleBtn" style="display:none;align-items:center;gap:4px;font-size:13px;font-weight:600;padding:6px 12px;border-radius:20px;border:1px solid #d1d5db;background:#f3f4f6;color:#374151;cursor:pointer;vertical-align:middle;margin-left:8px;" title="コートサイドで見る際、画面が自動消灯しないようにします">🌙 通常</button>
                         </h3>
                         <div id="generationSummaryContainer"
                             class="text-xs text-gray-600 bg-gray-50 p-2 rounded-md my-3 border"></div>
