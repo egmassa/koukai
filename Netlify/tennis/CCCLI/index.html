@@ -58,6 +58,12 @@
             動かした瞬間に必ず違反になっていたことが原因
           - 「2試合間で休憩者を交換」する新しい近傍操作を追加。
             各人のトータル休憩回数を変えずに組み合わせだけ変更できる
+        v7.10 : 全体再監査でSA評価関数の設定漏れを修正 (2026-07-21)
+          - calculateSummaryStats/calcOpponentCoverageがsurfaceCount
+            パラメータを受け取りながら、内部3箇所でruleType/groups/
+            surfaceCountをdocument.querySelector・appStateから直接
+            読んでいた（isCandidateCorrectTypeで修正済みの問題と同型）。
+            SA探索中に設定を変更すると評価が不整合になり得た点を修正
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -565,7 +571,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.9</p>
+            <p class="text-gray-400 text-xs mt-1">v7.10</p>
         </header>
 
         <main>

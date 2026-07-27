@@ -1594,7 +1594,7 @@
             const excl = settings.exclusions != null ? settings.exclusions : appState.exclusions;
             const stats = calculateSummaryStats(
                 matches, settings.members, allPairs,
-                settings.currentSurfaceCount, excl
+                settings.currentSurfaceCount, excl, _rtRest, _grpEval
             );
             return calculateMetaScore(stats) + mixBonus + penalty;
         }
@@ -2054,7 +2054,7 @@
                     break;
                 }
                 if (targetRate > 0 && bestSolution && totalIters % 500 === 0) {
-                    const tmpStats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions);
+                    const tmpStats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
                     const gradeScore = calcOverallGrade(tmpStats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus).total;
                     if (gradeScore >= targetRate) {
                         reachedTarget = true;
@@ -2258,7 +2258,7 @@
                 appState.matches = bestSolution;
                 appState.generationSettings = { groups: originalSettings.groups, ruleType: originalSettings.ruleType };
 
-                const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions);
+                const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
                 const restInfo = checkConsecutiveRests(bestSolution, originalSettings.members);
                 let metaScore = calculateMetaScore(stats);
                 // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと同じロジック）
@@ -2718,7 +2718,7 @@
                 const generatedMatches = await generateMatchesInBackground(targetMatchCount, originalSettings);
                 if (!generatedMatches || generatedMatches.length < targetMatchCount) continue;
 
-                const stats = calculateSummaryStats(generatedMatches, originalSettings.members, appState.allPossiblePairs);
+                const stats = calculateSummaryStats(generatedMatches, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups);
                 let metaScore = calculateMetaScore(stats);
 
                 const restInfo = checkConsecutiveRests(generatedMatches, originalSettings.members);
@@ -4282,7 +4282,7 @@ ${conclusionText}</pre>
             } return sum /
                 (2 * n * n * avg);
         } function totalFourPlayerCards(n) { return nCk(n, 4); } function
-            calcOpponentCoverage(matches) {
+            calcOpponentCoverage(matches, ruleType, groups, surfaceCount, totalMemberCount) {
             const seen = new
                 Set(); matches.forEach(m => m.courts.forEach(c => {
                     const k = [c.team1.join(','),
@@ -4290,20 +4290,22 @@ ${conclusionText}</pre>
                     seen.add(k);
                 }));
             // genderMix strictモードのみ有効な対戦カード数を使う
-            const _rtOC = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
-            const _grpOC = appState.groups || {};
+            // 呼び出し元がruleType/groups/surfaceCount/totalMemberCountを渡さない場合のみ、現在のライブ状態にフォールバック
+            const _rtOC = ruleType !== undefined ? ruleType : (document.querySelector('input[name="ruleType"]:checked')?.value || 'none');
+            const _grpOC = groups !== undefined ? groups : (appState.groups || {});
             const _mcOC = Object.values(_grpOC).filter(g => g === 'M').length;
             const _fcOC = Object.values(_grpOC).filter(g => g === 'F').length;
-            const _scOC = appState.currentSurfaceCount;
+            const _scOC = surfaceCount !== undefined ? surfaceCount : appState.currentSurfaceCount;
+            const _tmcOC = totalMemberCount !== undefined ? totalMemberCount : appState.currentTotalMemberCount;
             const _isStrictOC = _rtOC === 'genderMix' && _mcOC > _scOC * 2 && _fcOC > _scOC * 2;
             let theoCap;
             if (_isStrictOC) {
                 theoCap = nCk(_mcOC, 2) * nCk(_fcOC, 2) * 3;
-                if (theoCap === 0) theoCap = nCk(appState.currentTotalMemberCount, 4) * 3;
+                if (theoCap === 0) theoCap = nCk(_tmcOC, 4) * 3;
             } else {
-                theoCap = nCk(appState.currentTotalMemberCount, 4) * 3;
+                theoCap = nCk(_tmcOC, 4) * 3;
             }
-            const roundCap = matches.length * appState.currentSurfaceCount;
+            const roundCap = matches.length * _scOC;
             const max = Math.min(theoCap, roundCap);
             return {
                 ratio: seen.size / max, used: seen.size,
@@ -4319,10 +4321,13 @@ ${conclusionText}</pre>
          * @param {Array} allPossiblePairs - 全ペアの配列
          * @returns {object} 計算された統計情報のオブジェクト
          */
-        function calculateSummaryStats(matches, members, allPossiblePairs, surfaceCount, exclusions) {
-            // surfaceCount・exclusionsはグローバルにフォールバック（後方互換）
+        function calculateSummaryStats(matches, members, allPossiblePairs, surfaceCount, exclusions, ruleType, groups) {
+            // surfaceCount・exclusions・ruleType・groupsは、呼び出し元が渡さない場合のみ
+            // 現在のライブ状態にフォールバック（後方互換）。SA探索中は必ず呼び出し元のsettingsを渡すこと。
             if (surfaceCount == null) surfaceCount = appState.currentSurfaceCount;
             if (exclusions == null) exclusions = appState.exclusions;
+            if (ruleType === undefined) ruleType = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
+            if (groups === undefined) groups = appState.groups || {};
             const pairUsage = calculateAllPairUsageCounts(matches, members.length);
             const cardCounts = calculateMatchCardCounts(matches);
 
@@ -4333,12 +4338,9 @@ ${conclusionText}</pre>
 
             const usedCardTypes = Object.keys(cardCounts).length;
             // genderMix strictモードのみ有効な4人グループ（2M+2F）を分母に使う
-            const _rtForCard = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
-            const _grpCard = appState.groups || {};
-            const _mcCard = Object.values(_grpCard).filter(g => g === 'M').length;
-            const _fcCard = Object.values(_grpCard).filter(g => g === 'F').length;
-            const _scCard = appState.currentSurfaceCount;
-            const _isStrictCard = _rtForCard === 'genderMix' && _mcCard > _scCard * 2 && _fcCard > _scCard * 2;
+            const _mcCard = Object.values(groups).filter(g => g === 'M').length;
+            const _fcCard = Object.values(groups).filter(g => g === 'F').length;
+            const _isStrictCard = ruleType === 'genderMix' && _mcCard > surfaceCount * 2 && _fcCard > surfaceCount * 2;
             let totalCardTypes;
             if (_isStrictCard) {
                 totalCardTypes = nCk(_mcCard, 2) * nCk(_fcCard, 2);
@@ -4350,7 +4352,7 @@ ${conclusionText}</pre>
             const realisticMaxCards = Math.min(totalCardTypes, totalMatchesPlayed);
             const cardCoverageRatio = realisticMaxCards > 0 ? usedCardTypes / realisticMaxCards : 0;
 
-            const opponentCoverageData = calcOpponentCoverage(matches);
+            const opponentCoverageData = calcOpponentCoverage(matches, ruleType, groups, surfaceCount, members.length);
 
             const cvPair = calcCV(Object.values(pairUsage));
             const giniPair = calcGini(Object.values(pairUsage));
@@ -4362,17 +4364,14 @@ ${conclusionText}</pre>
             let maxDiff = 0;
             if (members.length > 0) {
                 const cumulativePlays = new Array(members.length).fill(0);
-                const _rtPC = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
-                const _grpPC = appState.groups || {};
                 matches.forEach((match, matchIdx) => {
                     match.playersThisRound.forEach(playerIdx => cumulativePlays[playerIdx]++);
                     const activeIdx = members
                         .map((_, i) => i)
                         .filter(i => !exclusions[i] || exclusions[i] > (matchIdx + 1));
-                    const _malesPC = activeIdx.filter(i => (_grpPC[i] || 'default') === 'M');
-                    const _femalesPC = activeIdx.filter(i => (_grpPC[i] || 'default') === 'F');
-                    const _scPC = appState.currentSurfaceCount;
-                    const _isStrictPC = _rtPC === 'genderMix' && _malesPC.length > _scPC * 2 && _femalesPC.length > _scPC * 2;
+                    const _malesPC = activeIdx.filter(i => (groups[i] || 'default') === 'M');
+                    const _femalesPC = activeIdx.filter(i => (groups[i] || 'default') === 'F');
+                    const _isStrictPC = ruleType === 'genderMix' && _malesPC.length > surfaceCount * 2 && _femalesPC.length > surfaceCount * 2;
                     if (_isStrictPC) {
                         // strictモード: 性別内の最大差（性別間の差は構造上必然）
                         const mPlays = _malesPC.map(i => cumulativePlays[i]);
