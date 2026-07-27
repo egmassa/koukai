@@ -98,6 +98,15 @@
             renderGenerationSummaryと同じ相対評価(上限比95%以上S等)に
             統一。renderGenerationSummary側の同種スケール不一致も併せて修正
           - 総合評価タイルの内訳に「休憩ペア公平性」を追加表示
+        v7.13 : genderMix best-effort関連の2件を修正 (2026-07-21)
+          - 【バグ8】calcConditionCeilingのプレイ公平性上限が、
+            best-effortモードでも常に男女別の均等割り判定(strict前提)
+            を使っており過大評価だった。best-effort時はruleType='none'
+            と同じ総人数ベースの判定に変更
+          - 【バグ9】デバッグログのミックス試合率が、面数2以上かつ
+            少数派人数が不足する構成で構造上常に0%になっていた。
+            コート単位の集計に変更し、「少数派が全員同時出場した
+            試合のうち実際にミックスコートを作れた試合数」も併記
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -605,7 +614,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.12</p>
+            <p class="text-gray-400 text-xs mt-1">v7.13</p>
         </header>
 
         <main>

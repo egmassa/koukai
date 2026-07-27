@@ -1815,10 +1815,28 @@
                 });
                 matchValidation = results.join('\n');
                 if (isBE2) {
-                    const mixCount = appState.matches.filter(m => m.courts.every(c => isCandidateCorrectType(c))).length;
-                    const mixRate = Math.round(mixCount / appState.matches.length * 100);
+                    // コート単位で集計（m.courts.everyだと面数>1かつ少数派の人数が
+                    // 全コート分に満たない構成では構造上常に0になり実態を反映しない）
+                    let mixCourtCount = 0, totalCourtCount = 0;
+                    appState.matches.forEach(m => {
+                        m.courts.forEach(c => {
+                            totalCourtCount++;
+                            if (isCandidateCorrectType(c, 'genderMix', groups)) mixCourtCount++;
+                        });
+                    });
+                    const mixCourtRate = totalCourtCount > 0 ? Math.round(mixCourtCount / totalCourtCount * 100) : 0;
                     matchValidation += `\n※ best-effortモードでは非ミックス試合は許容（仕様3-1-2）`;
-                    matchValidation += `\n  ミックス試合率: ${mixCount}/${appState.matches.length}試合 (${mixRate}%)`;
+                    matchValidation += `\n  ミックスコート率: ${mixCourtCount}/${totalCourtCount}コート (${mixCourtRate}%)`;
+
+                    // 少数派の性別が全員同時出場した試合のうち、実際にミックスコートを作れた試合数
+                    const minorityIsMale = males.length <= females.length;
+                    const minorityGroup = minorityIsMale ? males : females;
+                    const minorityLabel = minorityIsMale ? '男性' : '女性';
+                    if (minorityGroup.length > 0) {
+                        const minorityPresentMatches = appState.matches.filter(m => minorityGroup.every(p => m.playersThisRound.includes(p)));
+                        const mixAchievedMatches = minorityPresentMatches.filter(m => m.courts.some(c => isCandidateCorrectType(c, 'genderMix', groups)));
+                        matchValidation += `\n  ${minorityLabel}${minorityGroup.length}人が全員同時出場した試合: ${minorityPresentMatches.length}試合中${mixAchievedMatches.length}試合でミックスコートを形成`;
+                    }
                 }
                 if (ruleType === 'fixedPair') {
                     const p1Matches = appState.matches.filter(m => m.courts.some(c => {
@@ -2981,7 +2999,8 @@ ${conclusionText}</pre>
             // (1) プレイ公平性
             const totalPlaySlots = surfaces * 4 * matchCount;
             let ceilPlayCount;
-            if (ruleType === 'genderMix') {
+            if (isGenderMixStrict) {
+                // strictモード: 全コート2M+2F固定なので、男女別に均等分割できるかで判定
                 const maleCount = Object.values(groups).filter(g => g === 'M').length;
                 const femaleCount = Object.values(groups).filter(g => g === 'F').length;
                 const mSlots = surfaces * 2 * matchCount;
@@ -2990,6 +3009,8 @@ ${conclusionText}</pre>
                 const fOk = femaleCount > 0 && fSlots % femaleCount === 0;
                 ceilPlayCount = (mOk && fOk) ? 100 : 70;
             } else {
+                // best-effort（人数不足で男女別に分けられない場合）・ruleType='none'等:
+                // 全員で全枠を分け合うだけなので、男女別ではなく総人数で判定する
                 ceilPlayCount = (totalPlaySlots % members === 0) ? 100 : 70;
             }
 
