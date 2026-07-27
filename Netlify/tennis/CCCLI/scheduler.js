@@ -488,7 +488,7 @@
 <li style="margin-bottom:8px;">「1. 設定と生成」の<strong>合計メンバー数</strong>の横にある「<strong>うち未到着</strong>」に人数を入力（例: 18人中2人遅刻なら「2」を入力。自動的に17番・18番が未到着になります）</li>
 <li style="margin-bottom:8px;">通常どおり試合を生成（未到着の人抜きで組まれます）</li>
 <li style="margin-bottom:8px;">本人が来たら、試合スケジュール上部に表示される「<strong>◯◯さん到着</strong>」ボタンをタップ</li>
-<li style="margin-bottom:8px;">確認ダイアログで「はい」を選ぶと、次の未消化試合から自動で組み込まれます（消化済みの試合・チェック済みの進行状況はそのまま）</li>
+<li style="margin-bottom:8px;">確認ダイアログで「はい」を選ぶと、最後に完了した試合の次から自動で組み込まれます（消化済みの試合・チェック済みの進行状況はそのまま）</li>
 </ol>
 <p style="font-size:0.8rem;color:#6b7280;margin-bottom:6px;">公平性の考え方: 遅れて参加した人は、参加した時点から他の人と同じペースで出場します。参加前の分を取り戻して多く出場することはありません（総プレイ数は参加が遅い分だけ少なくなります）。</p>
 <p style="font-size:0.8rem;color:#6b7280;">※ 全試合が消化済みの状態で遅刻者が来た場合は自動組み込みができません。各試合の ✏️ から手動でメンバーを入れ替えてください。</p>
@@ -1948,7 +1948,7 @@
 &nbsp;2-3-2: genderMix best-effortでは性別内での公平性を優先<br>
 &nbsp;2-3-3: best-effortでの男女間差は評価対象外<br>
 &nbsp;2-3-4: 途中参加者（joins）は按分型で評価する。参加開始試合（未到着メンバーが
-「到着」をタップした時点の次の未消化試合）の直前時点における他メンバーの
+「到着」をタップした時点で、最後に完了した試合の次）の直前時点における他メンバーの
 理論上の平均累積プレイ数を仮想オフセットとして加算してから比較し、参加後は
 同ペースで出場していれば公平とみなす（参加前の分を追いつくために多く
 出場させることはしない。総プレイ数は参加が遅い分だけ少なくなるのが正しい）<br>
@@ -3699,6 +3699,11 @@ ${conclusionText}</pre>
                 // 再生成モード：1〜regenerateFrom-1 試合までを保持
                 appState.matches = appState.matches.slice(0, regenerateFrom - 1);
                 // appState.exclusions はあらかじめ handleApplyExclusion でセット済み
+                // 再生成される範囲(regenerateFrom以降)の進行状況チェックは、作り直された
+                // 別内容の試合に引き継ぐと「未実施の試合が消化済みに見える」ため除去する
+                appState.completedMatches.forEach(idx => {
+                    if (idx >= regenerateFrom - 1) appState.completedMatches.delete(idx);
+                });
             }
             appState.dataSource = '新規生成';
             appState.areAnalysisSectionsVisible = false;
@@ -6897,18 +6902,26 @@ ${conclusionText}</pre>
             if (appState.matches.length === 0) return;
 
             // fromMatch = 最初の未消化試合番号（1-indexed）
-            let fromMatch = null;
-            for (let i = 0; i < appState.matches.length; i++) {
-                if (!appState.completedMatches.has(i)) { fromMatch = i + 1; break; }
-            }
-            if (fromMatch === null) {
-                showDialog('エラー', '全ての試合が消化済みのため、途中参加を自動的に組み込めません。試合をタップして手動で編集してください。');
+            // 「最初の未消化試合」ではなく「最後に完了した試合の次」から参加させる。
+            // 進捗が1,3,4のように歯抜けの場合、最初の未消化(第2試合)から再生成すると
+            // 消化済みの第3・4試合まで破壊してしまうため。飛ばされた未消化試合(第2試合)は
+            // 遅刻者不在のまま残る(joins=fromMatchの意味論とも一致する)
+            let lastCompleted = 0;
+            appState.completedMatches.forEach(idx => {
+                if (idx + 1 > lastCompleted) lastCompleted = idx + 1;
+            });
+            const fromMatch = lastCompleted + 1;
+            if (fromMatch > appState.matches.length) {
+                showDialog('エラー', '最終試合まで消化済みのため、途中参加を自動的に組み込めません。試合をタップして手動で編集してください。');
                 return;
             }
 
+            const _preserveNote = fromMatch === 1
+                ? ''
+                : `（第${fromMatch - 1}試合までは変更されません）`;
             showDialog(
                 '確認',
-                `${appState.members[playerIndex]}さんを第${fromMatch}試合から参加させ、以降の試合を再生成しますか？（第${fromMatch - 1}試合までは変更されません）`,
+                `${appState.members[playerIndex]}さんを第${fromMatch}試合から参加させ、以降の試合を再生成しますか？${_preserveNote}`,
                 async (confirmed) => {
                     if (!confirmed) return;
 
