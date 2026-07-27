@@ -74,6 +74,9 @@
         // が互いに影響し合う循環を避けるため。
         function calculateJoinOffset(playerIndex, fromMatch, exclusions, joins) {
             if (fromMatch <= 1) return 0;
+            // 未到着(全試合不参加)にオフセットは無意味。fromMatch=9999のまま計算すると
+            // 数千という巨大な値が保存・エクスポートされてしまうため0にする
+            if (fromMatch === JOIN_NOT_ARRIVED) return 0;
             const surfaces = appState.currentSurfaceCount;
             const totalSlotsBeforeJoin = surfaces * 4 * (fromMatch - 1);
             const activeCount = Array.from({ length: appState.currentTotalMemberCount }, (_, i) => i)
@@ -95,6 +98,14 @@
 
         function updateJoinOffset(playerIndex, fromMatch) {
             appState.joinOffsets[playerIndex] = calculateJoinOffset(playerIndex, fromMatch, appState.exclusions, appState.joins);
+        }
+
+        // 上限スコア(calcConditionCeiling)用の実効メンバー数。
+        // 未到着(全試合不参加)のメンバーはスケジュール上存在しないのと同じため、
+        // 総メンバー数のまま計算すると上限・目標が実際より高く/低く見積もられる
+        function getEffectiveMemberCountForCeiling() {
+            const _notArr = Object.values(appState.joins || {}).filter(v => v === JOIN_NOT_ARRIVED).length;
+            return Math.max(0, appState.currentTotalMemberCount - _notArr);
         }
 
         const LS_KEY_PW = LS_KEY + '_pw';
@@ -1142,7 +1153,9 @@
             if (!dom.maxConsecWarning) return;
             const P = appState.currentSurfaceCount * 4;
             const _exclCount = appState.matches.length > 0 ? Object.keys(appState.exclusions).length : 0;
-            const N = appState.currentTotalMemberCount - _exclCount;
+            // 未到着メンバーは試合枠を消費しないため実効人数から除く
+            const _notArrCount = Object.values(appState.joins).filter(v => v === JOIN_NOT_ARRIVED).length;
+            const N = appState.currentTotalMemberCount - _exclCount - _notArrCount;
             if (P === 0 || N <= P) { dom.maxConsecWarning.classList.add('hidden'); return; }
             const Kmin = Math.ceil(P / (N - P));
             const selected = appState.maxConsecutiveLimit;
@@ -1196,7 +1209,9 @@
             const sel = dom.maxConsecutiveSelect;
             const P = appState.currentSurfaceCount * 4;
             const _exclCount = appState.matches.length > 0 ? Object.keys(appState.exclusions).length : 0;
-            const N = appState.currentTotalMemberCount - _exclCount;
+            // 未到着メンバーは試合枠を消費しないため実効人数から除く
+            const _notArrCount = Object.values(appState.joins).filter(v => v === JOIN_NOT_ARRIVED).length;
+            const N = appState.currentTotalMemberCount - _exclCount - _notArrCount;
             sel.innerHTML = '';
             sel.disabled = false;
             appState.forcedInfinity = false;
@@ -1766,11 +1781,12 @@
             const _exclForPc = settings.exclusions != null ? settings.exclusions : appState.exclusions;
             const _joinsForPc = settings.joins != null ? settings.joins : appState.joins;
             const _joinOffsetsForPc = settings.joinOffsets != null ? settings.joinOffsets : appState.joinOffsets;
-            // 途中参加者(按分型): 仮想オフセットを加算してから比較する
+            // 途中参加者(按分型): 仮想オフセットを加算してから比較する。
+            // 最終試合時点でアクティブなら比較対象（到着済みの途中参加者はオフセット込みで
+            // 他メンバーと比較できる）。離脱済み・未到着は最終試合で非アクティブのため除外
             const _activePc = _playCnts
                 .map((cnt, i) => cnt + (_joinOffsetsForPc[i] || 0))
-                .filter((_, i) =>
-                    isPlayerActive(i, 1, _exclForPc, _joinsForPc) && isPlayerActive(i, matches.length, _exclForPc, _joinsForPc));
+                .filter((_, i) => isPlayerActive(i, matches.length, _exclForPc, _joinsForPc));
             if (_activePc.length > 1) {
                 const _pcDiff = Math.max(..._activePc) - Math.min(..._activePc);
                 if (_pcDiff > 1) penalty -= (_pcDiff - 1) * pw.playCount;
@@ -2255,7 +2271,7 @@
             const currentRuleType = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
             const ceilingData = calcConditionCeiling(
                 appState.currentSurfaceCount,
-                appState.currentTotalMemberCount,
+                getEffectiveMemberCountForCeiling(),
                 targetMatchCount,
                 currentRuleType,
                 appState.groups
@@ -2466,8 +2482,13 @@
                 }
             }
 
-            // 第1試合の参加者が若い番号になるようにリナンバー（ミックスルール以外）
-            if (bestSolution && originalSettings.ruleType !== 'genderMix') {
+            // 第1試合の参加者が若い番号になるようにリナンバー（ミックスルール以外）。
+            // joins/exclusionsがある場合はスキップ: これらはプレイヤー番号をキーに持つが
+            // リナンバーに追従させていないため、実行すると別人に紐付いてしまう
+            // （現行フローでは未到着・参加者は末尾番号のため恒等置換となりスキップと同じだが防御的に明示）
+            if (bestSolution && originalSettings.ruleType !== 'genderMix'
+                && Object.keys(originalSettings.joins || {}).length === 0
+                && Object.keys(originalSettings.exclusions || {}).length === 0) {
                 const _p0 = [...bestSolution[0].playersThisRound].sort((a, b) => a - b);
                 const _r0 = [...bestSolution[0].restingPlayers].sort((a, b) => a - b);
                 const _ord = [..._p0, ..._r0]; // 第1試合参加者が先頭（低い番号）になる順
@@ -3520,12 +3541,15 @@ ${conclusionText}</pre>
         // ─── 目標スコアUIを条件変更時に更新 ────────────────────────────────
         function updateTargetScoreUI() {
             const surfaces = parseInt(document.getElementById('surfaceCountSelect')?.value || 1);
-            const members = parseInt(document.getElementById('totalMemberCountSelect')?.value || 0);
+            const membersTotal = parseInt(document.getElementById('totalMemberCountSelect')?.value || 0);
             const matches = parseInt(document.getElementById('matchCountSelect')?.value || 20);
             const info = document.getElementById('ceilingInfo');
             if (!info) return;
-            if (members < 4) { info.innerHTML = ''; return; }
+            if (membersTotal < 4) { info.innerHTML = ''; return; }
 
+            // 未到着メンバーはスケジュール上存在しないため実効人数で上限を計算
+            const _notArrTS = Object.values(appState.joins || {}).filter(v => v === JOIN_NOT_ARRIVED).length;
+            const members = Math.max(0, membersTotal - _notArrTS);
             const ceiling = calcConditionCeiling(surfaces, members, matches);
             const _ceilScore = ceiling.totalBase ?? ceiling.total;
             info.innerHTML = `この条件での上限: <b style="color:#15803d;">${_ceilScore}点</b> <span style="font-size:10px;color:#6b7280;">（${_ceilScore}点到達で再試行不要）</span><span style="font-size:10px;color:#9ca3af;margin-left:4px;">(プレイ公平${ceiling.scores.playCount}・ペア多様${ceiling.scores.pairCoverage}・カード多様${ceiling.scores.cardCoverage}・序盤多様${ceiling.scores.earlyDiversity})</span>`;
@@ -4187,8 +4211,13 @@ ${conclusionText}</pre>
             // genderMixの場合: strictモード（両性とも十分な人数がいる）のみM-Fペアに限定
             // best-effortモード（片性が不足）では全ペアを対象にする
             const _isStrict = _ruleType === 'genderMix' && !isGenderMixBestEffort(_groups, appState.currentSurfaceCount);
+            // 未到着(全試合不参加)のメンバーを含むペアは構造上決して成立しないため母数から除く。
+            // 含めるとペア多様性・公平性の分母が実現不可能なペアで膨らみ、評価が常に悪化する
+            const _jnsPairs = appState.joins || {};
             for (let i = 0; i < appState.currentTotalMemberCount; i++) {
+                if (_jnsPairs[i] === JOIN_NOT_ARRIVED) continue;
                 for (let j = i + 1; j < appState.currentTotalMemberCount; j++) {
+                    if (_jnsPairs[j] === JOIN_NOT_ARRIVED) continue;
                     if (_isStrict) {
                         const gi = _groups[i] || 'default';
                         const gj = _groups[j] || 'default';
@@ -4613,13 +4642,16 @@ ${conclusionText}</pre>
         // 休憩を共にした回数をペアごとに集計（同じ顔ぶれが繰り返し休憩する偏りを検出するため）
         function calculateRestPairUsageCounts(matches, memberCount, exclusions, joins) {
             const counts = {};
+            const excl = exclusions || {};
+            const jns = joins || {};
+            // 未到着(全試合不参加)のメンバーを含む休憩ペアは決して発生しないため母数から除く
             for (let i = 0; i < memberCount; i++) {
+                if (jns[i] === JOIN_NOT_ARRIVED) continue;
                 for (let j = i + 1; j < memberCount; j++) {
+                    if (jns[j] === JOIN_NOT_ARRIVED) continue;
                     counts[`${i},${j}`] = 0;
                 }
             }
-            const excl = exclusions || {};
-            const jns = joins || {};
             matches.forEach((m, matchIdx) => {
                 const matchNumber = matchIdx + 1;
                 // 離脱済み・未参加のメンバーは「常に休憩」扱いになり集計を歪めるため対象外にする
@@ -4915,7 +4947,7 @@ ${conclusionText}</pre>
             const ceilRuleType = appState.generationSettings?.ruleType || 'none';
             const ceilInfo = calcConditionCeiling(
                 appState.currentSurfaceCount,
-                appState.currentTotalMemberCount,
+                getEffectiveMemberCountForCeiling(),
                 appState.matches.length,
                 ceilRuleType,
                 appState.groups
@@ -6790,8 +6822,11 @@ ${conclusionText}</pre>
             dom.notArrivedCountInput.max = String(maxN);
         }
 
-        // 「うち未到着」の人数指定に応じて、登録順の末尾N人をjoins[idx]=JOIN_NOT_ARRIVED
-        // (全試合不参加)に設定する。既に到着済み(実際のfromMatch値)のメンバーは変更しない
+        // 「うち未到着」の人数指定に応じて、登録順の末尾からN人をjoins[idx]=JOIN_NOT_ARRIVED
+        // (全試合不参加)に設定する。既に到着済み(実際のfromMatch値)・離脱設定済みの
+        // メンバーは対象外として飛ばす。「末尾N個の席」を固定で見ると、到着済みメンバーが
+        // 末尾の席を占めている場合に指定人数より少なくマークされ、表示が実カウントに
+        // 戻ってしまう（入力が効かないように見える）ため、設定可能なメンバーだけを数える
         function handleNotArrivedCountChange() {
             const total = appState.currentTotalMemberCount;
             const maxN = Math.max(0, total - appState.currentSurfaceCount * 4);
@@ -6799,20 +6834,45 @@ ${conclusionText}</pre>
             if (isNaN(n) || n < 0) n = 0;
             if (n > maxN) n = maxN;
 
-            const tailStart = total - n;
-            for (let i = 0; i < total; i++) {
-                if (i >= tailStart) {
-                    if (appState.joins[i] == null && appState.exclusions[i] == null) {
-                        appState.joins[i] = JOIN_NOT_ARRIVED;
-                    }
-                } else if (appState.joins[i] === JOIN_NOT_ARRIVED) {
+            let remaining = n;
+            for (let i = total - 1; i >= 0; i--) {
+                const hasArrivedJoin = appState.joins[i] != null && appState.joins[i] !== JOIN_NOT_ARRIVED;
+                if (hasArrivedJoin || appState.exclusions[i] != null) continue;
+                if (remaining > 0) {
+                    appState.joins[i] = JOIN_NOT_ARRIVED;
+                    remaining--;
+                } else {
                     delete appState.joins[i];
                 }
             }
             recalculateAllJoinOffsets();
+            updateMaxConsecutiveForActiveCount();
             updateNotArrivedCountDisplay();
             renderArrivalButtons();
+            updateTargetScoreUI();
             saveState();
+        }
+
+        // 未到着人数の変更に応じて最大連続プレイ数の推奨値・選択肢を更新する。
+        // 未到着メンバーは試合枠を消費しないため、実効人数(合計-未到着)で計算しないと
+        // 「上限が緩すぎて生成が破綻する/厳しすぎて選択肢に出ない」が起こる
+        function updateMaxConsecutiveForActiveCount() {
+            const P = appState.currentSurfaceCount * 4;
+            const _notArr = Object.values(appState.joins).filter(v => v === JOIN_NOT_ARRIVED).length;
+            const N = appState.currentTotalMemberCount - _notArr;
+            let newLimit = DEFAULT_MAX_CONSECUTIVE;
+            if (N > P) {
+                const Kmin = Math.ceil(P / (N - P));
+                newLimit = (Kmin >= 99) ? 99 : Math.min(Kmin + 1, 15);
+            } else {
+                newLimit = 99;
+            }
+            appState.maxConsecutiveLimit = newLimit;
+            updateMaxConsecutiveOptions();
+            if (![...dom.maxConsecutiveSelect.options].some(opt => opt.value == newLimit)) {
+                dom.maxConsecutiveSelect.appendChild(new Option(`${newLimit} 連続`, newLimit));
+            }
+            dom.maxConsecutiveSelect.value = String(newLimit);
         }
 
         // 試合スケジュールカード上部に、未到着メンバー(joins===JOIN_NOT_ARRIVED)の
@@ -6890,6 +6950,10 @@ ${conclusionText}</pre>
 
             // 制約: 同一メンバーへのjoins/exclusionsは joins < exclusions のみ許可
             const existingJoin = appState.joins[playerIndex];
+            if (existingJoin === JOIN_NOT_ARRIVED) {
+                showDialog('入力エラー', `${appState.members[playerIndex]}さんは未到着のため、離脱を設定できません。（参加しないまま終わる場合は未到着のままで問題ありません）`);
+                return;
+            }
             if (existingJoin != null && !(existingJoin < fromMatch)) {
                 showDialog('入力エラー', `${appState.members[playerIndex]}さんは第${existingJoin}試合から途中参加の設定があります。離脱はそれより後の試合番号にしてください。`);
                 return;
@@ -7158,7 +7222,7 @@ ${conclusionText}</pre>
             if (appState.matches.length > 0 && appState.allPossiblePairs.length > 0) {
                 const statsSnap = calculateSummaryStats(appState.matches, appState.members, appState.allPossiblePairs);
                 const gradeSnap = calcOverallGrade(statsSnap, appState.matches, appState.members, appState.allPossiblePairs);
-                const ceilInfo2 = calcConditionCeiling(appState.currentSurfaceCount, appState.currentTotalMemberCount, appState.matches.length);
+                const ceilInfo2 = calcConditionCeiling(appState.currentSurfaceCount, getEffectiveMemberCountForCeiling(), appState.matches.length);
                 const _ceilScore2 = ceilInfo2.totalBase ?? ceilInfo2.total;
                 // _ceilScore2はmixBonus抜きなので、比較側もtotalBase(bonus抜き)で揃える
                 const _reachedCeil2 = Math.max(0, _ceilScore2 - gradeSnap.totalBase) <= 1.0;
