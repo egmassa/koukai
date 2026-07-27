@@ -14,6 +14,7 @@
             members: [],
             groups: {},
             exclusions: {},
+            joins: {}, // 途中参加（{playerIdx: fromMatch} = fromMatch試合目「から」参加。exclusionsの逆）
             allPossiblePairs: [],
             matches: [],
             completedMatches: new Set(),
@@ -46,6 +47,17 @@
             const mCount = Object.keys(groups).filter(k => groups[k] === 'M').length;
             const fCount = Object.keys(groups).filter(k => groups[k] === 'F').length;
             return mCount <= surfaces * 2 || fCount <= surfaces * 2;
+        }
+
+        // ─── 出場可否の一元判定ヘルパー（離脱・途中参加を統合） ─────────────────
+        // matchNumberは1-indexed（第1試合=1）。exclusions/joinsが未指定の場合は
+        // appStateから読む（呼び出し元がsettings経由で明示的に渡すのが望ましい）。
+        function isPlayerActive(playerIdx, matchNumber, exclusions, joins) {
+            if (exclusions == null) exclusions = appState.exclusions;
+            if (joins == null) joins = appState.joins;
+            if (exclusions[playerIdx] && matchNumber >= exclusions[playerIdx]) return false;
+            if (joins[playerIdx] && matchNumber < joins[playerIdx]) return false;
+            return true;
         }
 
         const LS_KEY_PW = LS_KEY + '_pw';
@@ -182,6 +194,7 @@
                 'genderMixWrapper', 'femalePlayersContainer', 'editMatchModal', 'cancelEditMatchButton', 'saveMatchButton',
                 'editMatchTitle', 'editMatchForm', 'jumpNextBtn',
                 'dropoutSettingsWrapper', 'dropoutPlayerSelect', 'dropoutMatchNumberInput', 'applyDropoutButton', 'dropoutHint',
+                'dropoutPlayerLabel', 'dropoutMatchNumberLabel',
                 'analysisToggle', 'jumpNextBtn', 'theme-toggle', 'theme-toggle-dark-icon', 'theme-toggle-light-icon',
                 'expandScheduleBtn', 'printScheduleBtn',
                 'configurationHub', 'memberDetailContent'
@@ -376,7 +389,17 @@
             dom.exportCsvButton.addEventListener('click', handleExportCsv);
             dom.cancelEditMatchButton.addEventListener('click', () => dom.editMatchModal.classList.add('hidden'));
             dom.saveMatchButton.addEventListener('click', saveMatchEdit);
-            dom.applyDropoutButton.addEventListener('click', handleApplyExclusion);
+            dom.applyDropoutButton.addEventListener('click', () => {
+                const mode = document.querySelector('input[name="dropoutMode"]:checked')?.value || 'leave';
+                if (mode === 'join') {
+                    handleApplyJoin();
+                } else {
+                    handleApplyExclusion();
+                }
+            });
+            document.querySelectorAll('input[name="dropoutMode"]').forEach(radio => {
+                radio.addEventListener('change', updateExclusionUI);
+            });
             dom.expandScheduleBtn.addEventListener('click', toggleScheduleExpansion);
             (function _debugBtnSetup() {
                 const _dbBtn = document.getElementById('debugLogBtn');
@@ -744,7 +767,7 @@
                 return;
             }
 
-            const { members, matches, currentTotalMemberCount, currentSurfaceCount, exclusions, pairIdMap, pairColorMap } = appState;
+            const { members, matches, currentTotalMemberCount, currentSurfaceCount, exclusions, joins, pairIdMap, pairColorMap } = appState;
             const generationSettings = appState.generationSettings || {};
             const groups = generationSettings.groups || {};
             const ruleType = generationSettings.ruleType || 'none';
@@ -758,10 +781,28 @@
                 }).join(', ');
                 exclusionText = ` | 離脱: ${exclusionDetails}`;
             }
+            const joinEntries = Object.entries(joins || {});
+            if (joinEntries.length > 0) {
+                const joinDetails = joinEntries.map(([playerIdx, fromMatch]) => {
+                    return `${members[playerIdx]}(第${fromMatch}試合~)`;
+                }).join(', ');
+                exclusionText += ` | 参加: ${joinDetails}`;
+            }
 
             let tableRows = '';
             matches.forEach((match, matchIdx) => {
-                const restingNames = match.restingPlayers.map(i => members[i]).join(', ') || 'なし';
+                const matchNumber = matchIdx + 1;
+                // まだ参加していないメンバーは「休憩」ではなく別枠にする
+                const restingActiveNames = match.restingPlayers
+                    .filter(i => isPlayerActive(i, matchNumber, exclusions, joins))
+                    .map(i => members[i]);
+                const notYetJoinedNames = match.restingPlayers
+                    .filter(i => !isPlayerActive(i, matchNumber, exclusions, joins))
+                    .map(i => members[i]);
+                let restingNames = restingActiveNames.join(', ') || 'なし';
+                if (notYetJoinedNames.length > 0) {
+                    restingNames += `<br><span style="color:#9ca3af;">未参加: ${notYetJoinedNames.join(', ')}</span>`;
+                }
                 const courtRows = match.courts.map((court, courtIdx) => {
                     const team1HTML = toBadgesForPrint(court.team1, members, groups, ruleType, pairIdMap, pairColorMap);
                     const team2HTML = toBadgesForPrint(court.team2, members, groups, ruleType, pairIdMap, pairColorMap);
@@ -937,6 +978,7 @@
                     appState.favorites = parsed.favorites || [];
                     appState.groups = parsed.groups || {};
                     appState.exclusions = parsed.exclusions || {};
+                    appState.joins = parsed.joins || {}; // 後方互換: 旧データにはjoinsが存在しない
 
                     // ▼▼▼ この行を追加 ▼▼▼
                     // 古いデータ形式との互換性を保つため、generationSettingsがなければ空のオブジェクトとして初期化する
@@ -990,6 +1032,7 @@
                 appState.members = Array.from({ length: wanted }, (_, i) => `${i + 1}`);
                 appState.groups = {};
                 appState.exclusions = {};
+                appState.joins = {};
             }
             if (appState.currentSurfaceCount < prevSurface) {
                 dom.totalMemberCountSelect.value = minMembers;
@@ -997,6 +1040,7 @@
                 appState.members = Array.from({ length: minMembers }, (_, i) => `${i + 1}`);
                 appState.groups = {};
                 appState.exclusions = {};
+                appState.joins = {};
             }
 
             appState.matches = [];
@@ -1064,6 +1108,7 @@
                 appState.members = Array.from({ length: minMembers }, (_, i) => `${i + 1}`);
                 appState.groups = {};
                 appState.exclusions = {};
+                appState.joins = {};
             }
             select.value = appState.currentTotalMemberCount;
         }
@@ -1150,7 +1195,9 @@
             if (dom.resultsDashboard) dom.resultsDashboard.classList.toggle('hidden', !hasMatches);
             // 分析パネルはareAnalysisSectionsVisibleフラグに従う（hasMatchesだけで開かない）
             if (dom.analysisSection) dom.analysisSection.classList.toggle('hidden', !hasMatches || !appState.areAnalysisSectionsVisible);
-            if (dom.dropoutSettingsWrapper) dom.dropoutSettingsWrapper.classList.toggle('hidden', !hasMatches);
+            // 途中参加(joins)は試合生成前でも設定できるため、メンバーがいれば表示する
+            // （途中離脱は既存の試合が必要なので、モード側で無効化する）
+            if (dom.dropoutSettingsWrapper) dom.dropoutSettingsWrapper.classList.toggle('hidden', appState.currentTotalMemberCount === 0);
             // if (dom.configurationHub) dom.configurationHub.open = !hasMatches; // ← この行をコメントアウトして無効化
 
 
@@ -1593,7 +1640,11 @@
                 }
             }
             const _exclForRest = settings.exclusions != null ? settings.exclusions : appState.exclusions;
-            const _activeRestStreaks = _maxIndivRest.filter((_, p) => !(_exclForRest[p] && matches.length >= _exclForRest[p]));
+            const _joinsForRest = settings.joins != null ? settings.joins : appState.joins;
+            // 途中離脱・途中参加のいずれかがあり、全試合を通して出場していない選手は
+            // ストリーク比較が歪むため対象外にする（両端(第1試合・最終試合)で活動中かで判定）
+            const _activeRestStreaks = _maxIndivRest.filter((_, p) =>
+                isPlayerActive(p, 1, _exclForRest, _joinsForRest) && isPlayerActive(p, matches.length, _exclForRest, _joinsForRest));
             if (_activeRestStreaks.length > 1) {
                 const _restStrMax = Math.max(..._activeRestStreaks);
                 const _restStrMin = Math.min(..._activeRestStreaks);
@@ -1617,7 +1668,9 @@
                 }
             }
             const _exclForPlay = settings.exclusions != null ? settings.exclusions : appState.exclusions;
-            const _activePlayStreaks = _maxIndivPlayStreak.filter((_, p) => !(_exclForPlay[p] && matches.length >= _exclForPlay[p]));
+            const _joinsForPlay = settings.joins != null ? settings.joins : appState.joins;
+            const _activePlayStreaks = _maxIndivPlayStreak.filter((_, p) =>
+                isPlayerActive(p, 1, _exclForPlay, _joinsForPlay) && isPlayerActive(p, matches.length, _exclForPlay, _joinsForPlay));
             if (_activePlayStreaks.length > 1) {
                 const _playStrMax = Math.max(..._activePlayStreaks);
                 const _playStrMin = Math.min(..._activePlayStreaks);
@@ -1632,7 +1685,9 @@
                 m.playersThisRound.forEach(p => { if (p < _pcLen) _playCnts[p]++; });
             }
             const _exclForPc = settings.exclusions != null ? settings.exclusions : appState.exclusions;
-            const _activePc = _playCnts.filter((_, i) => !(_exclForPc[i] && matches.length >= _exclForPc[i]));
+            const _joinsForPc = settings.joins != null ? settings.joins : appState.joins;
+            const _activePc = _playCnts.filter((_, i) =>
+                isPlayerActive(i, 1, _exclForPc, _joinsForPc) && isPlayerActive(i, matches.length, _exclForPc, _joinsForPc));
             if (_activePc.length > 1) {
                 const _pcDiff = Math.max(..._activePc) - Math.min(..._activePc);
                 if (_pcDiff > 1) penalty -= (_pcDiff - 1) * pw.playCount;
@@ -1680,9 +1735,10 @@
             // メインスコア
             const allPairs = settings.allPossiblePairs || appState.allPossiblePairs;
             const excl = settings.exclusions != null ? settings.exclusions : appState.exclusions;
+            const jns = settings.joins != null ? settings.joins : appState.joins;
             const stats = calculateSummaryStats(
                 matches, settings.members, allPairs,
-                settings.currentSurfaceCount, excl, _rtRest, _grpEval
+                settings.currentSurfaceCount, excl, _rtRest, _grpEval, jns
             );
             return calculateMetaScore(stats) + mixBonus + penalty;
         }
@@ -1834,6 +1890,13 @@
                 ? exclusionEntries.map(([idx, fromMatch]) => `  [${idx}] ${members[idx] || ('P' + (Number(idx) + 1))}: 第${fromMatch}試合から離脱`).join('\n')
                 : '  なし';
 
+            // 途中参加情報
+            const joins = appState.joins || {};
+            const joinEntries = Object.entries(joins);
+            const joinInfo = joinEntries.length > 0
+                ? joinEntries.map(([idx, fromMatch]) => `  [${idx}] ${members[idx] || ('P' + (Number(idx) + 1))}: 第${fromMatch}試合から参加`).join('\n')
+                : '  なし';
+
             // genderMix用の分類
             const males = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'M');
             const females = Array.from({ length: memberCount }, (_, i) => i).filter(i => (groups[i] || 'default') === 'F');
@@ -1950,8 +2013,12 @@
                 const restStreaks = new Array(memberCount).fill(0);
                 const maxPlay = new Array(memberCount).fill(0);
                 const maxRest = new Array(memberCount).fill(0);
-                appState.matches.forEach(m => {
+                appState.matches.forEach((m, matchIdx) => {
+                    const matchNumber = matchIdx + 1;
                     for (let p = 0; p < memberCount; p++) {
+                        // 離脱後・未参加のあいだは対象外にする（ずっと不出場なだけの期間を
+                        // 連続休憩としてカウントしてしまわないようにするため）
+                        if (!isPlayerActive(p, matchNumber, appState.exclusions, appState.joins)) continue;
                         if (m.playersThisRound.includes(p)) {
                             playStreaks[p]++; restStreaks[p] = 0;
                         } else {
@@ -1984,7 +2051,7 @@
             // 休憩ペアの偏り（同じ顔ぶれが繰り返し一緒に休んでいないか）
             let restPairInfo = 'マッチなし';
             if (appState.matches && appState.matches.length > 0) {
-                const restPairUsage = calculateRestPairUsageCounts(appState.matches, memberCount, appState.exclusions);
+                const restPairUsage = calculateRestPairUsageCounts(appState.matches, memberCount, appState.exclusions, appState.joins);
                 const cvRestPair = calcCV(Object.values(restPairUsage));
                 const restRoster = appState.matches.map((m, i) => {
                     const names = m.restingPlayers.map(p => members[p] || ('P' + (p + 1))).join(',');
@@ -2008,6 +2075,9 @@
                 '',
                 '【離脱情報】',
                 exclusionInfo,
+                '',
+                '【参加情報】',
+                joinInfo,
                 '',
                 '【isCandidateCorrectTypeテスト】',
                 `ruleType取得: ${ruleType}`,
@@ -2112,6 +2182,8 @@
                 groups: JSON.parse(JSON.stringify(appState.groups)),
                 ruleType: document.querySelector('input[name="ruleType"]:checked').value,
                 members: [...appState.members],
+                exclusions: { ...appState.exclusions },
+                joins: { ...appState.joins },
             };
             // 第1試合に出場すべきプレイヤー（登録順の先頭4人）を事前計算して settings に保持
             {
@@ -2161,7 +2233,7 @@
                     break;
                 }
                 if (targetRate > 0 && bestSolution && totalIters % 500 === 0) {
-                    const tmpStats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
+                    const tmpStats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups, originalSettings.joins);
                     const gradeScore = calcOverallGrade(tmpStats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus).totalBase;
                     if (gradeScore >= targetRate) {
                         reachedTarget = true;
@@ -2367,7 +2439,7 @@
                 appState.matches = bestSolution;
                 appState.generationSettings = { groups: originalSettings.groups, ruleType: originalSettings.ruleType };
 
-                const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
+                const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups, originalSettings.joins);
                 const restInfo = checkConsecutiveRests(bestSolution, originalSettings.members);
                 let metaScore = calculateMetaScore(stats);
                 // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと全く同じ式に統一）
@@ -2527,6 +2599,8 @@
 
             const excl = settings.exclusions || appState.exclusions || {};
             if (Object.keys(excl).length > 0) return null; // 離脱ありは非対応
+            const jns = settings.joins || appState.joins || {};
+            if (Object.keys(jns).length > 0) return null; // 途中参加ありも非対応（第1試合が全員参加前提のため）
 
             const surfaces = settings.currentSurfaceCount || appState.currentSurfaceCount;
             const N = settings.currentTotalMemberCount || appState.currentTotalMemberCount;
@@ -2872,6 +2946,7 @@
                 members: [...appState.members],
                 allPossiblePairs: [...appState.allPossiblePairs],
                 exclusions: { ...appState.exclusions },
+                joins: { ...appState.joins },
             };
 
             regenerateAllPossiblePairs();
@@ -2883,7 +2958,7 @@
                 const generatedMatches = await generateMatchesInBackground(targetMatchCount, originalSettings);
                 if (!generatedMatches || generatedMatches.length < targetMatchCount) continue;
 
-                const stats = calculateSummaryStats(generatedMatches, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups);
+                const stats = calculateSummaryStats(generatedMatches, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups, originalSettings.joins);
                 let metaScore = calculateMetaScore(stats);
 
                 const restInfo = checkConsecutiveRests(generatedMatches, originalSettings.members);
@@ -3079,6 +3154,12 @@ ${conclusionText}</pre>
                 return false;
             }
 
+            const joinsAMatch = JSON.stringify(settingsA.joins || {});
+            const joinsBMatch = JSON.stringify(settingsB.joins || {});
+            if (joinsAMatch !== joinsBMatch) {
+                return false;
+            }
+
             return true;
         }
 
@@ -3093,7 +3174,9 @@ ${conclusionText}</pre>
                 matchCount: settings.matchCount,
                 maxConsecutiveLimit: settings.maxConsecutiveLimit,
                 ruleType: settings.ruleType,
-                groups: settings.groups || {}
+                groups: settings.groups || {},
+                exclusions: settings.exclusions || {},
+                joins: settings.joins || {}
             });
         }
 
@@ -3702,8 +3785,8 @@ ${conclusionText}</pre>
         function generateRandomSingleMatch(matchIndex) {
             const allPlayers = Array.from({ length: appState.currentTotalMemberCount }, (_, k) =>
                 k);
-            let availablePlayersForRound = allPlayers.filter(pIdx => !appState.exclusions[pIdx] ||
-                appState.exclusions[pIdx] > (matchIndex + 1));
+            let availablePlayersForRound = allPlayers.filter(pIdx =>
+                isPlayerActive(pIdx, matchIndex + 1, appState.exclusions, appState.joins));
             const courts = [];
             for (let c = 0; c < appState.currentSurfaceCount; c++) {
                 if
@@ -3874,8 +3957,7 @@ ${conclusionText}</pre>
                 if (regenerationStartIndex === -1 || i >= regenerationStartIndex) {
                     const activePlayerPlays = [];
                     for (let pIdx = 0; pIdx < appState.currentTotalMemberCount; pIdx++) {
-                        const isExcluded = appState.exclusions[pIdx] && matchNumber >= appState.exclusions[pIdx];
-                        if (!isExcluded) {
+                        if (isPlayerActive(pIdx, matchNumber, appState.exclusions, appState.joins)) {
                             activePlayerPlays.push(cumulativePlays[pIdx]);
                         }
                     }
@@ -4074,8 +4156,19 @@ ${conclusionText}</pre>
                 titleLabel.htmlFor = `match-${matchIdx}`;
                 titleLabel.textContent = `第${matchIdx + 1}試合`;
 
-                const restingNames = match.restingPlayers.map(i => appState.members[i]).join(', ') || 'なし';
-                restingPlayersSpan.textContent = `休憩: ${restingNames}`;
+                const matchNumber = matchIdx + 1;
+                // まだ参加していないメンバーは「休憩」ではなく「未参加」として区別する
+                const restingActiveNames = match.restingPlayers
+                    .filter(i => isPlayerActive(i, matchNumber, appState.exclusions, appState.joins))
+                    .map(i => appState.members[i]);
+                const notYetJoinedNames = match.restingPlayers
+                    .filter(i => !isPlayerActive(i, matchNumber, appState.exclusions, appState.joins))
+                    .map(i => appState.members[i]);
+                let restingLabel = `休憩: ${restingActiveNames.join(', ') || 'なし'}`;
+                if (notYetJoinedNames.length > 0) {
+                    restingLabel += ` ｜ 未参加: ${notYetJoinedNames.join(', ')}`;
+                }
+                restingPlayersSpan.textContent = restingLabel;
 
                 // 7. コート情報（対戦カード）を生成して追加する
                 match.courts.forEach((court, courtIdx) => {
@@ -4405,7 +4498,7 @@ ${conclusionText}</pre>
         }
 
         // 休憩を共にした回数をペアごとに集計（同じ顔ぶれが繰り返し休憩する偏りを検出するため）
-        function calculateRestPairUsageCounts(matches, memberCount, exclusions) {
+        function calculateRestPairUsageCounts(matches, memberCount, exclusions, joins) {
             const counts = {};
             for (let i = 0; i < memberCount; i++) {
                 for (let j = i + 1; j < memberCount; j++) {
@@ -4413,10 +4506,11 @@ ${conclusionText}</pre>
                 }
             }
             const excl = exclusions || {};
+            const jns = joins || {};
             matches.forEach((m, matchIdx) => {
                 const matchNumber = matchIdx + 1;
-                // 離脱済みメンバーは「常に休憩」扱いになり集計を歪めるため対象外にする
-                const activeResting = m.restingPlayers.filter(p => !(excl[p] && matchNumber >= excl[p]));
+                // 離脱済み・未参加のメンバーは「常に休憩」扱いになり集計を歪めるため対象外にする
+                const activeResting = m.restingPlayers.filter(p => isPlayerActive(p, matchNumber, excl, jns));
                 for (let a = 0; a < activeResting.length; a++) {
                     for (let b = a + 1; b < activeResting.length; b++) {
                         const i = Math.min(activeResting[a], activeResting[b]);
@@ -4542,11 +4636,12 @@ ${conclusionText}</pre>
          * @param {Array} allPossiblePairs - 全ペアの配列
          * @returns {object} 計算された統計情報のオブジェクト
          */
-        function calculateSummaryStats(matches, members, allPossiblePairs, surfaceCount, exclusions, ruleType, groups) {
-            // surfaceCount・exclusions・ruleType・groupsは、呼び出し元が渡さない場合のみ
+        function calculateSummaryStats(matches, members, allPossiblePairs, surfaceCount, exclusions, ruleType, groups, joins) {
+            // surfaceCount・exclusions・joins・ruleType・groupsは、呼び出し元が渡さない場合のみ
             // 現在のライブ状態にフォールバック（後方互換）。SA探索中は必ず呼び出し元のsettingsを渡すこと。
             if (surfaceCount == null) surfaceCount = appState.currentSurfaceCount;
             if (exclusions == null) exclusions = appState.exclusions;
+            if (joins == null) joins = appState.joins;
             if (ruleType === undefined) ruleType = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
             if (groups === undefined) groups = appState.groups || {};
             const pairUsage = calculateAllPairUsageCounts(matches, members.length);
@@ -4589,7 +4684,7 @@ ${conclusionText}</pre>
                     match.playersThisRound.forEach(playerIdx => cumulativePlays[playerIdx]++);
                     const activeIdx = members
                         .map((_, i) => i)
-                        .filter(i => !exclusions[i] || exclusions[i] > (matchIdx + 1));
+                        .filter(i => isPlayerActive(i, matchIdx + 1, exclusions, joins));
                     const _malesPC = activeIdx.filter(i => (groups[i] || 'default') === 'M');
                     const _femalesPC = activeIdx.filter(i => (groups[i] || 'default') === 'F');
                     const _isStrictPC = ruleType === 'genderMix' && _malesPC.length > surfaceCount * 2 && _femalesPC.length > surfaceCount * 2;
@@ -4612,7 +4707,7 @@ ${conclusionText}</pre>
 
             const matchupFairness = calculateMatchupFairness(matches, allPossiblePairs);
 
-            const restPairUsage = calculateRestPairUsageCounts(matches, members.length, exclusions);
+            const restPairUsage = calculateRestPairUsageCounts(matches, members.length, exclusions, joins);
             const cvRestPair = calcCV(Object.values(restPairUsage));
             const giniRestPair = calcGini(Object.values(restPairUsage));
 
@@ -5486,6 +5581,7 @@ ${conclusionText}</pre>
                                 members: [...appState.members],
                                 groups: { ...appState.groups },
                                 exclusions: { ...appState.exclusions },
+                                joins: { ...appState.joins },
                                 matches: JSON.parse(JSON.stringify(appState.matches)),
                                 completedMatches: Array.from(appState.completedMatches),
                                 generationSettings: { ...appState.generationSettings },
@@ -5550,6 +5646,7 @@ ${conclusionText}</pre>
                         const fav = appState.favorites.find(f => f.name === selectedName);
                         if (fav) {
                             appState.exclusions = fav.exclusions || {};
+                            appState.joins = fav.joins || {}; // 後方互換: 旧お気に入りにはjoinsが存在しない
                             appState.currentSurfaceCount = fav.settings.surfaceCount;
                             appState.currentTotalMemberCount = fav.settings.totalMemberCount;
                             appState.maxConsecutiveLimit = fav.settings.maxConsecutiveLimit;
@@ -5655,6 +5752,7 @@ ${conclusionText}</pre>
                 members: [...appState.members],
                 groups: { ...appState.groups },
                 exclusions: { ...appState.exclusions },
+                joins: { ...appState.joins },
                 matches: JSON.parse(JSON.stringify(appState.matches)),
                 completedMatches: Array.from(appState.completedMatches),
                 generationSettings: { ...appState.generationSettings },
@@ -5954,6 +6052,7 @@ ${conclusionText}</pre>
                                     = new
                                         Set(importedState.completedMatches
                                             || []);
+                                appState.joins = importedState.joins || {}; // 後方互換: 旧バックアップにはjoinsが存在しない
                                 restoreRuleTypeRadioFromState();
                                 updateAllUI();
                                 showDialog('成功',
@@ -5998,7 +6097,7 @@ ${conclusionText}</pre>
 
         // ▼▼▼ 修正版の関数 ▼▼▼
         function formatConditionsForCSV(favorite) {
-            const { settings, members, memo, exclusions } = favorite;
+            const { settings, members, memo, exclusions, joins } = favorite;
 
             // ruleMapの定義を正しく閉じます
             const ruleMap = {
@@ -6033,6 +6132,14 @@ ${conclusionText}</pre>
                     return `${members[playerIdx]}(${fromMatch}試合目~)`;
                 }).join('; '); // カンマを避けるためセミコロンで連結
                 conditions.push(['離脱情報', `"${exclusionText}"`]);
+            }
+
+            const joinEntries = Object.entries(joins || {});
+            if (joinEntries.length > 0) {
+                const joinText = joinEntries.map(([playerIdx, fromMatch]) => {
+                    return `${members[playerIdx]}(第${fromMatch}試合~)`;
+                }).join('; ');
+                conditions.push(['参加情報', `"${joinText}"`]);
             }
 
             conditions.push(['メモ', `"${memo || ''}"`]);
@@ -6206,6 +6313,7 @@ ${conclusionText}</pre>
                             members: [],
                             groups: {},
                             exclusions: {},
+                            joins: {},
                             allPossiblePairs: [],
                             matches: [],
                             completedMatches: new Set(),
@@ -6225,6 +6333,7 @@ ${conclusionText}</pre>
                     } else {
                         appState.completedMatches.clear();
                         appState.exclusions = {};
+                        appState.joins = {};
                         updateExclusionUI();
                         applyDisplayLogicBasedOnState();
                         saveState();
@@ -6523,18 +6632,30 @@ ${conclusionText}</pre>
             dom.dropoutPlayerSelect.innerHTML = _dropoutSorted
                 .map(({ name, index }) => `<option value="${index}">${name}</option>`)
                 .join('');
-            dom.dropoutMatchNumberInput.value
-                = '';
-            dom.dropoutMatchNumberInput.max
-                =
-                appState.matches.length;
-            dom.dropoutHint.textContent
-                =
-                appState.matches.length
-                    === 0 ?
-                    '先に試合を生成してください。'
-                    :
-                    `1〜${appState.matches.length}の範囲で選択できます。`;
+            dom.dropoutMatchNumberInput.value = '';
+
+            const mode = document.querySelector('input[name="dropoutMode"]:checked')?.value || 'leave';
+            const hasMatches = appState.matches.length > 0;
+
+            if (mode === 'join') {
+                if (dom.dropoutPlayerLabel) dom.dropoutPlayerLabel.textContent = '参加するメンバー:';
+                if (dom.dropoutMatchNumberLabel) dom.dropoutMatchNumberLabel.textContent = '何試合目から参加？';
+                dom.applyDropoutButton.textContent = hasMatches ? '途中参加を適用して再生成' : '途中参加を設定（次回生成時に反映）';
+                dom.applyDropoutButton.disabled = false;
+                dom.dropoutMatchNumberInput.removeAttribute('max');
+                dom.dropoutHint.textContent = hasMatches
+                    ? `1〜${appState.matches.length}の範囲で選択できます。`
+                    : '試合生成前でも設定できます。次回の生成から反映されます。';
+            } else {
+                if (dom.dropoutPlayerLabel) dom.dropoutPlayerLabel.textContent = '離脱するメンバー:';
+                if (dom.dropoutMatchNumberLabel) dom.dropoutMatchNumberLabel.textContent = '何試合目から離脱？';
+                dom.applyDropoutButton.textContent = '離脱を適用して再生成';
+                dom.applyDropoutButton.disabled = !hasMatches;
+                dom.dropoutMatchNumberInput.max = appState.matches.length;
+                dom.dropoutHint.textContent = hasMatches
+                    ? `1〜${appState.matches.length}の範囲で選択できます。`
+                    : '先に試合を生成してください。';
+            }
         }
 
         async function handleApplyExclusion() {
@@ -6545,6 +6666,13 @@ ${conclusionText}</pre>
             // 入力値が有効かチェック
             if (isNaN(playerIndex) || isNaN(fromMatch) || fromMatch < 1 || fromMatch > appState.matches.length) {
                 showDialog('入力エラー', '有効なメンバーと試合番号（1〜' + appState.matches.length + '）を入力してください。');
+                return;
+            }
+
+            // 制約: 同一メンバーへのjoins/exclusionsは joins < exclusions のみ許可
+            const existingJoin = appState.joins[playerIndex];
+            if (existingJoin != null && !(existingJoin < fromMatch)) {
+                showDialog('入力エラー', `${appState.members[playerIndex]}さんは第${existingJoin}試合から途中参加の設定があります。離脱はそれより後の試合番号にしてください。`);
                 return;
             }
 
@@ -6573,6 +6701,65 @@ ${conclusionText}</pre>
                     }
 
                     // 再生成フラグを立てて、試合を再生成
+                    appState.isRegeneratingAfterDropout = true;
+                    await generateAndDisplayMatches(appState.matches.length, /*isRegenerate=*/true, /*regenerateFrom=*/fromMatch);
+                    appState.isRegeneratingAfterDropout = false;
+                }
+            );
+        }
+
+        async function handleApplyJoin() {
+            // 入力値を取得
+            const playerIndex = parseInt(dom.dropoutPlayerSelect.value, 10);
+            const fromMatch = parseInt(dom.dropoutMatchNumberInput.value, 10);
+
+            if (isNaN(playerIndex) || isNaN(fromMatch) || fromMatch < 1) {
+                showDialog('入力エラー', '有効なメンバーと試合番号（1以上）を入力してください。');
+                return;
+            }
+            if (appState.matches.length > 0 && fromMatch > appState.matches.length) {
+                showDialog('入力エラー', '有効な試合番号（1〜' + appState.matches.length + '）を入力してください。');
+                return;
+            }
+
+            // 制約: 同一メンバーへのjoins/exclusionsは joins < exclusions のみ許可
+            const existingExclusion = appState.exclusions[playerIndex];
+            if (existingExclusion != null && !(fromMatch < existingExclusion)) {
+                showDialog('入力エラー', `${appState.members[playerIndex]}さんは第${existingExclusion}試合から離脱の設定があります。途中参加はそれより前の試合番号にしてください。`);
+                return;
+            }
+
+            // 試合生成前: 設定だけ保存し、次回の生成から反映する（再生成は行わない）
+            if (appState.matches.length === 0) {
+                appState.joins[playerIndex] = fromMatch;
+                saveState();
+                updateExclusionUI();
+                showDialog('設定完了', `${appState.members[playerIndex]}さんの第${fromMatch}試合からの参加を設定しました。次回の生成から反映されます。`);
+                return;
+            }
+
+            showDialog(
+                '確認',
+                `${appState.members[playerIndex]}さんを第${fromMatch}試合から参加させ、以降の試合を再生成しますか？`,
+                async (confirmed) => {
+                    if (!confirmed) return;
+
+                    // 途中参加情報を設定
+                    appState.joins[playerIndex] = fromMatch;
+
+                    // 途中参加は人数が増える方向なので緩和は不要だが、上限が∞(99)だった場合は
+                    // 参加後にN>Pへ転じることがあるため、有限値に戻せないか確認する
+                    const P = appState.currentSurfaceCount * 4;
+                    const activeCountAtJoin = Array.from({ length: appState.currentTotalMemberCount }, (_, i) => i)
+                        .filter(i => isPlayerActive(i, fromMatch, appState.exclusions, appState.joins)).length;
+                    if (appState.maxConsecutiveLimit >= 99 && activeCountAtJoin > P) {
+                        const newLimit = Math.ceil(P / (activeCountAtJoin - P));
+                        appState.maxConsecutiveLimit = newLimit;
+                        dom.maxConsecutiveSelect.value = String(newLimit);
+                        saveState();
+                    }
+
+                    // 再生成フラグを立てて、試合を再生成（既存の途中離脱と同じ緩和ロジックを流用）
                     appState.isRegeneratingAfterDropout = true;
                     await generateAndDisplayMatches(appState.matches.length, /*isRegenerate=*/true, /*regenerateFrom=*/fromMatch);
                     appState.isRegeneratingAfterDropout = false;
@@ -6765,7 +6952,7 @@ ${conclusionText}</pre>
         }
 
         function renderGenerationSummary() {
-            const { currentSurfaceCount, currentTotalMemberCount, members, exclusions, dataSource } = appState;
+            const { currentSurfaceCount, currentTotalMemberCount, members, exclusions, joins, dataSource } = appState;
             const container = document.getElementById('generationSummaryContainer');
             if (!container) return;
 
@@ -6792,6 +6979,13 @@ ${conclusionText}</pre>
                     return `${members[playerIdx]}(${fromMatch}試合目~)`;
                 }).join(', ');
                 conditionsText += ` / <strong>離脱:</strong> ${exclusionText}`;
+            }
+            const joinEntries = Object.entries(joins || {});
+            if (joinEntries.length > 0) {
+                const joinText = joinEntries.map(([playerIdx, fromMatch]) => {
+                    return `${members[playerIdx]}(第${fromMatch}試合~)`;
+                }).join(', ');
+                conditionsText += ` / <strong>参加:</strong> ${joinText}`;
             }
             summaryParts.push(conditionsText);
 
