@@ -107,6 +107,17 @@
             少数派人数が不足する構成で構造上常に0%になっていた。
             コート単位の集計に変更し、「少数派が全員同時出場した
             試合のうち実際にミックスコートを作れた試合数」も併記
+        v7.14 : 軽微な修正3件 (2026-07-21)
+          - ダイアログ確認ボタンの{once:true}スクロールリスナーが、
+            Esc・オーバーレイクリックで閉じると未消費のまま残り、
+            次に開いた別ダイアログで意図しないスクロールが発火する
+            問題を修正
+          - strict genderMixのパターン列挙が、条件によっては数億
+            パターンになりブラウザがフリーズする問題を修正。理論
+            パターン数が5万を超える場合はランダムサンプリングに切替
+          - Undo/Redo履歴がお気に入り一覧を毎世代複製しメモリを
+            圧迫していた問題を修正。お気に入りは元々Undo対象外の
+            ため履歴から除外し、Undo後も現在の一覧を維持するように
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -614,7 +625,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.13</p>
+            <p class="text-gray-400 text-xs mt-1">v7.14</p>
         </header>
 
         <main>

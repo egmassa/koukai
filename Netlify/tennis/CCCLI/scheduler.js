@@ -17,6 +17,7 @@
             completedMatches: new Set(),
             favorites: [],
             dialogCallback: null,
+            _pendingDialogScrollHandler: null, // ダイアログ確認ボタンに一時登録するスクロール用リスナー（未消費残留対策）
             charts: { cumulativePlayCountChart: null, memberProfileRadarChart: null },
             areAnalysisSectionsVisible: false,
             editingMatch: null,
@@ -269,6 +270,11 @@
             delete stateToSave.history;
             delete stateToSave.historyIndex;
 
+            // favoritesはUndo/Redoの対象として設計されていない（追加・削除・編集時に
+            // pushStateToHistoryを呼んでいない）ため、履歴世代ごとに複製すると
+            // メモリを圧迫するだけで意味がない。除外する
+            delete stateToSave.favorites;
+
             stateToSave.completedMatches = Array.from(appState.completedMatches || []);
             // JSONを経由して完全なディープコピーを作成
             const snapshot = JSON.parse(JSON.stringify(stateToSave));
@@ -303,6 +309,7 @@
                 charts: { cumulativePlayCountChart: null, memberProfileRadarChart: null },
                 history: appState.history,
                 historyIndex: index,
+                favorites: appState.favorites, // 履歴には含まれないため、現在のお気に入り一覧を維持する
             });
 
             // UI全体を更新
@@ -2382,7 +2389,9 @@
 </div>`;
                 showDialog('探索完了', null, null, _dialogHtml);
                 if (_relGrade === 'S' || _reachedCeilDialog) {
-                    dom.dialogConfirmButton.addEventListener('click', () => {
+                    // 前回分が未消費のまま残っていれば先に解除してから登録する
+                    clearPendingDialogScrollHandler();
+                    appState._pendingDialogScrollHandler = () => {
                         setTimeout(() => {
                             const _el = document.getElementById('resultsDashboard');
                             if (_el) {
@@ -2390,7 +2399,8 @@
                                 window.scrollTo({ top: _top, behavior: 'smooth' });
                             }
                         }, 350);
-                    }, { once: true });
+                    };
+                    dom.dialogConfirmButton.addEventListener('click', appState._pendingDialogScrollHandler, { once: true });
                 }
             } else {
                 showDialog('探索失敗', '有効な組み合わせが見つかりませんでした。条件を変更してください。');
@@ -2556,22 +2566,49 @@
                 return result;
             }
 
+            function factorial(n) {
+                let r = 1;
+                for (let i = 2; i <= n; i++) r *= i;
+                return r;
+            }
+
             // パターン列挙
             const allPatterns = [];
             if (!isBestEffort) {
-                // strictモード: M-Fペアのみで厳密に生成
-                for (const playingM of getCombinations(males, totalM)) {
-                    for (const playingF of getCombinations(females, totalF)) {
-                        for (const fPerm of getPermutations(playingF)) {
-                            const courts = [];
-                            for (let c = 0; c < surfaces; c++) {
-                                const mPair = [playingM[c * 2], playingM[c * 2 + 1]];
-                                const fPair = [fPerm[c * 2], fPerm[c * 2 + 1]];
-                                courts.push(makeCourt(mPair, fPair));
+                // 理論パターン数が大きすぎる場合（例: 3面・男女12人ずつ等）は全列挙すると
+                // 数億パターンになりブラウザがフリーズするため、ランダムサンプリングに切り替える
+                const RANDOM_SAMPLE_LIMIT = 50000;
+                const totalPatternCount = nCk(males.length, totalM) * nCk(females.length, totalF) * factorial(totalF);
+                if (totalPatternCount > RANDOM_SAMPLE_LIMIT) {
+                    // 重複パターンは許容（SAが後段で改善するため厳密なユニーク性は不要）
+                    for (let i = 0; i < RANDOM_SAMPLE_LIMIT; i++) {
+                        const playingM = shuffle(males).slice(0, totalM);
+                        const fPerm = shuffle(females).slice(0, totalF);
+                        const courts = [];
+                        for (let c = 0; c < surfaces; c++) {
+                            const mPair = [playingM[c * 2], playingM[c * 2 + 1]];
+                            const fPair = [fPerm[c * 2], fPerm[c * 2 + 1]];
+                            courts.push(makeCourt(mPair, fPair));
+                        }
+                        const playersThisRound = courts.flatMap(c => c.players).sort((a, b) => a - b);
+                        const restingPlayers = members.filter(p => !playersThisRound.includes(p)).sort((a, b) => a - b);
+                        allPatterns.push({ courts, playersThisRound, restingPlayers });
+                    }
+                } else {
+                    // strictモード: M-Fペアのみで厳密に生成
+                    for (const playingM of getCombinations(males, totalM)) {
+                        for (const playingF of getCombinations(females, totalF)) {
+                            for (const fPerm of getPermutations(playingF)) {
+                                const courts = [];
+                                for (let c = 0; c < surfaces; c++) {
+                                    const mPair = [playingM[c * 2], playingM[c * 2 + 1]];
+                                    const fPair = [fPerm[c * 2], fPerm[c * 2 + 1]];
+                                    courts.push(makeCourt(mPair, fPair));
+                                }
+                                const playersThisRound = courts.flatMap(c => c.players).sort((a, b) => a - b);
+                                const restingPlayers = members.filter(p => !playersThisRound.includes(p)).sort((a, b) => a - b);
+                                allPatterns.push({ courts, playersThisRound, restingPlayers });
                             }
-                            const playersThisRound = courts.flatMap(c => c.players).sort((a, b) => a - b);
-                            const restingPlayers = members.filter(p => !playersThisRound.includes(p)).sort((a, b) => a - b);
-                            allPatterns.push({ courts, playersThisRound, restingPlayers });
                         }
                     }
                 }
@@ -6139,7 +6176,24 @@ ${conclusionText}</pre>
             });
         }
 
+        // ダイアログ確認ボタンに一時登録したスクロール用リスナー（S評価時の探索完了ダイアログ等）を解除する。
+        // OKボタン以外（Esc・オーバーレイクリック）で閉じられ、リスナーが未消費のまま残るのを防ぐ。
+        function clearPendingDialogScrollHandler() {
+            if (appState._pendingDialogScrollHandler) {
+                dom.dialogConfirmButton.removeEventListener('click', appState._pendingDialogScrollHandler);
+                appState._pendingDialogScrollHandler = null;
+            }
+        }
+
         function processDialog(confirmed) {
+            // 同一クリックでこのダイアログ自身のスクロールリスナーがまだ発火していない場合に
+            // 備え、この場で即座に解除せず次のタスクへ遅延する（{once:true}での正常発火を妨げない）。
+            // 別ダイアログのOKボタンで前回分が残留しているケースは、これでそこで解除される。
+            if (appState._pendingDialogScrollHandler) {
+                const _staleScrollHandler = appState._pendingDialogScrollHandler;
+                appState._pendingDialogScrollHandler = null;
+                setTimeout(() => dom.dialogConfirmButton.removeEventListener('click', _staleScrollHandler), 0);
+            }
             dom.customDialog.classList.add('hidden');
             if (appState.dialogCallback) {
                 // ▼▼▼ このブロックで、ダイアログ内の入力値を取得します ▼▼▼
@@ -6517,6 +6571,8 @@ ${conclusionText}</pre>
                         &&
                         !modalElm.classList.contains('hidden')) {
                         modalElm.classList.add('hidden');
+                        // Escで閉じた場合はprocessDialogを経由しないため、ここで直接解除する
+                        if (modalElm === dom.customDialog) clearPendingDialogScrollHandler();
                     }
                 });
             modalElm.addEventListener('click',
@@ -6526,6 +6582,8 @@ ${conclusionText}</pre>
                         ===
                         modalElm) {
                         modalElm.classList.add('hidden');
+                        // オーバーレイクリックで閉じた場合も同様にprocessDialogを経由しない
+                        if (modalElm === dom.customDialog) clearPendingDialogScrollHandler();
                     }
                 });
         }
