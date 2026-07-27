@@ -183,6 +183,16 @@
             再生成で第1試合がランダムになっていた問題を修正
             (matchesが空かどうかで判定するよう変更)
           - ヘルプダイアログ・制約仕様書を新フローの説明に更新
+        v7.18.1 : SAが未到着メンバーをコートに引き込む問題を修正 (2026-07-27)
+          - 評価関数内のcheckConsecutiveRestsがアクティブ判定を持たず、
+            未到着メンバーの全試合不在を「連続休憩違反」とみなして
+            巨大ペナルティを課していたため、SAが未到着メンバーを
+            約3試合ごとに出場させる方向へ誤って最適化していた。
+            非アクティブ期間を連続休憩に数えないよう修正
+          - evaluateFullSolutionに「未参加・離脱済み選手が出場して
+            いる解は即失格」のハードガードを追加
+          - 近傍操作(doSwapWithRest/doSwapRestAcrossRounds)の交換
+            候補をアクティブ選手のみにフィルタ
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -690,7 +700,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.18</p>
+            <p class="text-gray-400 text-xs mt-1">v7.18.1</p>
         </header>
 
         <main>

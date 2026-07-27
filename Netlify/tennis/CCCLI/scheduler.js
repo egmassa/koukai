@@ -1269,11 +1269,13 @@
             }
         }
 
-        function checkConsecutiveRests(matches, members) {
+        function checkConsecutiveRests(matches, members, exclusions, joins) {
             if (!matches || members.length === 0 || matches.length < 2) {
                 // 期待されるデータ構造に合わせて playersInfo を返す
                 return { maxStreak: 0, playersInfo: [] };
             }
+            const _excl = exclusions || {};
+            const _jns = joins || {};
 
             // 各プレイヤーの連続休憩の最大値とその終了試合を記録する
             const playerStreakDetails = members.map((_, memberIdx) => {
@@ -1281,6 +1283,10 @@
                 let currentStreak = 0;
                 let endMatch = 0;
                 matches.forEach((match, matchIdx) => {
+                    // 未参加(未到着)・離脱後の期間は「休憩」ではないため連続休憩に数えない。
+                    // ここを数えてしまうと、評価関数が未到着メンバーの長期不在を
+                    // 連続休憩違反とみなし、SAが未到着メンバーを出場させる方向に最適化してしまう
+                    if (!isPlayerActive(memberIdx, matchIdx + 1, _excl, _jns)) return;
                     if (match.restingPlayers.includes(memberIdx)) {
                         currentStreak++;
                     } else {
@@ -1495,16 +1501,19 @@
             // 呼び出し元のsettingsスナップショットを優先し、実行中のライブappState変更に影響されないようにする
             const _grpSnapshot = (settings && settings.groups) || appState.groups || {};
             const _scSnapshot = (settings && settings.currentSurfaceCount) || appState.currentSurfaceCount;
+            const _exclSw = (settings && settings.exclusions) || appState.exclusions || {};
+            const _jnsSw = (settings && settings.joins) || appState.joins || {};
 
-            // genderMix strictモードのみ: 同性の休憩者のみ選択候補にする
-            let candidates = m.restingPlayers;
+            // restingPlayersには未参加(未到着)・離脱済みの選手も含まれるため、
+            // この試合に出場できるアクティブな選手だけをコート投入候補にする
+            let candidates = m.restingPlayers.filter(p => isPlayerActive(p, mi + 1, _exclSw, _jnsSw));
             if (ruleType === 'genderMix' && getGrp) {
                 const _mSw = Object.values(_grpSnapshot).filter(g => g === 'M').length;
                 const _fSw = Object.values(_grpSnapshot).filter(g => g === 'F').length;
                 const _isStrictSw = _mSw > _scSnapshot * 2 && _fSw > _scSnapshot * 2;
                 if (_isStrictSw) {
                     const oldGroup = getGrp(oldPlayer);
-                    candidates = m.restingPlayers.filter(p => getGrp(p) === oldGroup);
+                    candidates = candidates.filter(p => getGrp(p) === oldGroup);
                 }
                 // best-effortでは全員が候補（性別不問）
             }
@@ -1542,8 +1551,11 @@
             const m1 = neighbor[mi1], m2 = neighbor[mi2];
             if (!m1.restingPlayers.length || !m2.restingPlayers.length) return null;
 
-            // m1で休憩・m2でプレイ中の選手候補
-            let cand1 = m1.restingPlayers.filter(p => m2.playersThisRound.includes(p));
+            const _exclSw2 = (settings && settings.exclusions) || appState.exclusions || {};
+            const _jnsSw2 = (settings && settings.joins) || appState.joins || {};
+            // m1で休憩・m2でプレイ中の選手候補（交換後はm1でプレイするため、m1でアクティブな選手のみ）
+            let cand1 = m1.restingPlayers.filter(p => m2.playersThisRound.includes(p)
+                && isPlayerActive(p, mi1 + 1, _exclSw2, _jnsSw2));
             const _grpSnapshot = (settings && settings.groups) || appState.groups || {};
             const _scSnapshot = (settings && settings.currentSurfaceCount) || appState.currentSurfaceCount;
             const _mSw = Object.values(_grpSnapshot).filter(g => g === 'M').length;
@@ -1552,8 +1564,9 @@
             if (cand1.length === 0) return null;
             const p1 = cand1[Math.floor(Math.random() * cand1.length)];
 
-            // m2で休憩・m1でプレイ中の選手候補（genderMix strictでは同性のみ）
-            let cand2 = m2.restingPlayers.filter(p => m1.playersThisRound.includes(p) && p !== p1);
+            // m2で休憩・m1でプレイ中の選手候補（genderMix strictでは同性のみ。交換後はm2でプレイするため、m2でアクティブな選手のみ）
+            let cand2 = m2.restingPlayers.filter(p => m1.playersThisRound.includes(p) && p !== p1
+                && isPlayerActive(p, mi2 + 1, _exclSw2, _jnsSw2));
             if (_isStrictSw && getGrp) {
                 cand2 = cand2.filter(p => getGrp(p) === getGrp(p1));
             }
@@ -1602,13 +1615,19 @@
         // ── 解全体を評価（メタスコア計算） ──
         function evaluateFullSolution(matches, settings) {
             const pw = appState.pw || PENALTY_DEFAULTS;
-            // 整合性チェック: 各試合内でプレイヤー番号が重複していないか
-            for (const m of matches) {
+            const _exclGuard = settings.exclusions != null ? settings.exclusions : appState.exclusions;
+            const _jnsGuard = settings.joins != null ? settings.joins : appState.joins;
+            const _hasInactive = Object.keys(_exclGuard).length > 0 || Object.keys(_jnsGuard).length > 0;
+            // 整合性チェック: 各試合内でプレイヤー番号が重複していないか、
+            // および未参加(未到着)・離脱済みの選手が出場していないか（構造的に無効な解は即失格）
+            for (let mi = 0; mi < matches.length; mi++) {
+                const m = matches[mi];
                 const seen = new Set();
                 for (const c of m.courts) {
                     for (const p of c.players) {
                         if (seen.has(p)) return -1000000;
                         seen.add(p);
+                        if (_hasInactive && !isPlayerActive(p, mi + 1, _exclGuard, _jnsGuard)) return -1000000;
                     }
                 }
             }
@@ -1670,7 +1689,9 @@
                     }
                 }
             }
-            const restInfo = checkConsecutiveRests(matches, settings.members);
+            const restInfo = checkConsecutiveRests(matches, settings.members,
+                settings.exclusions != null ? settings.exclusions : appState.exclusions,
+                settings.joins != null ? settings.joins : appState.joins);
             // 仕様1-2-3/2-2: 連続休憩ペナルティ
             // 連続休憩は高優先で回避: 表示上限(maxConsecutiveLimit-1)を超えたら厳しくペナルティ
             const _maxRest = settings.maxConsecutiveLimit || appState.maxConsecutiveLimit || 2;
@@ -2521,7 +2542,7 @@
                 appState.generationSettings = { groups: originalSettings.groups, ruleType: originalSettings.ruleType };
 
                 const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups, originalSettings.joins, originalSettings.joinOffsets);
-                const restInfo = checkConsecutiveRests(bestSolution, originalSettings.members);
+                const restInfo = checkConsecutiveRests(bestSolution, originalSettings.members, originalSettings.exclusions, originalSettings.joins);
                 let metaScore = calculateMetaScore(stats);
                 // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと全く同じ式に統一）
                 const _repPw = appState.pw || PENALTY_DEFAULTS;
@@ -3044,7 +3065,7 @@
                 const stats = calculateSummaryStats(generatedMatches, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, originalSettings.exclusions, originalSettings.ruleType, originalSettings.groups, originalSettings.joins, originalSettings.joinOffsets);
                 let metaScore = calculateMetaScore(stats);
 
-                const restInfo = checkConsecutiveRests(generatedMatches, originalSettings.members);
+                const restInfo = checkConsecutiveRests(generatedMatches, originalSettings.members, originalSettings.exclusions, originalSettings.joins);
                 // genderMixでは2連続休憩は構造上避けられないためペナルティ免除
                 // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと全く同じ式に統一）
                 const _repPw = appState.pw || PENALTY_DEFAULTS;
