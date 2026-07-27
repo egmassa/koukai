@@ -145,6 +145,19 @@
             生成から反映される
           - renderGenerationSummary・印刷・CSV・デバッグログに参加
             情報を追記。試合リストで未参加メンバーを休憩と区別して表示
+        v7.17.1 : 途中参加機能を修正・完成 (2026-07-21)
+          - join適用時、参加前の試合が元の全員参加スケジュールのまま
+            残る問題を修正。第1試合から全体を再生成するよう変更
+            （進行状況チェックはリセット）
+          - 第1試合の固定メンバー選定を、登録順の先頭人数から
+            アクティブメンバー基準に修正。遅刻者が第1試合に混入
+            しないように（SA側の事前計算も同様に修正）
+          - 途中参加者の公平性を「追いつき型」から「按分型」に変更。
+            参加時点までの理論プレイ数を仮想オフセットとして加算して
+            比較することで、参加後は同ペースで出場し、参加前の分を
+            取り戻すために多く出場することはなくなった
+            (appState.joinOffsets)
+          - ヘルプダイアログ・制約仕様書に途中参加の按分ルールを明記
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -652,7 +665,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.17</p>
+            <p class="text-gray-400 text-xs mt-1">v7.17.1</p>
         </header>
 
         <main>
