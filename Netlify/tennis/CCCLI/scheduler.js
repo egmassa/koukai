@@ -37,11 +37,7 @@
         // ─── genderMix best-effortモード判定ヘルパー ──────────────────────────
         // 男女いずれかが全コート分以下の場合はbest-effortモード
         function isGenderMixBestEffort(groups, surfaces) {
-            // UIの明示的な設定を優先
-            if (appState.genderMixMode) {
-                return appState.genderMixMode !== 'strict';
-            }
-            // フォールバック: 人数から自動判定
+            // 人数から自動判定（男女いずれかがコート数×2以下ならbest-effort）
             groups = groups || appState.groups || {};
             surfaces = surfaces || appState.currentSurfaceCount;
             const mCount = Object.keys(groups).filter(k => groups[k] === 'M').length;
@@ -239,6 +235,7 @@
             applyTheme(savedTheme);
             loadState();
             setupEventListeners();
+            restoreRuleTypeRadioFromState();
             updateAllUI();
             updateFavoritesCountDisplay();
             dom.currentYear.textContent = new Date().getFullYear();
@@ -2023,7 +2020,7 @@
             // ★ mixBonusヘルパー（SA内部高速計算用）
             function _calcMixBonus(solution, settings) {
                 if (settings.ruleType !== 'genderMix') return 0;
-                if ((appState.genderMixMode || 'best-effort') === 'strict') return 0;
+                if (!isGenderMixBestEffort(settings.groups, settings.currentSurfaceCount)) return 0;
                 let mixCourts = 0, totalCourts = 0;
                 for (const m of solution) {
                     for (const c of m.courts) {
@@ -2055,7 +2052,7 @@
                 }
                 if (targetRate > 0 && bestSolution && totalIters % 500 === 0) {
                     const tmpStats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
-                    const gradeScore = calcOverallGrade(tmpStats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus).total;
+                    const gradeScore = calcOverallGrade(tmpStats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus).totalBase;
                     if (gradeScore >= targetRate) {
                         reachedTarget = true;
                         dom.loadingMessage.textContent = `🎯 目標達成！総合グレードスコア ${gradeScore}点 ≥ ${targetRate}点`;
@@ -2133,6 +2130,7 @@
                     if (delta > 0 || Math.random() < Math.exp(delta / T)) {
                         current = neighbor;
                         currentScore = neighborScore;
+                        if (currentScore > bestScoreThisRestart) bestScoreThisRestart = currentScore;
                         // 変更後
                         if (currentScore > bestScore) {
                             bestScore = currentScore;
@@ -2261,15 +2259,15 @@
                 const stats = calculateSummaryStats(bestSolution, originalSettings.members, appState.allPossiblePairs, originalSettings.currentSurfaceCount, appState.exclusions, originalSettings.ruleType, originalSettings.groups);
                 const restInfo = checkConsecutiveRests(bestSolution, originalSettings.members);
                 let metaScore = calculateMetaScore(stats);
-                // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと同じロジック）
+                // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと全く同じ式に統一）
+                const _repPw = appState.pw || PENALTY_DEFAULTS;
                 const _repMaxRest = originalSettings.maxConsecutiveLimit || appState.maxConsecutiveLimit || 2;
-                const _repBestEffort = originalSettings.ruleType === 'genderMix' && isGenderMixBestEffort(originalSettings.groups, originalSettings.currentSurfaceCount);
-                const _repRestTol = (_repBestEffort) ? _repMaxRest + 1 : _repMaxRest;
+                const _repRestTol = Math.max(1, _repMaxRest - 1);
                 if (restInfo.maxStreak > _repRestTol) {
-                    metaScore -= (restInfo.maxStreak - _repRestTol) * 20;
+                    metaScore -= (restInfo.maxStreak - _repRestTol) * _repPw.restHard;
                 }
-                if (restInfo.maxStreak > 1 && originalSettings.ruleType !== 'genderMix') {
-                    metaScore -= 30;
+                if (restInfo.maxStreak > 1) {
+                    metaScore -= _repPw.restSoft;
                 }
 
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
@@ -2307,7 +2305,7 @@
                 updateAllUI();
 
                 // ── 簡潔な結果ダイアログ ─────────────────────────────────────
-                const _pct = targetRate > 0 ? gradeForReport.total / targetRate : 1;
+                const _pct = targetRate > 0 ? gradeForReport.totalBase / targetRate : 1;
                 const _pctInt = Math.round(_pct * 100);
                 // 達成率ベースの相対グレード（この条件でどれだけ良い解か）
                 let _relGrade, _relColor, _relStars;
@@ -2317,7 +2315,7 @@
                 else if (_pctInt >= 65) { _relGrade = 'C'; _relColor = '#d97706'; _relStars = '★★☆☆☆'; }
                 else { _relGrade = 'D'; _relColor = '#dc2626'; _relStars = '★☆☆☆☆'; }
 
-                const _reachedCeilDialog = targetRate > 0 && (targetRate - gradeForReport.total) <= 1.0;
+                const _reachedCeilDialog = targetRate > 0 && (targetRate - gradeForReport.totalBase) <= 1.0;
                 if (_reachedCeilDialog && _relGrade !== 'S') {
                     _relGrade = 'S'; _relColor = '#16a34a'; _relStars = '★★★★★';
                 }
@@ -2343,12 +2341,13 @@
                     _action = '設定の連続制限や試合数を緩和することで大きく改善する可能性があります。';
                     _verdictColor = '#dc2626';
                 }
+                // 上限行(targetRate)はmixBonus抜きなので、並べて比較する「今回の結果」も同じ基準(totalBase)で揃える
                 const _ceilRow = targetRate > 0
                     ? `<div class="flex justify-between text-sm text-gray-500 py-1 border-b">
                          <span>この条件での上限</span><span class="font-semibold">${targetRate}点</span>
                        </div>
                        <div class="flex justify-between text-sm py-1 border-b">
-                         <span>今回の結果</span><span class="font-semibold">${gradeForReport.total}点</span>
+                         <span>今回の結果</span><span class="font-semibold">${gradeForReport.totalBase}点</span>
                        </div>`
                     : `<div class="text-center text-sm py-1 border-b">今回の結果: <strong>${gradeForReport.total}点</strong></div>`;
                 const _dialogHtml = `
@@ -2723,15 +2722,15 @@
 
                 const restInfo = checkConsecutiveRests(generatedMatches, originalSettings.members);
                 // genderMixでは2連続休憩は構造上避けられないためペナルティ免除
-                // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと同じロジック）
+                // 仕様2-2: 連続休憩ペナルティ（evaluateFullSolutionと全く同じ式に統一）
+                const _repPw = appState.pw || PENALTY_DEFAULTS;
                 const _repMaxRest = originalSettings.maxConsecutiveLimit || appState.maxConsecutiveLimit || 2;
-                const _repBestEffort = originalSettings.ruleType === 'genderMix' && isGenderMixBestEffort(originalSettings.groups, originalSettings.currentSurfaceCount);
-                const _repRestTol = (_repBestEffort) ? _repMaxRest + 1 : _repMaxRest;
+                const _repRestTol = Math.max(1, _repMaxRest - 1);
                 if (restInfo.maxStreak > _repRestTol) {
-                    metaScore -= (restInfo.maxStreak - _repRestTol) * 20;
+                    metaScore -= (restInfo.maxStreak - _repRestTol) * _repPw.restHard;
                 }
-                if (restInfo.maxStreak > 1 && originalSettings.ruleType !== 'genderMix') {
-                    metaScore -= 30;
+                if (restInfo.maxStreak > 1) {
+                    metaScore -= _repPw.restSoft;
                 }
 
                 allScores.push(metaScore);
@@ -2968,18 +2967,16 @@ ${conclusionText}</pre>
             if (!ruleType) ruleType = document.querySelector('input[name="ruleType"]:checked')?.value || 'none';
             if (!groups) groups = appState.groups || {};
             const getGroup = (i) => groups[i] || 'default';
+            // 重み合計=100点（restPairFairness追加時に115点になっていたのを正規化）
             const weights = {
-                playCount: 30, pairCoverage: 20, cardCoverage: 10,
-                opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
-                restPairFairness: 15
+                playCount: 26, pairCoverage: 17, cardCoverage: 9,
+                opponentCoverage: 9, pairFairness: 13, matchupFairness: 4, earlyDiversity: 9,
+                restPairFairness: 13
             };
 
-            // ★追加: genderMixモード判定
-            const genderMixMode = appState.genderMixMode
-                || document.querySelector('input[name="genderMixMode"]:checked')?.value
-                || 'best-effort';
-            const isGenderMixBestEffort = ruleType === 'genderMix' && genderMixMode !== 'strict';
-            const isGenderMixStrict = ruleType === 'genderMix' && genderMixMode === 'strict';
+            // genderMixモード判定: 人数ベースの自動判定に一本化（calculateSummaryStats等と揃える）
+            const _isBestEffortGM = ruleType === 'genderMix' && isGenderMixBestEffort(groups, surfaces);
+            const isGenderMixStrict = ruleType === 'genderMix' && !_isBestEffortGM;
 
             // (1) プレイ公平性
             const totalPlaySlots = surfaces * 4 * matchCount;
@@ -3088,7 +3085,7 @@ ${conclusionText}</pre>
             let total = Object.keys(weights).reduce((sum, k) => sum + (scores[k] * weights[k] / 100), 0);
 
             // ★ best-effortのmixボーナスを上限に加算
-            if (isGenderMixBestEffort) {
+            if (_isBestEffortGM) {
                 const maleCount = Object.values(groups).filter(g => g === 'M').length;
                 const femaleCount = Object.values(groups).filter(g => g === 'F').length;
                 if (maleCount > 0 && femaleCount > 0) {
@@ -3128,10 +3125,11 @@ ${conclusionText}</pre>
         }
 
         function calcOverallGrade(statsData, matches, members, allPossiblePairs, precomputedMixBonus) {
+            // 重み合計=100点（calcConditionCeilingと同じ配分に揃える）
             const weights = {
-                playCount: 30, pairCoverage: 20, cardCoverage: 10,
-                opponentCoverage: 10, pairFairness: 15, matchupFairness: 5, earlyDiversity: 10,
-                restPairFairness: 15,
+                playCount: 26, pairCoverage: 17, cardCoverage: 9,
+                opponentCoverage: 9, pairFairness: 13, matchupFairness: 4, earlyDiversity: 9,
+                restPairFairness: 13,
             };
             const scores = {};
             const diffPenalty = [100, 70, 30, 0];
@@ -3158,8 +3156,7 @@ ${conclusionText}</pre>
                 mixBonus = precomputedMixBonus;
             } else {
                 const _rt = document.querySelector('input[name="ruleType"]:checked')?.value;
-                const _gm = appState.genderMixMode || 'best-effort';
-                if (_rt === 'genderMix' && _gm !== 'strict' && matches && matches.length > 0) {
+                if (_rt === 'genderMix' && isGenderMixBestEffort(appState.groups, appState.currentSurfaceCount) && matches && matches.length > 0) {
                     let mixCourts = 0, totalCourts = 0;
                     for (const m of matches) {
                         for (const c of m.courts) {
@@ -3178,7 +3175,11 @@ ${conclusionText}</pre>
             else if (totalWithBonus >= 78) { grade = 'B'; stars = '★★★☆☆'; color = '#7c3aed'; label = '良好'; }
             else if (totalWithBonus >= 65) { grade = 'C'; stars = '★★☆☆☆'; color = '#d97706'; label = '普通'; }
             else { grade = 'D'; stars = '★☆☆☆☆'; color = '#dc2626'; label = '要改善'; }
-            return { total: Math.round(totalWithBonus * 10) / 10, grade, stars, color, label, scores };
+            return {
+                total: Math.round(totalWithBonus * 10) / 10,
+                totalBase: Math.round(total * 10) / 10, // mixBonus抜き。targetRate(ceilingData.totalBase)との比較には必ずこちらを使う
+                grade, stars, color, label, scores
+            };
         }
 
 
@@ -4489,7 +4490,7 @@ ${conclusionText}</pre>
                 appState.groups
             );
             const ceilScore = ceilInfo.totalBase ?? ceilInfo.total;
-            const curScore = gradeData.total;
+            const curScore = gradeData.totalBase; // targetRate/ceilScoreはmixBonus抜きなので、比較側もbonus抜きで揃える
             const gapFromCeil = Math.max(0, ceilScore - curScore); // 上限超えは0として扱う
             // 上限との差が1点以内 → 実質上限到達（計算誤差・丸め誤差を吸収）
             const reachedCeiling = gapFromCeil <= 1.0;
@@ -5313,11 +5314,10 @@ ${conclusionText}</pre>
                             appState.currentMemo = fav.memo || '';
                             dom.favoriteMemoInput.value = appState.currentMemo;
 
-                            // ▼▼▼ ここに修正を追加 ▼▼▼
                             // 新しいメンバー構成に合わせて、ペアのIDとカラーマップを再生成する
                             regenerateAllPossiblePairs();
-                            // ▲▲▲ 修正ここまで ▲▲▲
 
+                            restoreRuleTypeRadioFromState();
                             updateAllUI();
                             applyDisplayLogicBasedOnState();
                             showDialog('読込完了', `「${selectedName}」を読み込みました。`);
@@ -5705,6 +5705,7 @@ ${conclusionText}</pre>
                                     = new
                                         Set(importedState.completedMatches
                                             || []);
+                                restoreRuleTypeRadioFromState();
                                 updateAllUI();
                                 showDialog('成功',
                                     'データのインポートが完了しました。');
@@ -6133,8 +6134,11 @@ ${conclusionText}</pre>
             if (appState.currentTotalMemberCount > 0) {
                 specialRulesWrapper.classList.remove('hidden');
 
-                const currentP1 = fixedPairPlayer1.value;
-                const currentP2 = fixedPairPlayer2.value;
+                // appState.groupsのP1マーカーを正とする（loadState等の復元直後はDOM選択値が
+                // 反映されていないため、appState.groups側にP1が2人いればそちらを優先する）
+                const _p1Indices = Object.keys(appState.groups || {}).filter(k => appState.groups[k] === 'P1');
+                const currentP1 = _p1Indices.length === 2 ? _p1Indices[0] : fixedPairPlayer1.value;
+                const currentP2 = _p1Indices.length === 2 ? _p1Indices[1] : fixedPairPlayer2.value;
 
                 // 表示順を名前でソート（数値名なら数値順、それ以外は文字列順）
                 // 配列順序は過去のリナンバー処理で並び替わっている可能性があるため、表示時にソート
@@ -6191,6 +6195,16 @@ ${conclusionText}</pre>
                         && o.value !==
                         '-1');
             });
+        }
+
+        // loadState/お気に入り読込/JSONインポートの直後、updateAllUIを呼ぶ前に使用。
+        // これを怠るとinput[name="ruleType"]がHTMLのデフォルト値のまま残り、
+        // updateAllUI → updateSpecialRulesUI → handleRuleTypeChange → updateGroupsFromSpecialRules
+        // の経路で、復元したはずのappState.groupsが空オブジェクトで上書き保存されてしまう。
+        function restoreRuleTypeRadioFromState() {
+            const rt = (appState.generationSettings && appState.generationSettings.ruleType) || 'none';
+            const radio = document.querySelector(`input[name="ruleType"][value="${rt}"]`);
+            if (radio) radio.checked = true;
         }
 
         function

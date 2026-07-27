@@ -64,6 +64,31 @@
             surfaceCountをdocument.querySelector・appStateから直接
             読んでいた（isCandidateCorrectTypeで修正済みの問題と同型）。
             SA探索中に設定を変更すると評価が不整合になり得た点を修正
+        v7.11 : ロジック全体監査で発見した6件のバグを修正 (2026-07-21)
+          - SAの収束判定不全: bestScoreThisRestartが初期解のまま
+            一度も更新されず、収束判定用のallScoresが常にリスタート
+            直後のスコアだけを記録していた問題を修正
+          - genderMix時の目標判定スケール不一致: targetRateはmixBonus
+            抜き、比較先のgradeScoreはmixBonus込みで、最大30点早く
+            目標達成と誤判定されていた。calcOverallGradeにtotalBase
+            (bonus抜き)を追加し、目標判定・結果ダイアログ・
+            renderSummaryStatsのすべてでbonus抜き同士の比較に統一
+          - 存在しないappState.genderMixModeへの参照を全廃し、人数
+            ベース判定のisGenderMixBestEffort(groups, surfaces)に一本化
+            （calcConditionCeiling内でグローバル関数と同名のローカル
+            変数が定義され、意図せず上書き＝シャドーイングしていた点も修正）
+          - リロード・お気に入り読込・JSONインポート後にinput[name=
+            "ruleType"]のchecked状態が復元されず、updateAllUI経由で
+            appState.groupsが空オブジェクトのままsaveState()されて
+            しまう問題を修正。固定ペアselectの復元もappState.groupsの
+            P1マーカーを正として導出するよう堅牢化
+          - findBestBySimulatedAnnealing/findBestOfNGenerationsの
+            最終レポートにある連続休憩ペナルティが、コメントは
+            「evaluateFullSolutionと同じロジック」としながら実際には
+            許容値・係数とも別式だった不一致を、完全に同じ式に統一
+          - calcOverallGrade/calcConditionCeilingの重み合計が115点に
+            なっていた（restPairFairness追加時に加算のみしたため）のを
+            100点に正規化。S/A/B/C/D判定の閾値はそのまま維持
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -571,7 +596,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.10</p>
+            <p class="text-gray-400 text-xs mt-1">v7.11</p>
         </header>
 
         <main>
