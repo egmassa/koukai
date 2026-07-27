@@ -338,6 +338,10 @@
             // メモリを圧迫するだけで意味がない。除外する
             delete stateToSave.favorites;
 
+            // 再生成処理の途中で積むスナップショットにtrueが混入すると、
+            // Undoで復元した際に公平性判定が緩んだままになるため除外する
+            delete stateToSave.isRegeneratingAfterDropout;
+
             stateToSave.completedMatches = Array.from(appState.completedMatches || []);
             // JSONを経由して完全なディープコピーを作成
             const snapshot = JSON.parse(JSON.stringify(stateToSave));
@@ -373,6 +377,7 @@
                 history: appState.history,
                 historyIndex: index,
                 favorites: appState.favorites, // 履歴には含まれないため、現在のお気に入り一覧を維持する
+                isRegeneratingAfterDropout: false, // 一時フラグは常にリセット
             });
 
             // UI全体を更新
@@ -1021,6 +1026,9 @@
                     editingMatch: null,
                     history: undefined,
                     historyIndex: undefined,
+                    // 再生成中を示す一時フラグ。再生成処理の途中でsaveStateが呼ばれると
+                    // trueのまま永続化され、次回読込以降の生成で公平性判定が緩んだままになる
+                    isRegeneratingAfterDropout: false,
                 };
                 localStorage.setItem(LS_KEY, JSON.stringify(stateToSave));
             } catch (e) {
@@ -1037,7 +1045,8 @@
                     const parsed = JSON.parse(savedState);
                     Object.assign(appState, parsed, {
                         charts: { cumulativePlayCountChart: null, memberProfileRadarChart: null },
-                        editingMatch: null
+                        editingMatch: null,
+                        isRegeneratingAfterDropout: false // 一時フラグは復元しない（旧データにtrueが混入している場合の防御）
                     });
                     appState.completedMatches = new Set(parsed.completedMatches || []);
                     appState.favorites = parsed.favorites || [];
@@ -3734,6 +3743,10 @@ ${conclusionText}</pre>
                 dom.loadingIndicator.style.display = 'none';
                 finishGeneration(false);
                 updateSaveFavoriteButtonState();
+                // 離脱・到着の部分再生成もUndo対象にする。ここで履歴に積まないと、
+                // 「組合せを戻す」が最後の生成(あるいはページ読込時)のスナップショット
+                // まで一気に巻き戻ってしまい、面数・人数ごと別の状態になったように見える
+                pushStateToHistory();
             }
         }
 

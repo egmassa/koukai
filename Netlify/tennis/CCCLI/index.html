@@ -219,6 +219,15 @@
           - 再生成パスで、再生成範囲の進行状況チェックを除去する
             安全網を追加(離脱で消化済みより前の試合番号を指定した
             場合にも対応)
+        v7.18.4 : 到着・離脱の再生成をUndo履歴に対応 (2026-07-27)
+          - 到着・離脱の部分再生成が履歴に積まれていなかったため、
+            適用後に「組合せを戻す」と直前の生成時(無ければページ
+            読込時の古い状態=別の面数・人数)まで一気に巻き戻って
+            いた問題を修正。到着・離脱が1操作としてUndo/Redoできる
+          - 再生成中の一時フラグ(isRegeneratingAfterDropout)が
+            保存データ・Undo履歴に混入し、復元後の生成で公平性判定が
+            緩んだままになり得た問題を修正(汚染済みデータも次回
+            読込で正常化)
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -726,7 +735,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.18.3</p>
+            <p class="text-gray-400 text-xs mt-1">v7.18.4</p>
         </header>
 
         <main>
