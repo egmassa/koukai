@@ -118,6 +118,15 @@
           - Undo/Redo履歴がお気に入り一覧を毎世代複製しメモリを
             圧迫していた問題を修正。お気に入りは元々Undo対象外の
             ため履歴から除外し、Undo後も現在の一覧を維持するように
+        v7.15 : 「再試行推奨」判定を改善 (2026-07-21)
+          - 構造的に理論上限へ届かない条件(上限比90%前後が実用最良)で
+            毎回「もう1〜2回試すと〜」と表示される問題を修正
+          - 改善停止による早期終了を収束として正しく扱うよう修正
+            (stagnatedフラグを追加)
+          - 条件ごとの実測ベストスコアをlocalStorageに記録し、
+            理論上限に届かなくても「過去◯回の実測ベストと同等 —
+            再試行不要」と判定できるようにした。ダイアログに
+            実測ベスト行を追加表示
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -625,7 +634,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.14</p>
+            <p class="text-gray-400 text-xs mt-1">v7.15</p>
         </header>
 
         <main>

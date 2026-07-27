@@ -1,6 +1,8 @@
 
         // --- Constants & State ---
         const LS_KEY = 'interactiveDoublesDashboard_v2_17'; // Version up for new data structure
+        const LS_KEY_EMPIRICAL_BEST = LS_KEY + '_empiricalBest'; // 条件ごとの実測ベストスコア
+        const MAX_EMPIRICAL_ENTRIES = 30;
         const DEFAULT_MAX_CONSECUTIVE = 2;
 
 
@@ -2067,6 +2069,7 @@
 
             let restart = 0;
             let reachedTarget = false;
+            let stagnated = false; // 改善停止による早期終了（=これ以上回しても改善しないと判断した状態）
             while (true) {
                 // 終了条件チェック
                 const elapsedSoFar = (performance.now() - startTime) / 1000;
@@ -2193,6 +2196,7 @@
                 // ユーザーが指定した思考時間は基本的に使い切る。早期終了は真の収束(3-in-a-row)に任せる
                 const _elapsedFracEnd = (performance.now() - startTime) / 1000 / timeLimitSec;
                 if (_elapsedFracEnd >= 0.8 && allScores.length >= 5 && restart - lastImprovementRestart >= 20) {
+                    stagnated = true; // これ以上回しても改善しないと判断 → 収束扱い
                     dom.loadingMessage.textContent = `✅ 収束 - ${restart}回探索して改善なし (経過${(_elapsedFracEnd*100).toFixed(0)}%)`;
                     await new Promise(r => setTimeout(r, 200));
                     break;
@@ -2300,9 +2304,10 @@
                 const stdDev = calculateStandardDeviation(allScores, avg);
 
                 // 収束判定（相対閾値: bestScoreの0.5%または0.1の大きい方）
+                // 改善停止による早期終了(stagnated)も「これ以上改善しない」という意味で収束扱いにする
                 const CONV_EPS = Math.max(0.1, Math.abs(bestScore) * 0.005);
-                const converged = allScores.length >= 3 &&
-                    allScores.slice(-3).every(s => Math.abs(s - bestScore) < CONV_EPS);
+                const converged = stagnated || (allScores.length >= 3 &&
+                    allScores.slice(-3).every(s => Math.abs(s - bestScore) < CONV_EPS));
 
                 appState.lastRunAnalysis = {
                     attempts: userAttempts,
@@ -2322,6 +2327,10 @@
                 // 総合グレード計算
                 const gradeForReport = calcOverallGrade(stats, bestSolution, originalSettings.members, appState.allPossiblePairs, cachedMixBonus);
 
+                // 条件ごとの実測ベストを更新（理論上限が構造的に到達不能な条件でも、
+                // 過去の実績と比較して「これ以上は現実的に望めない」を判断できるようにする）
+                const _empiricalEntry = updateEmpiricalBest(originalSettings, gradeForReport.totalBase);
+
                 appState.lastRunAnalysis.reportText = `グレード: ${gradeForReport.grade} ${gradeForReport.total}点 / ${elapsed}秒 / ${totalIters}回評価`;
                 appState.dataSource = '⚡ アニーリング探索';
                 appState.areAnalysisSectionsVisible = false;
@@ -2340,37 +2349,57 @@
                 else if (_pctInt >= 65) { _relGrade = 'C'; _relColor = '#d97706'; _relStars = '★★☆☆☆'; }
                 else { _relGrade = 'D'; _relColor = '#dc2626'; _relStars = '★☆☆☆☆'; }
 
+                // 再試行推奨の判定は優先順(a)>(b)>(c)>(d)で行う
+                // (a) 理論上限との差1点以内
                 const _reachedCeilDialog = targetRate > 0 && (targetRate - gradeForReport.totalBase) <= 1.0;
-                if (_reachedCeilDialog && _relGrade !== 'S') {
+                // (b) 同条件の実測ベストとの差1点以内 かつ 過去3回以上の記録がある
+                const _empiricalGap = Math.max(0, _empiricalEntry.bestScore - gradeForReport.totalBase);
+                const _empiricalReached = _empiricalEntry.runCount >= 3 && _empiricalGap <= 1.0;
+                const _practicalBestReached = _reachedCeilDialog || _empiricalReached;
+                if (_practicalBestReached && _relGrade !== 'S') {
                     _relGrade = 'S'; _relColor = '#16a34a'; _relStars = '★★★★★';
                 }
                 let _verdict, _action, _verdictColor;
                 if (_relGrade === 'S') {
-                    _verdict = _reachedCeilDialog
-                        ? '✅ この条件での最高スコア — 再試行不要'
-                        : '✅ S評価達成 — 再試行不要';
+                    if (_reachedCeilDialog) {
+                        _verdict = '✅ この条件での最高スコア — 再試行不要';
+                    } else if (_empiricalReached) {
+                        _verdict = `✅ 過去${_empiricalEntry.runCount}回の実測ベスト(${_empiricalEntry.bestScore.toFixed(1)}点)と同等 — 再試行不要`;
+                    } else {
+                        _verdict = '✅ S評価達成 — 再試行不要';
+                    }
                     _action = 'このままご利用いただけます。';
                     _verdictColor = '#16a34a';
                 } else if (_pctInt >= 78) {
+                    // (c) 収束(改善停止含む) かつ 上限比88%以上
                     if (converged && _pctInt >= 88) {
                         _verdict = '✅ この条件での上限付近です — 再試行しても大きな改善は見込めません';
                         _action = '試合数を増やすか、人数を増やすとSランクが出やすくなります。';
                         _verdictColor = '#059669';
                     } else {
+                        // (d)
                         _verdict = '🔄 もう1〜2回試すとさらに良くなる可能性があります';
                         _action = '再度実行して比較してみてください。';
                         _verdictColor = '#2563eb';
                     }
                 } else {
+                    // (d)
                     _verdict = '⚠️ まだ改善の余地があります。再試行を推奨します';
                     _action = '設定の連続制限や試合数を緩和することで大きく改善する可能性があります。';
                     _verdictColor = '#dc2626';
                 }
+                // 実測ベスト行（過去に1回以上の記録がある場合のみ表示）
+                const _empiricalRow = _empiricalEntry.runCount > 0
+                    ? `<div class="flex justify-between text-sm text-gray-500 py-1 border-b">
+                         <span>実測ベスト</span><span class="font-semibold">${_empiricalEntry.bestScore.toFixed(1)}点 <span class="text-xs text-gray-400 font-normal">(過去${_empiricalEntry.runCount}回)</span></span>
+                       </div>`
+                    : '';
                 // 上限行(targetRate)はmixBonus抜きなので、並べて比較する「今回の結果」も同じ基準(totalBase)で揃える
                 const _ceilRow = targetRate > 0
                     ? `<div class="flex justify-between text-sm text-gray-500 py-1 border-b">
                          <span>この条件での上限</span><span class="font-semibold">${targetRate}点</span>
                        </div>
+                       ${_empiricalRow}
                        <div class="flex justify-between text-sm py-1 border-b">
                          <span>今回の結果</span><span class="font-semibold">${gradeForReport.totalBase}点</span>
                        </div>`
@@ -2969,6 +2998,57 @@ ${conclusionText}</pre>
             }
 
             return true;
+        }
+
+        // ─── 条件ごとの実測ベストスコア（localStorage永続化） ──────────────────
+        // 理論上限(calcConditionCeiling)は構造的に到達不能な値を含むため、
+        // 実際にこれまで出た最良スコアを条件シグネチャ単位で記録し、
+        // 「これ以上は現実的に望めない」の判断材料として併用する。
+        function getConditionSignature(settings) {
+            return JSON.stringify({
+                surfaces: settings.currentSurfaceCount,
+                members: settings.currentTotalMemberCount,
+                matchCount: settings.matchCount,
+                maxConsecutiveLimit: settings.maxConsecutiveLimit,
+                ruleType: settings.ruleType,
+                groups: settings.groups || {}
+            });
+        }
+
+        function loadEmpiricalBestStore() {
+            try {
+                return JSON.parse(localStorage.getItem(LS_KEY_EMPIRICAL_BEST)) || {};
+            } catch (_) { return {}; }
+        }
+
+        function saveEmpiricalBestStore(store) {
+            try { localStorage.setItem(LS_KEY_EMPIRICAL_BEST, JSON.stringify(store)); } catch (_) { }
+        }
+
+        // 読み取り専用（表示用）。runCountは増やさない
+        function getEmpiricalBest(settings) {
+            const store = loadEmpiricalBestStore();
+            return store[getConditionSignature(settings)] || null;
+        }
+
+        // 探索完了時にのみ呼ぶ。runCountを増やし、bestScoreを必要なら更新して返す
+        function updateEmpiricalBest(settings, scoreTotalBase) {
+            const store = loadEmpiricalBestStore();
+            const key = getConditionSignature(settings);
+            const entry = store[key] || { bestScore: -Infinity, runCount: 0 };
+            entry.runCount++;
+            if (scoreTotalBase > entry.bestScore) entry.bestScore = scoreTotalBase;
+            entry.lastUsed = Date.now();
+            store[key] = entry;
+
+            // 保存件数が上限を超えたら、lastUsedが古い条件から削除
+            const keys = Object.keys(store);
+            if (keys.length > MAX_EMPIRICAL_ENTRIES) {
+                keys.sort((a, b) => (store[a].lastUsed || 0) - (store[b].lastUsed || 0));
+                for (let i = 0; i < keys.length - MAX_EMPIRICAL_ENTRIES; i++) delete store[keys[i]];
+            }
+            saveEmpiricalBestStore(store);
+            return entry;
         }
 
         /**
@@ -4553,8 +4633,19 @@ ${conclusionText}</pre>
             const reachedCeiling = gapFromCeil <= 1.0;
             // 達成率（探索完了ダイアログ・renderGenerationSummaryと同じ「上限比の相対評価」）
             const relPct = ceilScore > 0 ? Math.round(curScore / ceilScore * 100) : 100;
-            // 「再試行不要」の判定も、ダイアログ等と同じく相対95%以上 または gap≤1.0 に揃える
-            const noRetryNeeded = reachedCeiling || relPct >= 95;
+            // 同条件の実測ベスト（表示専用の読み取りのみ、runCountは増やさない）
+            const _empiricalEntryTile = getEmpiricalBest({
+                currentSurfaceCount: appState.currentSurfaceCount,
+                currentTotalMemberCount: appState.currentTotalMemberCount,
+                matchCount: appState.matches.length,
+                maxConsecutiveLimit: appState.maxConsecutiveLimit,
+                ruleType: ceilRuleType,
+                groups: appState.groups
+            }) || { bestScore: -Infinity, runCount: 0 };
+            const _empiricalGapTile = Math.max(0, _empiricalEntryTile.bestScore - curScore);
+            const empiricalReached = _empiricalEntryTile.runCount >= 3 && _empiricalGapTile <= 1.0;
+            // 「再試行不要」の判定も、ダイアログ等と同じく 相対95%以上 または gap≤1.0 または 実測ベスト同等 に揃える
+            const noRetryNeeded = reachedCeiling || empiricalReached || relPct >= 95;
 
             // グレード文字・星・ラベルを絶対点数ではなく上限比の相対評価に統一
             // （条件によっては絶対100点満点に届かない上限しか存在しないため、絶対評価だと
@@ -4579,6 +4670,9 @@ ${conclusionText}</pre>
             if (reachedCeiling) {
                 // 上限との差1点以内 = 真のベスト（この条件で出せる最高の結果）
                 convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ この条件での最高スコア (${ceilScore}点) — 再試行不要</div>`;
+            } else if (empiricalReached) {
+                // 理論上限には届かないが、過去の実測ベストと同等（構造的にこれが実用上限）
+                convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ 過去${_empiricalEntryTile.runCount}回の実測ベスト(${_empiricalEntryTile.bestScore.toFixed(1)}点)と同等 — 再試行不要</div>`;
             } else if (noRetryNeeded) {
                 // 上限には僅かに届かないが、達成率95%以上で目標達成とみなす
                 convergeBadge = `<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🎯 達成率${relPct}% — 再試行不要 (最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点)</div>`;
