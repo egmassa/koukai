@@ -158,6 +158,29 @@
             取り戻すために多く出場することはなくなった
             (appState.joinOffsets)
           - ヘルプダイアログ・制約仕様書に途中参加の按分ルールを明記
+        v7.18 : 途中参加機能を「到着ベース」のUIに再設計 (2026-07-27)
+          - 現実の運用では遅刻者が何試合目から参加するか事前に分から
+            ないため、試合番号の手入力を廃し、ワンタップの到着フロー
+            に変更
+          - 「途中離脱」セクションに「未到着メンバー」を新設。生成前
+            はメンバーごとのチェックボックスで未到着を指定でき
+            (joins[idx]=JOIN_NOT_ARRIVED=9999で全試合不参加として
+            生成)、生成後は未到着メンバーの横に「到着」ボタンを表示
+          - 「到着」タップ時、最初の未消化試合番号を自動判定して
+            joinsを更新し、按分オフセットを再計算。以降の試合のみ
+            部分再生成する(離脱と同じ仕組み。完了済み試合・進行状況
+            チェックは温存)
+          - 参加試合番号をあらかじめ指定できる従来の手動指定機能は
+            「上級操作」として折りたたみ(details)に格納し、UI上は
+            目立たなくした
+          - renderGenerationSummary・印刷・CSV・デバッグログの表示を
+            「未到着」(未生成/未到着時)と「参加(第N試合〜)」(到着後)
+            で使い分けるよう更新
+          - バグ修正: generateAndDisplayMatchesがisRegenerate=true時
+            にcreateDeterministicFirstMatchを呼ばず、join適用の全体
+            再生成で第1試合がランダムになっていた問題を修正
+            (matchesが空かどうかで判定するよう変更)
+          - ヘルプダイアログ・制約仕様書を新フローの説明に更新
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -665,7 +688,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.17.1</p>
+            <p class="text-gray-400 text-xs mt-1">v7.18</p>
         </header>
 
         <main>
@@ -906,25 +929,22 @@
                 </details>
                 <section id="dropoutSettingsWrapper" class="mb-8 hidden">
                     <div class="card">
-                        <h2 class="text-2xl font-semibold mb-4">2. 途中離脱・途中参加設定
+                        <h2 class="text-2xl font-semibold mb-4">2. 途中離脱・未到着メンバー
                             <button id="dropoutHelpBtn" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;border:1px solid #d1d5db;background:#f3f4f6;font-size:15px;cursor:pointer;vertical-align:middle;margin-left:8px;" title="使い方">ℹ️</button>
                         </h2>
-                        <div class="flex space-x-6 mb-4">
-                            <label class="flex items-center"><input type="radio" name="dropoutMode" value="leave" checked
-                                    class="h-4 w-4 text-blue-600"><span class="ml-2">途中離脱</span></label>
-                            <label class="flex items-center"><input type="radio" name="dropoutMode" value="join"
-                                    class="h-4 w-4 text-blue-600"><span class="ml-2">途中参加（遅刻）</span></label>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                        <!-- 途中離脱 -->
+                        <h3 class="text-base font-semibold text-gray-700 mb-2">途中離脱</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                             <div>
                                 <label for="dropoutPlayerSelect"
-                                    class="block text-sm font-medium text-gray-700 mb-1" id="dropoutPlayerLabel">離脱するメンバー:</label>
+                                    class="block text-sm font-medium text-gray-700 mb-1">離脱するメンバー:</label>
                                 <select id="dropoutPlayerSelect"
                                     class="input-select mt-1 block w-full py-2 px-3 border"></select>
                             </div>
                             <div>
                                 <label for="dropoutMatchNumberInput"
-                                    class="block text-sm font-medium text-gray-700 mb-1" id="dropoutMatchNumberLabel">何試合目から離脱？</label>
+                                    class="block text-sm font-medium text-gray-700 mb-1">何試合目から離脱？</label>
                                 <input type="number" id="dropoutMatchNumberInput"
                                     class="input-text mt-1 block w-full py-2 px-3 border" min="1" placeholder="例: 5">
                                 <small id="dropoutHint" class="text-xs text-gray-500 mt-1 block">
@@ -936,6 +956,40 @@
                                     class="button-primary font-semibold py-2 px-4 rounded-md shadow-sm w-full">離脱を適用して再生成</button>
                             </div>
                         </div>
+
+                        <!-- 未到着メンバー -->
+                        <h3 class="text-base font-semibold text-gray-700 mb-2">未到着メンバー</h3>
+                        <p id="notArrivedHint" class="text-xs text-gray-500 mb-2">
+                            遅れて来るメンバーにチェックを付けてから生成すると、その人抜きで組み合わせを作ります。
+                            到着したら「到着」をタップすると次の試合から自動で組み込まれます。
+                        </p>
+                        <div id="notArrivedContainer" class="flex flex-wrap gap-2"></div>
+
+                        <!-- 上級操作: 参加試合番号の手動指定 -->
+                        <details class="mt-6">
+                            <summary class="text-sm text-gray-500 cursor-pointer select-none">上級: 参加試合番号を手動指定する</summary>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-3">
+                                <div>
+                                    <label for="manualJoinPlayerSelect"
+                                        class="block text-sm font-medium text-gray-700 mb-1">参加するメンバー:</label>
+                                    <select id="manualJoinPlayerSelect"
+                                        class="input-select mt-1 block w-full py-2 px-3 border"></select>
+                                </div>
+                                <div>
+                                    <label for="manualJoinMatchNumberInput"
+                                        class="block text-sm font-medium text-gray-700 mb-1">何試合目から参加？</label>
+                                    <input type="number" id="manualJoinMatchNumberInput"
+                                        class="input-text mt-1 block w-full py-2 px-3 border" min="1" placeholder="例: 4">
+                                    <small id="manualJoinHint" class="text-xs text-gray-500 mt-1 block">
+                                        試合生成前でも設定できます。
+                                    </small>
+                                </div>
+                                <div class="flex items-end">
+                                    <button id="applyManualJoinButton"
+                                        class="button-secondary font-semibold py-2 px-4 rounded-md shadow-sm w-full">途中参加を適用して再生成</button>
+                                </div>
+                            </div>
+                        </details>
                     </div>
                 </section>
 

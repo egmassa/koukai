@@ -4,6 +4,7 @@
         const LS_KEY_EMPIRICAL_BEST = LS_KEY + '_empiricalBest'; // 条件ごとの実測ベストスコア
         const MAX_EMPIRICAL_ENTRIES = 30;
         const DEFAULT_MAX_CONSECUTIVE = 2;
+        const JOIN_NOT_ARRIVED = 9999; // joinsに設定する「未到着（全試合不参加）」を表す十分大きい値
 
 
         const appState = {
@@ -230,7 +231,8 @@
                 'genderMixWrapper', 'femalePlayersContainer', 'editMatchModal', 'cancelEditMatchButton', 'saveMatchButton',
                 'editMatchTitle', 'editMatchForm', 'jumpNextBtn',
                 'dropoutSettingsWrapper', 'dropoutPlayerSelect', 'dropoutMatchNumberInput', 'applyDropoutButton', 'dropoutHint',
-                'dropoutPlayerLabel', 'dropoutMatchNumberLabel',
+                'notArrivedContainer', 'notArrivedHint',
+                'manualJoinPlayerSelect', 'manualJoinMatchNumberInput', 'manualJoinHint', 'applyManualJoinButton',
                 'analysisToggle', 'jumpNextBtn', 'theme-toggle', 'theme-toggle-dark-icon', 'theme-toggle-light-icon',
                 'expandScheduleBtn', 'printScheduleBtn',
                 'configurationHub', 'memberDetailContent'
@@ -425,17 +427,22 @@
             dom.exportCsvButton.addEventListener('click', handleExportCsv);
             dom.cancelEditMatchButton.addEventListener('click', () => dom.editMatchModal.classList.add('hidden'));
             dom.saveMatchButton.addEventListener('click', saveMatchEdit);
-            dom.applyDropoutButton.addEventListener('click', () => {
-                const mode = document.querySelector('input[name="dropoutMode"]:checked')?.value || 'leave';
-                if (mode === 'join') {
-                    handleApplyJoin();
-                } else {
-                    handleApplyExclusion();
-                }
-            });
-            document.querySelectorAll('input[name="dropoutMode"]').forEach(radio => {
-                radio.addEventListener('change', updateExclusionUI);
-            });
+            dom.applyDropoutButton.addEventListener('click', handleApplyExclusion);
+            if (dom.applyManualJoinButton) {
+                dom.applyManualJoinButton.addEventListener('click', handleApplyJoin);
+            }
+            if (dom.notArrivedContainer) {
+                dom.notArrivedContainer.addEventListener('change', (e) => {
+                    const cb = e.target.closest('.not-arrived-checkbox');
+                    if (!cb) return;
+                    handleNotArrivedCheckboxChange(parseInt(cb.dataset.playerIndex, 10), cb.checked);
+                });
+                dom.notArrivedContainer.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.arrival-button');
+                    if (!btn) return;
+                    handleArrival(parseInt(btn.dataset.playerIndex, 10));
+                });
+            }
             dom.expandScheduleBtn.addEventListener('click', toggleScheduleExpansion);
             (function _debugBtnSetup() {
                 const _dbBtn = document.getElementById('debugLogBtn');
@@ -459,28 +466,27 @@
             })();
             document.getElementById('specBtn').addEventListener('click', showSpecDialog);
             document.getElementById('dropoutHelpBtn')?.addEventListener('click', () => {
-                showDialog('途中離脱・途中参加', null, null, `
+                showDialog('途中離脱・未到着メンバー', null, null, `
 <div style="font-size:0.9rem;line-height:1.7;">
 <p style="margin-bottom:6px;font-weight:bold;">🚪 途中離脱</p>
 <p style="margin-bottom:10px;">試合の途中で参加できなくなったメンバーが出た場合、残りのメンバーで公平な試合を自動的に作り直せます。</p>
 <ol style="padding-left:1.2em;margin-bottom:14px;">
-<li style="margin-bottom:8px;">モードで「<strong>途中離脱</strong>」を選択</li>
 <li style="margin-bottom:8px;"><strong>離脱するメンバー</strong>をドロップダウンから選択</li>
 <li style="margin-bottom:8px;"><strong>何試合目から</strong>離脱するかを入力（例: 5試合目から不参加なら「5」）</li>
 <li style="margin-bottom:8px;">「<strong>離脱を適用して再生成</strong>」ボタンをタップ</li>
 </ol>
 <p style="font-size:0.8rem;color:#6b7280;margin-bottom:14px;">指定試合<strong>以降のみ</strong>が再計算され、それより前の試合はそのまま残ります。</p>
 
-<p style="margin-bottom:6px;font-weight:bold;">🏃 途中参加（遅刻）</p>
-<p style="margin-bottom:10px;">遅れて合流するメンバーがいる場合、参加試合以降から出場するよう組み込めます。</p>
+<p style="margin-bottom:6px;font-weight:bold;">🏃 未到着メンバー（遅刻者への対応）</p>
+<p style="margin-bottom:10px;">遅れてくる人も最初に全員登録しておき、来ていない人には「未到着」にチェックを付けて生成します。到着したら「<strong>到着</strong>」をタップすると、次の試合から自動で組み込まれます。消化済みの試合は変わりません。</p>
 <ol style="padding-left:1.2em;margin-bottom:14px;">
-<li style="margin-bottom:8px;">モードで「<strong>途中参加（遅刻）</strong>」を選択</li>
-<li style="margin-bottom:8px;"><strong>参加するメンバー</strong>をドロップダウンから選択</li>
-<li style="margin-bottom:8px;"><strong>何試合目から</strong>参加するかを入力（試合生成前でも設定可能。その場合は次回の生成から反映されます）</li>
-<li style="margin-bottom:8px;">「<strong>途中参加を適用して再生成</strong>」ボタンをタップ</li>
+<li style="margin-bottom:8px;">生成前に、まだ来ていないメンバーの「<strong>未到着</strong>」にチェック</li>
+<li style="margin-bottom:8px;">通常どおり試合を生成（未到着の人抜きで組まれます）</li>
+<li style="margin-bottom:8px;">本人が来たら、その人の「<strong>到着</strong>」ボタンをタップ</li>
+<li style="margin-bottom:8px;">確認ダイアログで「はい」を選ぶと、次の未消化試合から自動で組み込まれます（消化済みの試合・チェック済みの進行状況はそのまま）</li>
 </ol>
-<p style="font-size:0.8rem;color:#6b7280;margin-bottom:6px;">途中離脱と違い、参加前の試合を含めて<strong>スケジュール全体を再生成</strong>します。進行状況チェックはリセットされます。</p>
-<p style="font-size:0.8rem;color:#6b7280;">公平性の考え方: 遅れて参加した人は、参加した時点から他の人と同じペースで出場します。参加前の分を取り戻して多く出場することはありません（総プレイ数は参加が遅い分だけ少なくなります）。</p>
+<p style="font-size:0.8rem;color:#6b7280;margin-bottom:6px;">公平性の考え方: 遅れて参加した人は、参加した時点から他の人と同じペースで出場します。参加前の分を取り戻して多く出場することはありません（総プレイ数は参加が遅い分だけ少なくなります）。</p>
+<p style="font-size:0.8rem;color:#6b7280;">※ 参加する試合番号が事前に分かっている場合は、「上級: 参加試合番号を手動指定する」から直接指定することもできます（この場合は参加前の試合を含めて全体を再生成し、進行状況チェックはリセットされます）。</p>
 </div>`);
             });
             document.getElementById('scheduleHelpBtn')?.addEventListener('click', () => {
@@ -831,8 +837,13 @@
                 exclusionText = ` | 離脱: ${exclusionDetails}`;
             }
             const joinEntries = Object.entries(joins || {});
-            if (joinEntries.length > 0) {
-                const joinDetails = joinEntries.map(([playerIdx, fromMatch]) => {
+            const notArrivedEntries = joinEntries.filter(([, fromMatch]) => fromMatch === JOIN_NOT_ARRIVED);
+            const arrivedJoinEntries = joinEntries.filter(([, fromMatch]) => fromMatch !== JOIN_NOT_ARRIVED);
+            if (notArrivedEntries.length > 0) {
+                exclusionText += ` | 未到着: ${notArrivedEntries.map(([playerIdx]) => members[playerIdx]).join(', ')}`;
+            }
+            if (arrivedJoinEntries.length > 0) {
+                const joinDetails = arrivedJoinEntries.map(([playerIdx, fromMatch]) => {
                     return `${members[playerIdx]}(第${fromMatch}試合~)`;
                 }).join(', ');
                 exclusionText += ` | 参加: ${joinDetails}`;
@@ -1888,7 +1899,7 @@
 &nbsp;1-2-1: 参加人数 ≥ 面数×4人<br>
 &nbsp;1-2-2: 余りの人数が休憩者<br>
 &nbsp;1-2-3: 同じ人が連続して休憩しないよう原則制御<br>
-&nbsp;1-2-4: <b>最初の試合は必ずP1,P2,P3,P4（メンバー番号順に面数×4人）</b><br><br>
+&nbsp;1-2-4: <b>最初の試合は必ずアクティブなメンバーの番号順先頭から面数×4人</b>（離脱済み・未到着のメンバーは除く）<br><br>
 <b>1-3 対戦カード重複禁止（直近限定）</b><br>
 &nbsp;1-3-1: 同じパートナーペア（味方）の連続重複禁止<br>
 &nbsp;1-3-2: 同じ対戦相手ペアの連続重複禁止<br>
@@ -1905,10 +1916,11 @@
 &nbsp;2-3-1: 全員の出場回数の差を最小化<br>
 &nbsp;2-3-2: genderMix best-effortでは性別内での公平性を優先<br>
 &nbsp;2-3-3: best-effortでの男女間差は評価対象外<br>
-&nbsp;2-3-4: 途中参加者（joins）は按分型で評価する。参加前の理論上の
-平均累積プレイ数を仮想オフセットとして加算してから他メンバーと比較し、
-参加後は同ペースで出場していれば公平とみなす（参加前の分を追いつく
-ために多く出場させることはしない。総プレイ数は参加が遅い分だけ
+&nbsp;2-3-4: 途中参加者（joins）は按分型で評価する。参加開始試合（未到着メンバーが
+「到着」をタップした時点の次の未消化試合、または上級操作での手動指定試合）の
+直前時点における他メンバーの理論上の平均累積プレイ数を仮想オフセットとして
+加算してから比較し、参加後は同ペースで出場していれば公平とみなす（参加前の分を
+追いつくために多く出場させることはしない。総プレイ数は参加が遅い分だけ
 少なくなるのが正しい）<br>
 <h4 style="font-weight:bold;margin:10px 0 4px;color:#16a34a;">3. ソフト制約（スコア最大化）</h4>
 <b>3-1 男女ミックス</b><br>
@@ -1953,11 +1965,16 @@
                 ? exclusionEntries.map(([idx, fromMatch]) => `  [${idx}] ${members[idx] || ('P' + (Number(idx) + 1))}: 第${fromMatch}試合から離脱`).join('\n')
                 : '  なし';
 
-            // 途中参加情報
+            // 途中参加情報（未到着=JOIN_NOT_ARRIVEDと参加済みを区別して表示）
             const joins = appState.joins || {};
             const joinEntries = Object.entries(joins);
             const joinInfo = joinEntries.length > 0
-                ? joinEntries.map(([idx, fromMatch]) => `  [${idx}] ${members[idx] || ('P' + (Number(idx) + 1))}: 第${fromMatch}試合から参加`).join('\n')
+                ? joinEntries.map(([idx, fromMatch]) => {
+                    const name = members[idx] || ('P' + (Number(idx) + 1));
+                    return fromMatch === JOIN_NOT_ARRIVED
+                        ? `  [${idx}] ${name}: 未到着`
+                        : `  [${idx}] ${name}: 第${fromMatch}試合から参加`;
+                }).join('\n')
                 : '  なし';
 
             // genderMix用の分類
@@ -3653,7 +3670,9 @@ ${conclusionText}</pre>
             };
             updateExclusionUI();
             regenerateAllPossiblePairs();
-            if (!isRegenerate && appState.members.length >= appState.currentSurfaceCount * 4) {
+            // isRegenerateでもregenerateFrom<=1でmatchesが空になるケース（joinの全再生成等）では
+            // 第1試合を決定的に生成する必要がある。「matchesが現在空かどうか」で判定する
+            if (appState.matches.length === 0 && appState.members.length >= appState.currentSurfaceCount * 4) {
                 appState.matches.push(createDeterministicFirstMatch());
             }
 
@@ -6223,8 +6242,13 @@ ${conclusionText}</pre>
             }
 
             const joinEntries = Object.entries(joins || {});
-            if (joinEntries.length > 0) {
-                const joinText = joinEntries.map(([playerIdx, fromMatch]) => {
+            const notArrivedEntries = joinEntries.filter(([, fromMatch]) => fromMatch === JOIN_NOT_ARRIVED);
+            const arrivedJoinEntries = joinEntries.filter(([, fromMatch]) => fromMatch !== JOIN_NOT_ARRIVED);
+            if (notArrivedEntries.length > 0) {
+                conditions.push(['未到着メンバー', `"${notArrivedEntries.map(([playerIdx]) => members[playerIdx]).join('; ')}"`]);
+            }
+            if (arrivedJoinEntries.length > 0) {
+                const joinText = arrivedJoinEntries.map(([playerIdx, fromMatch]) => {
                     return `${members[playerIdx]}(第${fromMatch}試合~)`;
                 }).join('; ');
                 conditions.push(['参加情報', `"${joinText}"`]);
@@ -6711,41 +6735,137 @@ ${conclusionText}</pre>
             saveState();
         }
 
-        function updateExclusionUI() {
-            const _dropoutSorted = appState.members
+        // メンバーを表示名でソートしたヘルパー（離脱・手動参加・未到着の各UIで共用）
+        function getSortedMembersForDropoutUI() {
+            return appState.members
                 .map((name, index) => ({ name, index }))
                 .sort((a, b) => {
                     const na = parseInt(a.name, 10), nb = parseInt(b.name, 10);
                     if (!isNaN(na) && !isNaN(nb)) return na - nb;
                     return String(a.name).localeCompare(String(b.name));
                 });
-            dom.dropoutPlayerSelect.innerHTML = _dropoutSorted
+        }
+
+        function updateExclusionUI() {
+            const _dropoutSorted = getSortedMembersForDropoutUI();
+            const _optionsHtml = _dropoutSorted
                 .map(({ name, index }) => `<option value="${index}">${name}</option>`)
                 .join('');
+
+            // 途中離脱
+            dom.dropoutPlayerSelect.innerHTML = _optionsHtml;
             dom.dropoutMatchNumberInput.value = '';
-
-            const mode = document.querySelector('input[name="dropoutMode"]:checked')?.value || 'leave';
             const hasMatches = appState.matches.length > 0;
+            dom.applyDropoutButton.disabled = !hasMatches;
+            dom.dropoutMatchNumberInput.max = appState.matches.length;
+            dom.dropoutHint.textContent = hasMatches
+                ? `1〜${appState.matches.length}の範囲で選択できます。`
+                : '先に試合を生成してください。';
 
-            if (mode === 'join') {
-                if (dom.dropoutPlayerLabel) dom.dropoutPlayerLabel.textContent = '参加するメンバー:';
-                if (dom.dropoutMatchNumberLabel) dom.dropoutMatchNumberLabel.textContent = '何試合目から参加？';
-                dom.applyDropoutButton.textContent = hasMatches ? '途中参加を適用して再生成' : '途中参加を設定（次回生成時に反映）';
-                dom.applyDropoutButton.disabled = false;
-                dom.dropoutMatchNumberInput.removeAttribute('max');
-                dom.dropoutHint.textContent = hasMatches
+            // 上級: 参加試合番号の手動指定
+            if (dom.manualJoinPlayerSelect) {
+                dom.manualJoinPlayerSelect.innerHTML = _optionsHtml;
+                dom.manualJoinMatchNumberInput.value = '';
+                dom.manualJoinMatchNumberInput.removeAttribute('max');
+                dom.manualJoinHint.textContent = hasMatches
                     ? `1〜${appState.matches.length}の範囲で選択できます。`
                     : '試合生成前でも設定できます。次回の生成から反映されます。';
-            } else {
-                if (dom.dropoutPlayerLabel) dom.dropoutPlayerLabel.textContent = '離脱するメンバー:';
-                if (dom.dropoutMatchNumberLabel) dom.dropoutMatchNumberLabel.textContent = '何試合目から離脱？';
-                dom.applyDropoutButton.textContent = '離脱を適用して再生成';
-                dom.applyDropoutButton.disabled = !hasMatches;
-                dom.dropoutMatchNumberInput.max = appState.matches.length;
-                dom.dropoutHint.textContent = hasMatches
-                    ? `1〜${appState.matches.length}の範囲で選択できます。`
-                    : '先に試合を生成してください。';
+                dom.applyManualJoinButton.textContent = hasMatches ? '途中参加を適用して再生成' : '途中参加を設定（次回生成時に反映）';
             }
+
+            renderNotArrivedSection();
+        }
+
+        // 「未到着メンバー」セクションの描画。
+        // 生成前: 全メンバーをチェックボックスで表示（チェック=未到着=joins[idx]=JOIN_NOT_ARRIVED）
+        // 生成後: 現在「未到着」のメンバーだけ「到着」ボタンで表示
+        function renderNotArrivedSection() {
+            const container = dom.notArrivedContainer;
+            if (!container) return;
+            const sorted = getSortedMembersForDropoutUI();
+            const hasMatches = appState.matches.length > 0;
+
+            if (!hasMatches) {
+                container.innerHTML = sorted.map(({ name, index }) => {
+                    const checked = appState.joins[index] === JOIN_NOT_ARRIVED ? 'checked' : '';
+                    return `<label class="inline-flex items-center gap-1.5 text-sm border rounded-full px-3 py-1.5 cursor-pointer bg-gray-50">
+                        <input type="checkbox" class="not-arrived-checkbox h-4 w-4" data-player-index="${index}" ${checked}>
+                        <span>${name}</span>
+                    </label>`;
+                }).join('') || '<span class="text-sm text-gray-400">メンバーがいません。</span>';
+                if (dom.notArrivedHint) dom.notArrivedHint.style.display = '';
+            } else {
+                const notArrived = sorted.filter(({ index }) => appState.joins[index] === JOIN_NOT_ARRIVED);
+                if (notArrived.length === 0) {
+                    container.innerHTML = '<span class="text-sm text-gray-400">未到着のメンバーはいません。</span>';
+                } else {
+                    container.innerHTML = notArrived.map(({ name, index }) =>
+                        `<button type="button" class="arrival-button inline-flex items-center gap-1.5 text-sm border rounded-full px-3 py-1.5 bg-amber-50 border-amber-300 text-amber-800 font-semibold" data-player-index="${index}">
+                            ${name}: 到着
+                        </button>`
+                    ).join('');
+                }
+                if (dom.notArrivedHint) dom.notArrivedHint.style.display = 'none';
+            }
+        }
+
+        function handleNotArrivedCheckboxChange(playerIndex, checked) {
+            if (checked) {
+                const existingExclusion = appState.exclusions[playerIndex];
+                if (existingExclusion != null) {
+                    showDialog('入力エラー', `${appState.members[playerIndex]}さんは離脱の設定があるため、未到着には設定できません。`);
+                    renderNotArrivedSection(); // チェックを元に戻す
+                    return;
+                }
+                appState.joins[playerIndex] = JOIN_NOT_ARRIVED;
+            } else {
+                delete appState.joins[playerIndex];
+            }
+            saveState();
+        }
+
+        async function handleArrival(playerIndex) {
+            if (appState.matches.length === 0) return;
+
+            // fromMatch = 最初の未消化試合番号（1-indexed）
+            let fromMatch = null;
+            for (let i = 0; i < appState.matches.length; i++) {
+                if (!appState.completedMatches.has(i)) { fromMatch = i + 1; break; }
+            }
+            if (fromMatch === null) {
+                showDialog('エラー', '全ての試合が消化済みのため、途中参加を適用できません。');
+                return;
+            }
+
+            showDialog(
+                '確認',
+                `${appState.members[playerIndex]}さんを第${fromMatch}試合から参加させ、以降の試合を再生成しますか？（第${fromMatch - 1}試合までは変更されません）`,
+                async (confirmed) => {
+                    if (!confirmed) return;
+
+                    appState.joins[playerIndex] = fromMatch;
+                    updateJoinOffset(playerIndex, fromMatch);
+
+                    // 人数が増える方向なので緩和は不要だが、上限が∞(99)だった場合は
+                    // 参加後にN>Pへ転じることがあるため、有限値に戻せないか確認する
+                    const P = appState.currentSurfaceCount * 4;
+                    const activeCountAtJoin = Array.from({ length: appState.currentTotalMemberCount }, (_, i) => i)
+                        .filter(i => isPlayerActive(i, fromMatch, appState.exclusions, appState.joins)).length;
+                    if (appState.maxConsecutiveLimit >= 99 && activeCountAtJoin > P) {
+                        const newLimit = Math.ceil(P / (activeCountAtJoin - P));
+                        appState.maxConsecutiveLimit = newLimit;
+                        dom.maxConsecutiveSelect.value = String(newLimit);
+                        saveState();
+                    }
+
+                    // 「未到着」だった選手は元のスケジュール全体で最初から除外されているため、
+                    // 第fromMatch試合より前を作り直す必要はない（離脱と同じ部分再生成でよい）。
+                    // 完了済み試合・進行状況チェックは温存する
+                    appState.isRegeneratingAfterDropout = true;
+                    await generateAndDisplayMatches(appState.matches.length, /*isRegenerate=*/true, /*regenerateFrom=*/fromMatch);
+                    appState.isRegeneratingAfterDropout = false;
+                }
+            );
         }
 
         async function handleApplyExclusion() {
@@ -6799,9 +6919,9 @@ ${conclusionText}</pre>
         }
 
         async function handleApplyJoin() {
-            // 入力値を取得
-            const playerIndex = parseInt(dom.dropoutPlayerSelect.value, 10);
-            const fromMatch = parseInt(dom.dropoutMatchNumberInput.value, 10);
+            // 入力値を取得（上級: 参加試合番号の手動指定）
+            const playerIndex = parseInt(dom.manualJoinPlayerSelect.value, 10);
+            const fromMatch = parseInt(dom.manualJoinMatchNumberInput.value, 10);
 
             if (isNaN(playerIndex) || isNaN(fromMatch) || fromMatch < 1) {
                 showDialog('入力エラー', '有効なメンバーと試合番号（1以上）を入力してください。');
@@ -7076,8 +7196,14 @@ ${conclusionText}</pre>
                 conditionsText += ` / <strong>離脱:</strong> ${exclusionText}`;
             }
             const joinEntries = Object.entries(joins || {});
-            if (joinEntries.length > 0) {
-                const joinText = joinEntries.map(([playerIdx, fromMatch]) => {
+            const notArrivedEntries = joinEntries.filter(([, fromMatch]) => fromMatch === JOIN_NOT_ARRIVED);
+            const arrivedJoinEntries = joinEntries.filter(([, fromMatch]) => fromMatch !== JOIN_NOT_ARRIVED);
+            if (notArrivedEntries.length > 0) {
+                const notArrivedText = notArrivedEntries.map(([playerIdx]) => members[playerIdx]).join(', ');
+                conditionsText += ` / <strong>未到着:</strong> ${notArrivedText}`;
+            }
+            if (arrivedJoinEntries.length > 0) {
+                const joinText = arrivedJoinEntries.map(([playerIdx, fromMatch]) => {
                     return `${members[playerIdx]}(第${fromMatch}試合~)`;
                 }).join(', ');
                 conditionsText += ` / <strong>参加:</strong> ${joinText}`;
