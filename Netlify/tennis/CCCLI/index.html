@@ -89,6 +89,15 @@
           - calcOverallGrade/calcConditionCeilingの重み合計が115点に
             なっていた（restPairFairness追加時に加算のみしたため）のを
             100点に正規化。S/A/B/C/D判定の閾値はそのまま維持
+        v7.12 : グレード表示の判定方式を統一 (2026-07-21)
+          - 【バグ7】探索完了ダイアログは上限比の相対評価で「再試行
+            不要」と判定する一方、総合評価タイルは絶対点数評価の
+            グレード文字を使っていたため、同じ結果に「再試行不要」と
+            「再試行できます」が同時表示される矛盾があった。タイルの
+            グレード文字・星・ラベルと「再試行不要」判定を、ダイアログ・
+            renderGenerationSummaryと同じ相対評価(上限比95%以上S等)に
+            統一。renderGenerationSummary側の同種スケール不一致も併せて修正
+          - 総合評価タイルの内訳に「休憩ペア公平性」を追加表示
     -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -596,7 +605,7 @@
         <header class="mb-8 text-center">
             <h1 class="text-3xl md:text-4xl font-bold">🎾 テニペアガチャ 🎰</h1>
             <p class="text-gray-600 mt-2">最適なダブルスの組み合わせを簡単に計画し、分析しましょう。</p>
-            <p class="text-gray-400 text-xs mt-1">v7.11</p>
+            <p class="text-gray-400 text-xs mt-1">v7.12</p>
         </header>
 
         <main>

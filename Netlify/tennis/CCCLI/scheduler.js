@@ -4479,7 +4479,6 @@ ${conclusionText}</pre>
             const gradeData = calcOverallGrade(statsData, appState.matches, appState.members, appState.allPossiblePairs);
             const ana = appState.lastRunAnalysis;
             const isConverged = ana?.converged === true;
-            const isTargetReached = ana?.reachedTarget === true;
             // 上限スコアと現在スコアを比較して再試行要否を判定
             const ceilRuleType = appState.generationSettings?.ruleType || 'none';
             const ceilInfo = calcConditionCeiling(
@@ -4494,26 +4493,41 @@ ${conclusionText}</pre>
             const gapFromCeil = Math.max(0, ceilScore - curScore); // 上限超えは0として扱う
             // 上限との差が1点以内 → 実質上限到達（計算誤差・丸め誤差を吸収）
             const reachedCeiling = gapFromCeil <= 1.0;
+            // 達成率（探索完了ダイアログ・renderGenerationSummaryと同じ「上限比の相対評価」）
+            const relPct = ceilScore > 0 ? Math.round(curScore / ceilScore * 100) : 100;
+            // 「再試行不要」の判定も、ダイアログ等と同じく相対95%以上 または gap≤1.0 に揃える
+            const noRetryNeeded = reachedCeiling || relPct >= 95;
 
-            // 上限に到達している場合はグレードをS（最高）に昇格
-            if (reachedCeiling) {
+            // グレード文字・星・ラベルを絶対点数ではなく上限比の相対評価に統一
+            // （条件によっては絶対100点満点に届かない上限しか存在しないため、絶対評価だと
+            //   ダイアログでは「S・再試行不要」なのにここでは「C・再試行できます」という
+            //   矛盾した表示になっていた）
+            if (noRetryNeeded) {
                 gradeData.grade = 'S';
                 gradeData.stars = '★★★★★';
                 gradeData.color = '#16a34a';
-                gradeData.label = '最高 (条件上限)';
+                gradeData.label = reachedCeiling ? '最高 (条件上限)' : '最高';
+            } else if (relPct >= 88) {
+                gradeData.grade = 'A'; gradeData.stars = '★★★★☆'; gradeData.color = '#2563eb'; gradeData.label = '優秀';
+            } else if (relPct >= 78) {
+                gradeData.grade = 'B'; gradeData.stars = '★★★☆☆'; gradeData.color = '#7c3aed'; gradeData.label = '良好';
+            } else if (relPct >= 65) {
+                gradeData.grade = 'C'; gradeData.stars = '★★☆☆☆'; gradeData.color = '#d97706'; gradeData.label = '普通';
+            } else {
+                gradeData.grade = 'D'; gradeData.stars = '★☆☆☆☆'; gradeData.color = '#dc2626'; gradeData.label = '要改善';
             }
 
             let convergeBadge;
             if (reachedCeiling) {
                 // 上限との差1点以内 = 真のベスト（この条件で出せる最高の結果）
                 convergeBadge = `<div style="display:inline-block;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">✅ この条件での最高スコア (${ceilScore}点) — 再試行不要</div>`;
-            } else if (isTargetReached) {
-                // 目標達成（上限未到達でも十分）
-                convergeBadge = `<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🎯 目標達成 — 再試行不要 (最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点)</div>`;
+            } else if (noRetryNeeded) {
+                // 上限には僅かに届かないが、達成率95%以上で目標達成とみなす
+                convergeBadge = `<div style="display:inline-block;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🎯 達成率${relPct}% — 再試行不要 (最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点)</div>`;
             } else {
-                // 上限未到達 = 収束の有無にかかわらず改善余地あり
+                // 達成率95%未満 = 収束の有無にかかわらず改善余地あり
                 const reason = isConverged ? '同じ結果が繰り返されています（局所最適の可能性）' : '時間切れ';
-                convergeBadge = `<div style="display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🔄 最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点 — 再試行できます（${reason}）</div>`;
+                convergeBadge = `<div style="display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:700;margin-top:10px;">🔄 達成率${relPct}%（最高${ceilScore}点まであと${gapFromCeil.toFixed(1)}点） — 再試行できます（${reason}）</div>`;
             }
             const gradeTileHtml = `
             <div style="background:linear-gradient(135deg,${gradeData.color}18,${gradeData.color}08);border:2px solid ${gradeData.color};border-radius:12px;padding:16px;text-align:center;grid-column:1/-1;">
@@ -4535,6 +4549,7 @@ ${conclusionText}</pre>
                         <div>ペア公平性: <b>${gradeData.scores.pairFairness}点</b></div>
                         <div>対戦公平性: <b>${gradeData.scores.matchupFairness}点</b></div>
                         <div>序盤多様性: <b>${gradeData.scores.earlyDiversity}点</b></div>
+                        <div>休憩ペア公平性: <b>${gradeData.scores.restPairFairness}点</b></div>
                     </div>
                 </div>
                 ${convergeBadge}
@@ -6531,7 +6546,8 @@ ${conclusionText}</pre>
                 const gradeSnap = calcOverallGrade(statsSnap, appState.matches, appState.members, appState.allPossiblePairs);
                 const ceilInfo2 = calcConditionCeiling(appState.currentSurfaceCount, appState.currentTotalMemberCount, appState.matches.length);
                 const _ceilScore2 = ceilInfo2.totalBase ?? ceilInfo2.total;
-                const _reachedCeil2 = Math.max(0, _ceilScore2 - gradeSnap.total) <= 1.0;
+                // _ceilScore2はmixBonus抜きなので、比較側もtotalBase(bonus抜き)で揃える
+                const _reachedCeil2 = Math.max(0, _ceilScore2 - gradeSnap.totalBase) <= 1.0;
                 // サマリーパネルと同様に上限到達時はSへ昇格
                 if (_reachedCeil2) {
                     gradeSnap.grade = 'S';
@@ -6543,7 +6559,7 @@ ${conclusionText}</pre>
                 if (_reachedCeil2) {
                     _sb_grade = 'S'; _sb_color = '#16a34a'; _sb_stars = '★★★★★';
                 } else if (_ceilScore2 > 0) {
-                    const _sbPct = Math.round(gradeSnap.total / _ceilScore2 * 100);
+                    const _sbPct = Math.round(gradeSnap.totalBase / _ceilScore2 * 100);
                     if (_sbPct >= 95) { _sb_grade = 'S'; _sb_color = '#16a34a'; _sb_stars = '★★★★★'; }
                     else if (_sbPct >= 88) { _sb_grade = 'A'; _sb_color = '#2563eb'; _sb_stars = '★★★★☆'; }
                     else if (_sbPct >= 78) { _sb_grade = 'B'; _sb_color = '#7c3aed'; _sb_stars = '★★★☆☆'; }
