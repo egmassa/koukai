@@ -242,7 +242,7 @@
                 'genderMixWrapper', 'femalePlayersContainer', 'editMatchModal', 'cancelEditMatchButton', 'saveMatchButton',
                 'editMatchTitle', 'editMatchForm', 'jumpNextBtn',
                 'dropoutSettingsWrapper', 'dropoutPlayerSelect', 'dropoutMatchNumberInput', 'applyDropoutButton', 'dropoutHint',
-                'notArrivedCountInput', 'arrivalButtonsContainer',
+                'notArrivedCountInput', 'notArrivedCountHint', 'arrivalButtonsContainer',
                 'analysisToggle', 'jumpNextBtn', 'theme-toggle', 'theme-toggle-dark-icon', 'theme-toggle-light-icon',
                 'expandScheduleBtn', 'printScheduleBtn',
                 'configurationHub', 'memberDetailContent'
@@ -384,6 +384,7 @@
             updateAllUI();
             applyDisplayLogicBasedOnState();
             updateUndoRedoButtons();
+            updateTargetScoreUI(); // 面数・人数・未到着数が変わるため上限スコア表示も同期
         }
 
         /**
@@ -1356,6 +1357,7 @@
             applyDisplayLogicBasedOnState();
             dom.saveFavoriteButton.disabled = false;
             updateSaveFavoriteButtonState();
+            updateExclusionUI();   // ← これを1行追加するだけ
             saveState();
         }
 
@@ -5835,6 +5837,12 @@ ${conclusionText}</pre>
                             restoreRuleTypeRadioFromState();
                             updateAllUI();
                             applyDisplayLogicBasedOnState();
+                            updateTargetScoreUI();
+                            // お気に入り読込はmatches/exclusions/joins等を丸ごと入れ替える操作のため、
+                            // 保存とUndo履歴への追加が必要（欠落していると、読込後にリロードすると
+                            // 前のセッション状態に戻り、Undoすると読込前の状態をすっ飛ばしてしまう）
+                            saveState();
+                            pushStateToHistory();
                             showDialog('読込完了', `「${selectedName}」を読み込みました。`);
                         }
                         dom.favoritesSelect.dataset.previousValue = selectedName;
@@ -6180,7 +6188,12 @@ ${conclusionText}</pre>
                     ...appState,
                     charts: undefined,
                     completedMatches: Array.from(appState.completedMatches),
-                    editingMatch: null
+                    editingMatch: null,
+                    // Undo履歴(最大50件の全状態スナップショット)はバックアップの主旨と無関係で
+                    // ファイルを不必要に肥大化させる上、再インポート時にセッションを跨いだ
+                    // 無関係なhistory配列で現在のUndo/Redoポインタを壊してしまうため除外する
+                    history: undefined,
+                    historyIndex: undefined,
                 };
                 const jsonString = JSON.stringify(stateToSave, null, 2);
                 const blob = new Blob([jsonString], {
@@ -6224,8 +6237,16 @@ ${conclusionText}</pre>
                                             || []);
                                 appState.joins = importedState.joins || {}; // 後方互換: 旧バックアップにはjoinsが存在しない
                                 appState.joinOffsets = importedState.joinOffsets || {}; // 後方互換: 旧バックアップにはjoinOffsetsが存在しない
+                                // インポートしたファイルのhistory(他セッションの無関係なスナップショット、
+                                // または旧仕様でexportに含まれていた巨大配列)は使わず、この状態を
+                                // 起点とする新しいUndo履歴を1件だけ作り直す
+                                appState.history = [];
+                                appState.historyIndex = -1;
                                 restoreRuleTypeRadioFromState();
                                 updateAllUI();
+                                updateTargetScoreUI();
+                                saveState();
+                                pushStateToHistory();
                                 showDialog('成功',
                                     'データのインポートが完了しました。');
                             }
@@ -6482,7 +6503,7 @@ ${conclusionText}</pre>
 
                         Object.assign(appState, {
                             currentSurfaceCount: 1,
-                            totalMemberCount: 0,
+                            currentTotalMemberCount: 0,
                             // ★★★ ここの値を 0 から DEFAULT_MAX_CONSECUTIVE に修正しました ★★★
                             maxConsecutiveLimit: DEFAULT_MAX_CONSECUTIVE,
                             forcedInfinity: false,
@@ -6515,6 +6536,9 @@ ${conclusionText}</pre>
                         updateExclusionUI();
                         applyDisplayLogicBasedOnState();
                         saveState();
+                        // 到着・離脱と同じくexclusions/joins/completedMatchesを変更する操作のため、
+                        // 履歴に積まないとUndoがこの操作を素通りして更に前の状態まで戻ってしまう
+                        pushStateToHistory();
                     }
                 });
         }
@@ -6838,6 +6862,16 @@ ${conclusionText}</pre>
             dom.notArrivedCountInput.value = String(count);
             const maxN = Math.max(0, appState.currentTotalMemberCount - appState.currentSurfaceCount * 4);
             dom.notArrivedCountInput.max = String(maxN);
+            // 生成後にこの数値を直接変更しても試合は再生成されず、表示(未到着表記)と
+            // 実際のスケジュールが食い違うだけになるため、生成後は編集不可にし
+            // 「到着」ボタン経由の操作に一本化する
+            const hasMatches = appState.matches.length > 0;
+            dom.notArrivedCountInput.disabled = hasMatches;
+            if (dom.notArrivedCountHint) {
+                dom.notArrivedCountHint.textContent = hasMatches
+                    ? '生成後は変更できません。到着したら下の「到着」ボタンを使ってください。'
+                    : '';
+            }
         }
 
         // 「うち未到着」の人数指定に応じて、登録順の末尾からN人をjoins[idx]=JOIN_NOT_ARRIVED
@@ -6973,6 +7007,17 @@ ${conclusionText}</pre>
                 showDialog('入力エラー', '有効なメンバーと試合番号（1〜' + appState.matches.length + '）を入力してください。');
                 return;
             }
+
+            // 消化済み試合を上書きさせない（到着処理と同じ制約）
+            let lastCompleted = 0;
+            appState.completedMatches.forEach(idx => {
+                if (idx + 1 > lastCompleted) lastCompleted = idx + 1;
+            });
+            if (fromMatch <= lastCompleted) {
+                showDialog('入力エラー', `第${lastCompleted}試合までは消化済みです。離脱は第${lastCompleted + 1}試合以降で指定してください。`);
+                return;
+            }
+
 
             // 制約: 同一メンバーへのjoins/exclusionsは joins < exclusions のみ許可
             const existingJoin = appState.joins[playerIndex];
