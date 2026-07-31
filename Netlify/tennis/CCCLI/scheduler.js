@@ -118,6 +118,7 @@
             playCount:      150,   // 合計プレイ数差 (差1超過につき)
             genderMixPair:  200,   // genderMix F+F同士ペア (コートにつき)
             fixedPairSplit: 200,   // fixedPairペア分離 (コートにつき)
+            consecutivePair: 200,  // 直前の試合と同一ペアが連続 (発生1件につき)
             firstMatch:     500,   // 第1試合固定
             saIter:         200,   // SAリスタートあたりイテレーション数
             saConverge:       5,   // 収束判定: 連続同点リスタート数
@@ -1357,7 +1358,7 @@
             applyDisplayLogicBasedOnState();
             dom.saveFavoriteButton.disabled = false;
             updateSaveFavoriteButtonState();
-            updateExclusionUI();   // ← これを1行追加するだけ
+            updateExclusionUI(); // 再生成完了後の最新試合数でヒント/max属性を再同期(離脱UIが古い試合数のまま残るバグの修正)
             saveState();
         }
 
@@ -1834,6 +1835,22 @@
                     }
                 }
             }
+            // 直前の試合と全く同じペア（team1/team2の組み合わせ）が連続することを避ける
+            // ※ SA探索(evaluateFullSolution)はここに来るまでペア連続を一切見ていなかったため追加
+            let consecutivePairCount = 0;
+            for (let mi = 1; mi < matches.length; mi++) {
+                const prevPairs = new Set();
+                matches[mi - 1].courts.forEach(c => {
+                    prevPairs.add(c.team1.join(','));
+                    prevPairs.add(c.team2.join(','));
+                });
+                matches[mi].courts.forEach(c => {
+                    if (prevPairs.has(c.team1.join(','))) consecutivePairCount++;
+                    if (prevPairs.has(c.team2.join(','))) consecutivePairCount++;
+                });
+            }
+            if (consecutivePairCount > 0) penalty -= consecutivePairCount * pw.consecutivePair;
+
             // 第1試合は表示名順の先頭4人が出場しなければ大ペナルティ
             if (matches.length > 0 && settings.firstMatchPlayers) {
                 const _fmp = settings.firstMatchPlayers;
@@ -1876,6 +1893,7 @@
                 { key: 'maxPlayStreak',   label: '連続プレイ上限超過',      unit: '点/回超過' },
                 { key: 'genderMixPair',   label: 'genderMix F+Fペア',      unit: '点/コート' },
                 { key: 'fixedPairSplit',  label: 'fixedPairペア分離',       unit: '点/コート' },
+                { key: 'consecutivePair', label: '直前試合と同一ペア',      unit: '点/件' },
                 { key: 'firstMatch',      label: '第1試合固定',              unit: '点' },
                 { key: 'saIter',          label: 'SAイテレーション/再起動', unit: '回' },
                 { key: 'saConverge',      label: 'SA収束判定・連続回数',    unit: '回' },
@@ -7008,7 +7026,7 @@ ${conclusionText}</pre>
                 return;
             }
 
-            // 消化済み試合を上書きさせない（到着処理と同じ制約）
+            // 制約: 消化済み試合は上書きさせない（到着処理(handleArrival)と同じ制約）
             let lastCompleted = 0;
             appState.completedMatches.forEach(idx => {
                 if (idx + 1 > lastCompleted) lastCompleted = idx + 1;
@@ -7017,7 +7035,6 @@ ${conclusionText}</pre>
                 showDialog('入力エラー', `第${lastCompleted}試合までは消化済みです。離脱は第${lastCompleted + 1}試合以降で指定してください。`);
                 return;
             }
-
 
             // 制約: 同一メンバーへのjoins/exclusionsは joins < exclusions のみ許可
             const existingJoin = appState.joins[playerIndex];
