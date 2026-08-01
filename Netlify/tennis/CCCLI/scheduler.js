@@ -383,6 +383,7 @@
 
             // UI全体を更新
             updateAllUI();
+            restoreRuleTypeRadioFromState(); // Undo/Redo経路だけラジオボタンが同期されていなかった問題の修正
             applyDisplayLogicBasedOnState();
             updateUndoRedoButtons();
             updateTargetScoreUI(); // 面数・人数・未到着数が変わるため上限スコア表示も同期
@@ -6689,6 +6690,14 @@
             const fromMatch = lastCompleted + 1;
             if (fromMatch > appState.matches.length) {
                 showDialog('エラー', '最終試合まで消化済みのため、途中参加を自動的に組み込めません。試合をタップして手動で編集してください。');
+                return;
+            }
+
+            // 既にこのメンバーに「離脱」設定があり、その離脱試合番号が今回の参加試合番号以前の場合、
+            // isPlayerActive()がexclusions→joinsの順で判定するため全試合出場不可の矛盾状態になる
+            const existingExclusion = appState.exclusions[playerIndex];
+            if (existingExclusion != null && existingExclusion <= fromMatch) {
+                showDialog('入力エラー', `${appState.members[playerIndex]}さんは第${existingExclusion}試合から離脱の設定があります。先に離脱設定を解除するか、第${existingExclusion + 1}試合以降を指定してください。`);
                 return;
             }
 
