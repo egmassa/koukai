@@ -5,6 +5,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>マイツール</title>
+
+  <!-- PWA関連 -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#3b5bdb">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="マイツール">
   <script src="https://accounts.google.com/gsi/client" async defer onload="window.__gisLoaded = true; initGoogleAuth();"
     onerror="window.__gisFailed = true;"></script>
   <style>
@@ -406,6 +415,15 @@
         }, 5000);
       }
     };
+
+    // サービスワーカー登録（PWAとしてインストール可能にする）
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          console.warn('Service worker登録失敗:', err);
+        });
+      });
+    }
   </script>
 </body>
 
