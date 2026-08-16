@@ -1,0 +1,1969 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>ガット履歴データ管理 (Vanilla JS)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.5.0/semantic.min.css">
+    <!-- file://プロトコルでアイコンフォントが読めない場合のフォールバック -->
+    <style>
+        /* Semantic UIアイコン非表示時のフォールバック: iタグをhide、ボタンテキストで代替 */
+        .icon-fallback-hidden { display: none !important; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/1.2.1/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://egmassa.github.io/koukai/Netlify/shared/drive-manager.js"></script>
+    <style>
+        .container {
+            padding: 30px;
+        }
+
+        .drive-panel {
+            margin-bottom: 20px;
+            padding: 16px 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f5f3ff;
+        }
+
+        .drive-panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #5b3fa0;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+
+        .drive-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .drive-badge.connected { background: #e6f7f0; color: #0c8055; }
+        .drive-badge.disconnected { background: #fdecea; color: #b03027; }
+        .drive-badge.connecting { background: #fff4e0; color: #b3690a; }
+        .drive-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+        .drive-body { display: none; }
+        .drive-body.open { display: block; }
+
+        .drive-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .drive-field label {
+            font-size: 11px;
+            color: #666;
+            display: block;
+            margin-bottom: 3px;
+        }
+
+        .drive-field input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+
+        .drive-info {
+            font-size: 11px;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        #input-panel {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+
+        #stats-panel {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f0f8ff;
+        }
+
+        #chart-panel {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+        }
+
+        .chart-container.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .chart-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .timeline-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .timeline-controls .ui.button {
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .timeline-controls .period-buttons {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .timeline-controls .zoom-buttons {
+            display: flex;
+            gap: 5px;
+            margin-left: auto;
+        }
+
+        .chart-container canvas {
+            touch-action: pan-y;
+        }
+
+        .interval-stat-item {
+            display: inline-block;
+            margin: 10px 15px 10px 0;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #00b5ad;
+        }
+
+        .interval-stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .interval-stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        #data-table-container {
+            overflow-x: auto;
+        }
+
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+
+        .sortable .icon {
+            margin-left: 5px;
+        }
+
+        .header-filter {
+            width: 95%;
+            padding: 2px;
+            box-sizing: border-box;
+            margin-top: 5px;
+        }
+
+        th[draggable="true"] {
+            cursor: move;
+        }
+
+        .drag-source {
+            opacity: 0.5;
+        }
+
+        .drag-over {
+            border-left: 3px solid #00b5ad !important;
+        }
+
+        .filter-header {
+            position: relative;
+        }
+
+        .filter-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            z-index: 1000;
+            width: 250px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            border: 1px solid #d4d4d5;
+            border-radius: 4px;
+        }
+
+        .filter-dropdown-menu .menu {
+            max-height: 300px;
+            overflow-y: auto;
+            border: none;
+            padding: 0;
+        }
+
+        .filter-dropdown-menu .item {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+
+        .filter-dropdown-menu .item:hover {
+            background: #f2f2f2;
+        }
+
+        .filter-dropdown-menu .item.active {
+            background: #e0e0e0;
+            font-weight: bold;
+        }
+
+        .filter-dropdown-menu .divider {
+            border-top: 1px solid #d4d4d5;
+            margin: 5px 0;
+        }
+
+        .date-input-wrapper {
+            position: relative;
+        }
+
+        .today-btn {
+            position: absolute;
+            right: 5px;
+            top: 28px;
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-title {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .timeline-controls .zoom-buttons {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container ui">
+        <h1 class="ui header">🎾 ガット履歴データ管理 (Vanilla JS)</h1>
+
+        <div class="drive-panel">
+            <div class="drive-panel-title" onclick="toggleDrivePanel()">
+                ☁️ Google Drive連携
+                <span id="driveStatusBadge" class="drive-badge disconnected">
+                    <span class="drive-dot"></span><span id="driveStatusText">未接続</span>
+                </span>
+            </div>
+            <div class="drive-body" id="driveBody">
+                <div id="driveLastInfo" class="drive-info" style="margin-top:0;margin-bottom:8px;"></div>
+                <div class="drive-grid">
+                    <div class="drive-field">
+                        <label>OAuth Client ID</label>
+                        <input type="text" id="driveClientIdInput" placeholder="xxxxxxxx.apps.googleusercontent.com">
+                    </div>
+                    <div class="drive-field">
+                        <label>保存フォルダID</label>
+                        <input type="text" id="driveFolderIdInput" placeholder="1aBcDeFgHiJk...">
+                    </div>
+                </div>
+                <div class="ui small buttons">
+                    <button class="ui button" onclick="saveDriveSettings()">💾 設定保存</button>
+                    <button class="ui primary button" onclick="connectDrive()">🔗 Googleで接続</button>
+                    <button class="ui teal button" onclick="loadFromDrive()">☁️ 最新読込</button>
+                    <button class="ui green button" onclick="saveToDrive()">📤 Driveに保存</button>
+                    <button class="ui orange button" onclick="toggleBackupList()">🕘 バックアップから復元</button>
+                </div>
+                <div id="backupListPanel" style="display:none; margin-top:12px; border-top:1px solid #ddd; padding-top:12px;">
+                    <div style="font-size:12px; color:#888; margin-bottom:8px;">直近のバックアップ一覧（新しい順・最大10件）</div>
+                    <div id="backupListBody" style="font-size:12px;">読み込み中...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="stats-panel" class="ui segment">
+            <h3 class="ui header">📊 統計情報</h3>
+            <div class="stats-grid" id="stats-grid"></div>
+        </div>
+
+        <div id="chart-panel" class="ui segment">
+            <h3 class="ui header">📈 データ分析グラフ</h3>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <div class="chart-title">ガット別平均テンション</div>
+                    <canvas id="gutTensionChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">テンション分布</div>
+                    <canvas id="tensionDistChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">張替え間隔分析</div>
+                    <canvas id="intervalChart"></canvas>
+                </div>
+                <div class="chart-container full-width">
+                    <div class="chart-title">テンション有りデータの日付間隔</div>
+                    <div class="timeline-controls">
+                        <div class="zoom-buttons">
+                            <button class="ui mini button" onclick="zoomTensionIntervalChart('in')" title="ズームイン">🔍+</button>
+                            <button class="ui mini button" onclick="zoomTensionIntervalChart('out')" title="ズームアウト">🔍-</button>
+                            <button class="ui mini button" onclick="resetTensionIntervalZoom()" title="リセット">↩</button>
+                        </div>
+                    </div>
+                    <canvas id="tensionIntervalChart"></canvas>
+                </div>
+                <div class="chart-container full-width">
+                    <div class="chart-title">時系列テンション推移</div>
+                    <div class="timeline-controls">
+                        <div class="period-buttons">
+                            <button class="ui mini button" onclick="setTimelinePeriod('all')">全期間</button>
+                            <button class="ui mini button" onclick="setTimelinePeriod(365)">1年</button>
+                            <button class="ui mini button" onclick="setTimelinePeriod(180)">6ヶ月</button>
+                            <button class="ui mini button" onclick="setTimelinePeriod(90)">3ヶ月</button>
+                            <button class="ui mini button" onclick="setTimelinePeriod(30)">1ヶ月</button>
+                        </div>
+                        <div class="zoom-buttons">
+                            <button class="ui mini button" onclick="zoomTimeline('in')" title="ズームイン">🔍+</button>
+                            <button class="ui mini button" onclick="zoomTimeline('out')" title="ズームアウト">🔍-</button>
+                            <button class="ui mini button" onclick="resetTimelineZoom()" title="リセット">↩</button>
+                        </div>
+                    </div>
+                    <canvas id="tensionTimelineChart"></canvas>
+                </div>
+            </div>
+            <div id="interval-stats" style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px;">
+            </div>
+        </div>
+
+        <div id="input-panel" class="ui segment">
+            <h3 class="ui header dividing">
+                <span id="form-title">📅 新規データ入力</span>
+                <button class="ui button mini" type="button" onclick="clearEditMode()" id="clear-button"
+                    style="display: none; margin-left: 10px;">新規入力に戻す</button>
+            </h3>
+            <form class="ui form" id="add-data-form">
+                <div class="fields">
+                    <div class="field four wide date-input-wrapper">
+                        <label>日付 (YYYYMMDD)</label>
+                        <input type="text" id="input-日付" placeholder="例: 20251102" required>
+                        <button type="button" class="ui mini button today-btn" onclick="setToday()">今日</button>
+                    </div>
+                    <div class="field two wide">
+                        <label>テンション</label>
+                        <input type="number" id="input-テンション" placeholder="例: 42">
+                    </div>
+                    <div class="field three wide">
+                        <label>ラケットモデル</label>
+                        <input type="text" id="input-ラケットモデル" placeholder="例: VCORE 100">
+                    </div>
+                    <div class="field four wide">
+                        <label>ガット名/種類</label>
+                        <input type="text" id="input-ガット名" placeholder="例: ポリツアープロ 125" required>
+                    </div>
+                </div>
+                <div class="fields">
+                    <div class="field four wide">
+                        <label>店舗/アクション</label>
+                        <input type="text" id="input-店舗" placeholder="例: ロール18 / YY専門店">
+                    </div>
+                    <div class="field ten wide">
+                        <label>価格/備考</label>
+                        <input type="text" id="input-価格備考" placeholder="例: 3,300円。打球感がマイルド。">
+                    </div>
+                    <div class="field two wide" style="display: flex; gap: 5px; align-items: flex-end;">
+                        <button class="ui basic button fluid" type="button" id="duplicate-add-button"
+                            style="display: none;">追加</button>
+                        <button class="ui primary button fluid" type="submit" id="add-data-button">追加</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div class="controls">
+            <button class="ui button" onclick="document.getElementById('import-csv-file').click()">
+                📂 CSVファイルをインポート
+            </button>
+            <input type="file" id="import-csv-file" accept=".csv" style="display: none;" />
+            <button id="export-csv" class="ui button">
+                💾 CSVエクスポート
+            </button>
+            <button id="save-data" class="ui green button">
+                🗄️ データを保存
+            </button>
+            <button id="clear-filters" class="ui orange button">
+                🔍 フィルタ全クリア
+            </button>
+            <div class="ui label" id="record-count">
+                全件数: 0 | フィルタ後: 0
+            </div>
+        </div>
+
+        <div id="data-table-container">
+            <table class="ui selectable celled table" id="data-table">
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // ─── Google Drive連携：状態・設定 ─────────────────────────────
+        let driveClientId = localStorage.getItem('gutDriveClientId') || '';
+        let driveFolderId = localStorage.getItem('gutDriveFolderId') || '';
+        let driveStatus = 'disconnected';
+        let driveLastFile = null;
+        const DRIVE_MAIN_FILENAME = 'gut_history_data.json';
+        const DRIVE_BACKUP_PREFIX = 'gut_history_backup';
+        const DRIVE_MAX_BACKUPS = 10;
+
+        function toggleDrivePanel() {
+            document.getElementById('driveBody').classList.toggle('open');
+        }
+
+        function setDriveStatus(status, text) {
+            driveStatus = status;
+            const badge = document.getElementById('driveStatusBadge');
+            const label = document.getElementById('driveStatusText');
+            badge.className = 'drive-badge ' + status;
+            label.textContent = text;
+        }
+
+        function saveDriveSettings() {
+            driveClientId = document.getElementById('driveClientIdInput').value.trim();
+            driveFolderId = document.getElementById('driveFolderIdInput').value.trim();
+            localStorage.setItem('gutDriveClientId', driveClientId);
+            localStorage.setItem('gutDriveFolderId', driveFolderId);
+            alert('Drive設定を保存しました。');
+        }
+
+        async function connectDrive() {
+            if (!driveClientId || !driveFolderId) {
+                alert('OAuth Client IDと保存フォルダIDを入力・保存してください。');
+                return;
+            }
+            setDriveStatus('connecting', '接続中...');
+            try {
+                await driveManager.setup(driveClientId, driveFolderId);
+                await driveManager.getToken(false);
+                setDriveStatus('connected', '接続済み');
+            } catch (e) {
+                console.warn('Drive接続失敗:', e);
+                setDriveStatus('disconnected', '未接続');
+                alert('Drive接続に失敗しました: ' + e.message);
+            }
+        }
+
+        async function saveToDrive(silent) {
+            if (driveStatus !== 'connected') {
+                alert('先に「Googleで接続」を行ってください。');
+                return;
+            }
+            try {
+                const result = await driveManager.saveJsonWithBackup(DRIVE_MAIN_FILENAME, {
+                    version: APP_VERSION,
+                    dataSet: dataSet,
+                    timestamp: new Date().toISOString()
+                }, { backupPrefix: DRIVE_BACKUP_PREFIX, maxBackups: DRIVE_MAX_BACKUPS });
+                driveLastFile = { modifiedTime: result.modifiedTime };
+                document.getElementById('driveLastInfo').textContent =
+                    '最終更新: ' + new Date(result.modifiedTime).toLocaleString('ja-JP');
+                if (!silent) alert('Google Driveに保存しました' + (result.backedUp ? '（直前の状態をバックアップに退避済み）' : ''));
+            } catch (e) {
+                console.warn('Drive保存失敗:', e);
+                alert('Drive保存に失敗しました: ' + e.message);
+            }
+        }
+
+        async function loadFromDrive() {
+            if (driveStatus !== 'connected') {
+                alert('先に「Googleで接続」を行ってください。');
+                return;
+            }
+            try {
+                const result = await driveManager.loadJson(DRIVE_MAIN_FILENAME);
+                if (!result) {
+                    alert('Drive上に保存済みデータが見つかりませんでした。');
+                    return;
+                }
+                dataSet = result.data.dataSet || [];
+                driveLastFile = { modifiedTime: result.modifiedTime };
+                document.getElementById('driveLastInfo').textContent =
+                    '最終更新: ' + new Date(result.modifiedTime).toLocaleString('ja-JP');
+                renderTable();
+                saveDataToStorage(true); // ローカルにもキャッシュ（サイレント）
+                alert('Google Driveからデータを読み込みました。');
+            } catch (e) {
+                console.warn('Drive読込失敗:', e);
+                alert('Drive読込に失敗しました: ' + e.message);
+            }
+        }
+
+        // ─── バックアップからの復元 ─────────────────────────────
+        async function toggleBackupList() {
+            const panel = document.getElementById('backupListPanel');
+            const isOpening = panel.style.display === 'none' || !panel.style.display;
+            panel.style.display = isOpening ? 'block' : 'none';
+            if (isOpening) {
+                if (driveStatus !== 'connected') {
+                    document.getElementById('backupListBody').innerHTML = '<span style="color:#dc2626;">先にDriveに接続してください</span>';
+                    return;
+                }
+                await refreshBackupList();
+            }
+        }
+
+        async function refreshBackupList() {
+            const body = document.getElementById('backupListBody');
+            body.textContent = '読み込み中...';
+            try {
+                const backups = await driveManager.listBackups(DRIVE_BACKUP_PREFIX);
+                if (backups.length === 0) {
+                    body.innerHTML = '<span style="color:#888;">バックアップはまだありません</span>';
+                    return;
+                }
+                body.innerHTML = backups.map(f => {
+                    const dt = new Date(f.modifiedTime).toLocaleString('ja-JP');
+                    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #eee;">
+                        <span>${dt}</span>
+                        <button class="ui mini button" onclick="restoreBackup('${f.id}', '${dt}')">この状態に戻す</button>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                body.innerHTML = '<span style="color:#dc2626;">一覧の取得に失敗しました: ' + e.message + '</span>';
+            }
+        }
+
+        async function restoreBackup(fileId, dtLabel) {
+            if (!confirm(dtLabel + ' の状態に復元します。\n（今の内容は復元前に自動でバックアップされるので、やり直しは可能です）\n\nよろしいですか？')) return;
+            try {
+                const data = await driveManager.downloadJson(fileId);
+                dataSet = data.dataSet || [];
+                renderTable();
+                saveDataToStorage(true);
+                await saveToDrive(true); // 復元内容を新メインとして保存（＝復元前状態も自動バックアップ）
+                await refreshBackupList();
+                alert('✅ ' + dtLabel + ' の状態に復元しました');
+            } catch (e) {
+                alert('復元に失敗しました: ' + e.message);
+            }
+        }
+
+        let dataSet = [];
+        let currentEditRowIndex = null;
+        let COLUMNS = [
+            { id: "日付", title: "日付", type: "number", width: '120px', filterable: true, filterType: 'input' },
+            { id: "テンション", title: "テンション", type: "number", width: '100px', filterable: true, filterType: 'select' },
+            { id: "ラケットモデル", title: "ラケットモデル", type: "string", filterable: true, filterType: 'select' },
+            { id: "ガット名/種類", title: "ガット名/種類", type: "string", filterable: true, filterType: 'select' },
+            { id: "店舗/アクション", title: "店舗/アクション", type: "string", filterable: true, filterType: 'input' },
+            { id: "価格/備考", title: "価格/備考", type: "string", filterable: true, filterType: 'input' },
+        ];
+        let currentSort = { key: "日付", dir: "desc" };
+        let currentFilters = {};
+        let dragSourceEl = null;
+        let charts = {};
+        let timelineZoom = {
+            startIndex: null,
+            endIndex: null,
+            filterDays: null
+        };
+        let timelineZoomInterval = { // New zoom state for interval chart
+            startIndex: null,
+            endIndex: null
+        };
+
+        function setToday() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            document.getElementById('input-日付').value = `${yyyy}${mm}${dd}`;
+        }
+
+        function updateCharts() {
+            updateGutTensionChart();
+            updateTensionDistChart();
+            updateIntervalChart();
+            updateTensionTimelineChart();
+            updateTensionIntervalChart();
+        }
+
+        function updateTensionIntervalChart() {
+            const tensionData = dataSet
+                .map((r, index) => ({
+                    ...r,
+                    originalIndex: index
+                }))
+                .filter(r => r.日付 && r.テンション && String(r.テンション).trim() !== '')
+                .map(r => ({
+                    date: String(r.日付),
+                    tension: parseFloat(r.テンション),
+                    racket: normalizeRacketModel(r["ラケットモデル"]) || '(未記入)',
+                    originalIndex: r.originalIndex
+                }))
+                .filter(d => d.date.length === 8 && !isNaN(d.tension))
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+            const canvas = document.getElementById('tensionIntervalChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            if (charts.tensionInterval) {
+                charts.tensionInterval.destroy();
+            }
+
+            if (tensionData.length < 2) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            const intervalPoints = [];
+            for (let i = 1; i < tensionData.length; i++) {
+                const current = tensionData[i];
+                const previous = tensionData[i - 1];
+
+                const currentDate = new Date(
+                    parseInt(current.date.substring(0, 4)),
+                    parseInt(current.date.substring(4, 6)) - 1,
+                    parseInt(current.date.substring(6, 8))
+                );
+                const previousDate = new Date(
+                    parseInt(previous.date.substring(0, 4)),
+                    parseInt(previous.date.substring(4, 6)) - 1,
+                    parseInt(previous.date.substring(6, 8))
+                );
+
+                const daysDiff = Math.round((currentDate - previousDate) / (1000 * 60 * 60 * 24));
+
+                intervalPoints.push({
+                    x: i,
+                    y: daysDiff,
+                    racket: current.racket,
+                    previousDate: previous.date,
+                    currentDate: current.date
+                });
+            }
+
+            const racketGroups = intervalPoints.reduce((acc, point) => {
+                if (!acc[point.racket]) {
+                    acc[point.racket] = [];
+                }
+                acc[point.racket].push(point);
+                return acc;
+            }, {});
+
+            const colors = [
+                'rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)',
+                'rgba(255, 206, 86, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)',
+                'rgba(201, 203, 207, 1)', 'rgba(0, 0, 0, 1)'
+            ];
+
+            const datasets = Object.keys(racketGroups).map((racket, index) => ({
+                label: racket,
+                data: racketGroups[racket],
+                backgroundColor: colors[index % colors.length].replace('1)', '0.7)'),
+                borderColor: colors[index % colors.length],
+                pointRadius: 5,
+                pointHoverRadius: 7
+            }));
+
+            charts.tensionInterval = new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const point = context.raw;
+                                    let label = context.dataset.label || '';
+                                    if (label) { label += ': '; }
+                                    const dateStr = point.currentDate.substring(0, 4) + '/' + point.currentDate.substring(4, 6) + '/' + point.currentDate.substring(6, 8);
+                                    label += `(${point.x}番, ${point.y}日) 日付: ${dateStr}`;
+                                    return label;
+                                }
+                            }
+                        },
+                        zoom: { // Add zoom plugin configuration
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'データ番号' },
+                            type: 'linear',
+                            position: 'bottom',
+                            // Apply zoom limits if set
+                            min: timelineZoomInterval.startIndex !== null ? timelineZoomInterval.startIndex : undefined,
+                            max: timelineZoomInterval.endIndex !== null ? timelineZoomInterval.endIndex : undefined
+                        },
+                        y: {
+                            title: { display: true, text: '前回からの日数' },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function zoomTensionIntervalChart(direction) {
+            const chart = charts.tensionInterval;
+            if (!chart) return;
+
+            const scaleX = chart.scales.x;
+            
+            const tensionData = dataSet
+                .filter(r => r.日付 && r.テンション && String(r.テンション).trim() !== '')
+                .filter(d => String(d.日付).length === 8 && !isNaN(parseFloat(d.テンション)));
+
+            if (tensionData.length < 2) return;
+
+            const totalDataPoints = tensionData.length - 1;
+
+            let currentMin = scaleX.min !== undefined ? scaleX.min : 1;
+            let currentMax = scaleX.max !== undefined ? scaleX.max : totalDataPoints;
+            let currentRange = currentMax - currentMin;
+
+            if (direction === 'in') {
+                const newRange = Math.max(5, Math.floor(currentRange * 0.5));
+                const center = (currentMin + currentMax) / 2;
+                timelineZoomInterval.startIndex = Math.max(1, center - newRange / 2);
+                timelineZoomInterval.endIndex = Math.min(totalDataPoints, center + newRange / 2);
+            } else if (direction === 'out') {
+                const newRange = Math.min(totalDataPoints, Math.floor(currentRange * 2));
+                const center = (currentMin + currentMax) / 2;
+                timelineZoomInterval.startIndex = Math.max(1, center - newRange / 2);
+                timelineZoomInterval.endIndex = Math.min(totalDataPoints, center + newRange / 2);
+
+                if (timelineZoomInterval.endIndex - timelineZoomInterval.startIndex >= totalDataPoints - 1) {
+                    timelineZoomInterval.startIndex = null;
+                    timelineZoomInterval.endIndex = null;
+                }
+            }
+            updateTensionIntervalChart();
+        }
+        window.zoomTensionIntervalChart = zoomTensionIntervalChart;
+
+        function resetTensionIntervalZoom() {
+            timelineZoomInterval.startIndex = null;
+            timelineZoomInterval.endIndex = null;
+            updateTensionIntervalChart();
+        }
+        window.resetTensionIntervalZoom = resetTensionIntervalZoom;
+
+        function calculateIntervals() {
+            const sortedData = dataSet
+                .filter(r => r.日付)
+                .map(r => ({
+                    date: String(r.日付),
+                    racket: normalizeRacketModel(r["ラケットモデル"]),
+                    gut: r["ガット名/種類"],
+                    tension: r["テンション"]
+                }))
+                .filter(d => d.date.length === 8)
+                .sort((a, b) => b.date.localeCompare(a.date));
+
+            const intervals = [];
+            for (let i = 0; i < sortedData.length - 1; i++) {
+                const current = sortedData[i];
+                const previous = sortedData[i + 1];
+
+                const currentDate = new Date(
+                    parseInt(current.date.substring(0, 4)),
+                    parseInt(current.date.substring(4, 6)) - 1,
+                    parseInt(current.date.substring(6, 8))
+                );
+                const previousDate = new Date(
+                    parseInt(previous.date.substring(0, 4)),
+                    parseInt(previous.date.substring(4, 6)) - 1,
+                    parseInt(previous.date.substring(6, 8))
+                );
+
+                const daysDiff = Math.round((currentDate - previousDate) / (1000 * 60 * 60 * 24));
+
+                intervals.push({
+                    days: daysDiff,
+                    racket: current.racket || '(未記入)',
+                    gut: current.gut || '(未記入)',
+                    fromDate: previous.date,
+                    toDate: current.date
+                });
+            }
+
+            return intervals;
+        }
+
+        function updateIntervalChart() {
+            const intervals = calculateIntervals();
+
+            if (intervals.length === 0) return;
+
+            const racketIntervals = {};
+            intervals.forEach(interval => {
+                if (!racketIntervals[interval.racket]) {
+                    racketIntervals[interval.racket] = [];
+                }
+                racketIntervals[interval.racket].push(interval.days);
+            });
+
+            const racketAvgData = Object.entries(racketIntervals)
+                .map(([racket, days]) => ({
+                    racket: racket,
+                    avg: days.reduce((a, b) => a + b, 0) / days.length,
+                    count: days.length
+                }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 8);
+
+            const ctx = document.getElementById('intervalChart').getContext('2d');
+
+            if (charts.interval) {
+                charts.interval.destroy();
+            }
+
+            charts.interval = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: racketAvgData.map(d => d.racket),
+                    datasets: [{
+                        label: '平均張替え間隔 (日)',
+                        data: racketAvgData.map(d => d.avg),
+                        backgroundColor: 'rgba(153, 102, 255, 0.7)',
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function (context) {
+                                    const count = racketAvgData[context.dataIndex].count;
+                                    return `データ数: ${count}回`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return value.toFixed(0) + '日';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const statsDiv = document.getElementById('interval-stats');
+            const allDays = intervals.map(i => i.days);
+            const avgInterval = (allDays.reduce((a, b) => a + b, 0) / allDays.length).toFixed(1);
+            const minInterval = Math.min(...allDays);
+            const maxInterval = Math.max(...allDays);
+            const minIntervalData = intervals.find(i => i.days === minInterval);
+            const maxIntervalData = intervals.find(i => i.days === maxInterval);
+
+            statsDiv.innerHTML = `
+                <h4 style="margin-top: 0;">📊 張替え間隔統計</h4>
+                <div class="interval-stat-item">
+                    <div class="interval-stat-label">平均間隔</div>
+                    <div class="interval-stat-value">${avgInterval}日</div>
+                </div>
+                <div class="interval-stat-item">
+                    <div class="interval-stat-label">最短間隔</div>
+                    <div class="interval-stat-value">${minInterval}日</div>
+                    <div style="font-size: 11px; color: #666; margin-top: 3px;">${minIntervalData.racket} / ${minIntervalData.gut}</div>
+                </div>
+                <div class="interval-stat-item">
+                    <div class="interval-stat-label">最長間隔</div>
+                    <div class="interval-stat-value">${maxInterval}日</div>
+                    <div style="font-size: 11px; color: #666; margin-top: 3px;">${maxIntervalData.racket} / ${maxIntervalData.gut}</div>
+                </div>
+                <div class="interval-stat-item">
+                    <div class="interval-stat-label">総データ数</div>
+                    <div class="interval-stat-value">${intervals.length}回</div>
+                </div>
+            `;
+        }
+
+        function updateGutTensionChart() {
+            const gutTensions = {};
+
+            dataSet.forEach(row => {
+                const gut = row["ガット名/種類"];
+                const tension = parseFloat(row["テンション"]);
+
+                if (gut && !isNaN(tension)) {
+                    if (!gutTensions[gut]) {
+                        gutTensions[gut] = [];
+                    }
+                    gutTensions[gut].push(tension);
+                }
+            });
+
+            const gutData = Object.entries(gutTensions)
+                .map(([gut, tensions]) => ({
+                    gut: gut,
+                    avg: tensions.reduce((a, b) => a + b, 0) / tensions.length,
+                    count: tensions.length
+                }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 10);
+
+            const ctx = document.getElementById('gutTensionChart').getContext('2d');
+
+            if (charts.gutTension) {
+                charts.gutTension.destroy();
+            }
+
+            if (gutData.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                return;
+            }
+
+            charts.gutTension = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: gutData.map(d => d.gut),
+                    datasets: [{
+                        label: '平均テンション (lbs)',
+                        data: gutData.map(d => d.avg),
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function (context) {
+                                    const count = gutData[context.dataIndex].count;
+                                    return `使用回数: ${count}回`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function (value) {
+                                    return value.toFixed(1) + ' lbs';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateTensionDistChart() {
+            const tensions = dataSet
+                .filter(r => r.日付)
+                .map(r => parseFloat(r.テンション))
+                .filter(t => !isNaN(t));
+
+            if (tensions.length === 0) return;
+
+            const min = Math.floor(Math.min(...tensions));
+            const max = Math.ceil(Math.max(...tensions));
+            const binSize = 2;
+            const bins = {};
+
+            for (let i = min; i <= max; i += binSize) {
+                const binLabel = `${i}-${i + binSize - 1}`;
+                bins[binLabel] = 0;
+            }
+
+            tensions.forEach(t => {
+                const binStart = Math.floor((t - min) / binSize) * binSize + min;
+                const binLabel = `${binStart}-${binStart + binSize - 1}`;
+                if (bins[binLabel] !== undefined) {
+                    bins[binLabel]++;
+                }
+            });
+
+            const ctx = document.getElementById('tensionDistChart').getContext('2d');
+
+            if (charts.tensionDist) {
+                charts.tensionDist.destroy();
+            }
+
+            charts.tensionDist = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(bins),
+                    datasets: [{
+                        label: '件数',
+                        data: Object.values(bins),
+                        backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'テンション (lbs)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            },
+                            title: {
+                                display: true,
+                                text: '件数'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function normalizeRacketModel(racketModel) {
+            if (!racketModel) return '';
+            return racketModel.trim().replace(/\s*\d+\s*$/, '');
+        }
+
+        function updateTensionTimelineChart() {
+            const timelineData = dataSet
+                .filter(r => r.日付 && r.テンション)
+                .map(r => ({
+                    date: String(r.日付),
+                    tension: parseFloat(r.テンション),
+                    gut: r["ガット名/種類"],
+                    racket: normalizeRacketModel(r["ラケットモデル"])
+                }))
+                .filter(d => d.date.length === 8 && !isNaN(d.tension))
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+            if (timelineData.length === 0) return;
+
+            // フィルタリング（期間指定）
+            let filteredData = timelineData;
+            if (timelineZoom.filterDays !== null && timelineZoom.filterDays !== 'all') {
+                const latestDate = new Date(
+                    parseInt(timelineData[timelineData.length - 1].date.substring(0, 4)),
+                    parseInt(timelineData[timelineData.length - 1].date.substring(4, 6)) - 1,
+                    parseInt(timelineData[timelineData.length - 1].date.substring(6, 8))
+                );
+                const cutoffDate = new Date(latestDate);
+                cutoffDate.setDate(cutoffDate.getDate() - timelineZoom.filterDays);
+
+                filteredData = timelineData.filter(d => {
+                    const dataDate = new Date(
+                        parseInt(d.date.substring(0, 4)),
+                        parseInt(d.date.substring(4, 6)) - 1,
+                        parseInt(d.date.substring(6, 8))
+                    );
+                    return dataDate >= cutoffDate;
+                });
+            }
+
+            // ズームインデックス適用
+            if (timelineZoom.startIndex !== null && timelineZoom.endIndex !== null) {
+                const start = Math.max(0, timelineZoom.startIndex);
+                const end = Math.min(filteredData.length, timelineZoom.endIndex);
+                filteredData = filteredData.slice(start, end);
+            }
+
+            const racketModels = [...new Set(filteredData.map(d => d.racket).filter(r => r))];
+            if (racketModels.length === 0) racketModels.push('(ラケット未記入)');
+
+            const colors = [
+                'rgba(75, 192, 192, 1)',
+                'rgba(255, 99, 132, 1)',
+                'rgba(54, 162, 235, 1)',
+                'rgba(255, 206, 86, 1)',
+                'rgba(153, 102, 255, 1)',
+                'rgba(255, 159, 64, 1)'
+            ];
+
+            const datasets = racketModels.map((racket, index) => {
+                const racketData = filteredData.filter(d => d.racket === racket || (!d.racket && racket === '(ラケット未記入)'));
+
+                return {
+                    label: racket,
+                    data: racketData.map(d => ({
+                        x: d.date.substring(0, 4) + '/' + d.date.substring(4, 6) + '/' + d.date.substring(6, 8),
+                        y: d.tension
+                    })),
+                    borderColor: colors[index % colors.length],
+                    backgroundColor: colors[index % colors.length].replace('1)', '0.2)'),
+                    tension: 0.3,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    gut: racketData.map(d => d.gut)
+                };
+            });
+
+            const ctx = document.getElementById('tensionTimelineChart').getContext('2d');
+
+            if (charts.tensionTimeline) {
+                charts.tensionTimeline.destroy();
+            }
+
+            charts.tensionTimeline = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function (context) {
+                                    return context[0].label;
+                                },
+                                label: function (context) {
+                                    const datasetIndex = context.datasetIndex;
+                                    const dataIndex = context.dataIndex;
+                                    const gut = datasets[datasetIndex].gut[dataIndex];
+
+                                    return [
+                                        `${context.dataset.label}: ${context.parsed.y} lbs`,
+                                        gut ? `ガット: ${gut}` : ''
+                                    ].filter(s => s);
+                                }
+                            }
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function (value) {
+                                    return value + ' lbs';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function setTimelinePeriod(days) {
+            if (days === 'all') {
+                timelineZoom.filterDays = null;
+                timelineZoom.startIndex = null;
+                timelineZoom.endIndex = null;
+            } else {
+                timelineZoom.filterDays = days;
+                timelineZoom.startIndex = null;
+                timelineZoom.endIndex = null;
+            }
+            updateTensionTimelineChart();
+        }
+        window.setTimelinePeriod = setTimelinePeriod;
+
+        function zoomTimeline(direction) {
+            const timelineData = dataSet
+                .filter(r => r.日付 && r.テンション)
+                .map(r => ({ date: String(r.日付) }))
+                .filter(d => d.date.length === 8)
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+            if (timelineData.length === 0) return;
+
+            // 期間フィルタ適用後のデータ数を取得
+            let filteredCount = timelineData.length;
+            if (timelineZoom.filterDays !== null && timelineZoom.filterDays !== 'all') {
+                const latestDate = new Date(
+                    parseInt(timelineData[timelineData.length - 1].date.substring(0, 4)),
+                    parseInt(timelineData[timelineData.length - 1].date.substring(4, 6)) - 1,
+                    parseInt(timelineData[timelineData.length - 1].date.substring(6, 8))
+                );
+                const cutoffDate = new Date(latestDate);
+                cutoffDate.setDate(cutoffDate.getDate() - timelineZoom.filterDays);
+
+                filteredCount = timelineData.filter(d => {
+                    const dataDate = new Date(
+                        parseInt(d.date.substring(0, 4)),
+                        parseInt(d.date.substring(4, 6)) - 1,
+                        parseInt(d.date.substring(6, 8))
+                    );
+                    return dataDate >= cutoffDate;
+                }).length;
+            }
+
+            const totalCount = filteredCount;
+            const currentStart = timelineZoom.startIndex !== null ? timelineZoom.startIndex : 0;
+            const currentEnd = timelineZoom.endIndex !== null ? timelineZoom.endIndex : totalCount;
+            const currentRange = currentEnd - currentStart;
+
+            if (direction === 'in') {
+                // ズームイン: 表示範囲を50%に縮小
+                const newRange = Math.max(5, Math.floor(currentRange * 0.5));
+                const center = Math.floor((currentStart + currentEnd) / 2);
+                timelineZoom.startIndex = Math.max(0, center - Math.floor(newRange / 2));
+                timelineZoom.endIndex = Math.min(totalCount, timelineZoom.startIndex + newRange);
+            } else if (direction === 'out') {
+                // ズームアウト: 表示範囲を2倍に拡大
+                const newRange = Math.min(totalCount, Math.floor(currentRange * 2));
+                const center = Math.floor((currentStart + currentEnd) / 2);
+                timelineZoom.startIndex = Math.max(0, center - Math.floor(newRange / 2));
+                timelineZoom.endIndex = Math.min(totalCount, timelineZoom.startIndex + newRange);
+                
+                // 全体表示になった場合はインデックスをクリア
+                if (timelineZoom.endIndex - timelineZoom.startIndex >= totalCount) {
+                    timelineZoom.startIndex = null;
+                    timelineZoom.endIndex = null;
+                }
+            }
+
+            updateTensionTimelineChart();
+        }
+        window.zoomTimeline = zoomTimeline;
+
+        function resetTimelineZoom() {
+            timelineZoom.startIndex = null;
+            timelineZoom.endIndex = null;
+            timelineZoom.filterDays = null;
+            updateTensionTimelineChart();
+        }
+        window.resetTimelineZoom = resetTimelineZoom;
+
+        function formatCellValue(col, value) {
+            if (col.type === "number" && typeof value === "number") {
+                // If it's a number and not an integer, format to one decimal place
+                if (value % 1 !== 0) {
+                    return value.toFixed(1);
+                }
+                return value;
+            }
+            return String(value);
+        }
+
+        function updateCount(total, filtered) {
+            const recordCountElement = document.getElementById('record-count');
+            if (recordCountElement) {
+                recordCountElement.textContent = `全件数: ${total} | フィルタ後: ${filtered}`;
+            }
+        }
+
+        function renderTable() {
+            const table = document.getElementById("data-table");
+
+            let filteredData = dataSet.filter(row => {
+                return COLUMNS.every(col => {
+                    const filter = currentFilters[col.id];
+                    if (!filter) return true;
+
+                    const rowValue = String(row[col.id] || '').toLowerCase();
+                    const filterValue = String(filter).toLowerCase();
+
+                    if (col.filterType === 'select' && filterValue !== 'all') {
+                        return rowValue === filterValue;
+                    }
+                    if (col.filterType === 'input') {
+                        return rowValue.includes(filterValue);
+                    }
+                    return true;
+                });
+            });
+
+            filteredData.sort((a, b) => {
+                const key = currentSort.key;
+                const dir = currentSort.dir === "asc" ? 1 : -1;
+                const colType = COLUMNS.find(c => c.id === key).type;
+
+                let valA = a[key];
+                let valB = b[key];
+
+                if (colType === "number") {
+                    valA = parseFloat(valA) || 0;
+                    valB = parseFloat(valB) || 0;
+                } else if (colType === "string") {
+                    valA = String(valA).toLowerCase();
+                    valB = String(valB).toLowerCase();
+                }
+
+                if (valA < valB) return -1 * dir;
+                if (valA > valB) return 1 * dir;
+                return 0;
+            });
+
+            table.innerHTML = '';
+
+            const thead = table.createTHead();
+            const headerRow = thead.insertRow();
+            const filterRow = thead.insertRow();
+
+            COLUMNS.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col.title;
+
+                th.setAttribute('data-column-id', col.id);
+                th.className = 'sortable filter-header';
+                th.draggable = true;
+                if (col.width) th.style.width = col.width;
+
+                if (currentSort.key === col.id) {
+                    const icon = document.createElement('i');
+                    icon.className = `icon arrow ${currentSort.dir === 'asc' ? 'up' : 'down'}`;
+                    th.appendChild(icon);
+                }
+
+                if (col.filterable && col.filterType === 'select') {
+                    th.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        handleFilterDropdownToggle(e, col.id);
+                    });
+                } else if (col.filterable && col.filterType === 'input') {
+                    th.addEventListener('click', (e) => {
+                        if (!e.target.closest('.header-filter')) {
+                            handleSortClick(e);
+                        }
+                    });
+                } else {
+                    th.addEventListener('click', handleSortClick);
+                }
+
+                th.addEventListener('dragstart', handleDragStart);
+                th.addEventListener('dragover', handleDragOver);
+                th.addEventListener('dragleave', handleDragLeave);
+                th.addEventListener('drop', handleDrop);
+                th.addEventListener('dragend', handleDragEnd);
+
+                headerRow.appendChild(th);
+
+                const filterCell = filterRow.insertCell();
+                if (col.filterable && col.filterType === 'input') {
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'header-filter';
+                    input.placeholder = '検索...';
+                    input.value = currentFilters[col.id] || '';
+                    input.addEventListener('input', (e) => {
+                        currentFilters[col.id] = e.target.value.trim();
+                        renderTable();
+                    });
+                    input.addEventListener('click', (e) => e.stopPropagation());
+                    filterCell.appendChild(input);
+                } else if (col.filterType === 'select') {
+                    const filterLabel = document.createElement('div');
+                    filterLabel.style.cssText = 'text-align:center;color:#00b5ad;font-size:11px;padding:2px;';
+                    if (currentFilters[col.id]) {
+                        filterLabel.textContent = `絞込中: ${currentFilters[col.id]}`;
+                    }
+                    filterCell.appendChild(filterLabel);
+                }
+            });
+
+            const thActions = document.createElement('th');
+            thActions.textContent = '操作';
+            thActions.style.width = '80px';
+            headerRow.appendChild(thActions);
+            filterRow.insertCell();
+
+            const tbody = table.createTBody();
+
+            filteredData.forEach((rowData, index) => {
+                const row = tbody.insertRow();
+                row.setAttribute('data-index', dataSet.findIndex(d => d === rowData));
+
+                COLUMNS.forEach(col => {
+                    const cell = row.insertCell();
+                    cell.textContent = formatCellValue(col, rowData[col.id]);
+                });
+
+                const actionCell = row.insertCell();
+                actionCell.innerHTML = `<button class="ui mini red button delete-btn" data-index="${row.dataset.index}">🗑</button>`;
+
+                actionCell.querySelector('.delete-btn').addEventListener('click', handleDeleteClick);
+                row.addEventListener('click', handleRowClick);
+            });
+
+            updateCount(dataSet.length, filteredData.length);
+            // updateStatistics();
+            updateCharts();
+        }
+
+        function handleFilterDropdownToggle(e, columnId) {
+            e.stopPropagation();
+
+            const th = e.currentTarget;
+            const existingDropdown = th.querySelector('.filter-dropdown-menu');
+
+            if (existingDropdown) {
+                th.removeChild(existingDropdown);
+                return;
+            }
+
+            closeFilterDropdowns();
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'ui dropdown filter-dropdown-menu active visible';
+
+            const menu = document.createElement('div');
+            menu.className = 'menu visible transition';
+
+            const counts = getUniqueValuesWithCount(columnId);
+
+            const allItem = document.createElement('div');
+            allItem.className = 'item';
+            allItem.textContent = `すべて表示 (${dataSet.length})`;
+            allItem.setAttribute('data-value', 'all');
+            allItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleFilterSelect(columnId, 'all');
+            });
+            menu.appendChild(allItem);
+
+            menu.appendChild(document.createElement('div')).className = 'divider';
+
+            Object.entries(counts).sort((a, b) => {
+                const colType = COLUMNS.find(c => c.id === columnId).type;
+                if (colType === 'number') {
+                    return parseFloat(a[0]) - parseFloat(b[0]);
+                }
+                return a[0].localeCompare(b[0]);
+            }).forEach(([value, count]) => {
+                const item = document.createElement('div');
+                item.className = 'item';
+                item.textContent = `${value} (${count})`;
+                item.setAttribute('data-value', value);
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleFilterSelect(columnId, value);
+                });
+
+                if (currentFilters[columnId] === value) {
+                    item.classList.add('active', 'selected');
+                }
+                menu.appendChild(item);
+            });
+
+            dropdown.appendChild(menu);
+            th.appendChild(dropdown);
+        }
+
+        function handleFilterSelect(columnId, value) {
+            if (value === 'all' || value === '') {
+                delete currentFilters[columnId];
+            } else {
+                currentFilters[columnId] = value;
+            }
+            closeFilterDropdowns();
+            renderTable();
+        }
+
+        function closeFilterDropdowns() {
+            document.querySelectorAll('.filter-dropdown-menu').forEach(dropdown => {
+                const th = dropdown.closest('th');
+                if (th && th.contains(dropdown)) {
+                    th.removeChild(dropdown);
+                }
+            });
+        }
+
+        function getUniqueValuesWithCount(columnId) {
+            const counts = {};
+            dataSet.forEach(row => {
+                const value = String(row[columnId] || '').trim() || '(空)';
+                counts[value] = (counts[value] || 0) + 1;
+            });
+            return counts;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDataFromStorage();
+            renderTable();
+            setupEventListeners();
+
+            // Drive設定欄の復元（保存済みの値があれば入力欄に反映）
+            document.getElementById('driveClientIdInput').value = driveClientId;
+            document.getElementById('driveFolderIdInput').value = driveFolderId;
+        });
+
+        function setupEventListeners() {
+            document.getElementById("add-data-form").addEventListener("submit", handleFormSubmit);
+            document.getElementById("import-csv-file").addEventListener("change", handleImport);
+            document.getElementById("export-csv").addEventListener("click", handleExport);
+            document.getElementById("duplicate-add-button").addEventListener("click", handleDuplicateAdd);
+            document.getElementById("save-data").addEventListener("click", saveDataToStorage);
+            document.getElementById("clear-filters").addEventListener("click", clearAllFilters);
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.filter-header')) {
+                    closeFilterDropdowns();
+                }
+            });
+        }
+
+        function clearAllFilters() {
+            currentFilters = {};
+            renderTable();
+            alert('すべてのフィルタをクリアしました。');
+        }
+
+        function updateCount(total, filtered) {
+            const recordCountElement = document.getElementById('record-count');
+            if (recordCountElement) {
+                recordCountElement.textContent = `全件数: ${total} | フィルタ後: ${filtered}`;
+            }
+        }
+
+        const APP_VERSION = "1.2";
+
+        function saveDataToStorage(silent) {
+            if (!storageAvailable) {
+                if (!silent) alert('ブラウザのセキュリティ制限によりデータを保存できません。\n「💾 CSVエクスポート」でデータをCSVファイルとして保存してください。');
+                return;
+            }
+            try {
+                const data = {
+                    version: APP_VERSION,
+                    dataSet: dataSet,
+                    timestamp: new Date().toISOString()
+                };
+                localStorage.setItem('gutHistoryData', JSON.stringify(data));
+                if (!silent) alert('データをブラウザに保存しました。');
+            } catch (e) {
+                console.warn('localStorage保存失敗:', e.message);
+                if (!silent) alert('データの保存に失敗しました。CSVエクスポートでバックアップしてください。');
+            }
+        }
+
+        function loadDataFromStorage() {
+            if (!storageAvailable) return;
+            try {
+                const saved = localStorage.getItem('gutHistoryData');
+                if (saved) {
+                    const data = JSON.parse(saved);
+
+                    if (!data.version || data.version !== APP_VERSION) {
+                        console.warn("古いバージョンのデータを検出したため削除しました。");
+                        localStorage.removeItem('gutHistoryData');
+                        return;
+                    }
+
+                    dataSet = data.dataSet || [];
+                }
+            } catch (e) {
+                console.warn('データの読み込みに失敗しました:', e);
+            }
+        }
+
+        // localStorage が使えるか起動時に検査
+        let storageAvailable = false;
+        (function checkStorage() {
+            try {
+                localStorage.setItem('__test__', '1');
+                localStorage.removeItem('__test__');
+                storageAvailable = true;
+            } catch (e) {
+                storageAvailable = false;
+                // DOMContentLoaded後に警告表示
+                document.addEventListener('DOMContentLoaded', () => {
+                    const banner = document.createElement('div');
+                    banner.style.cssText = 'background:#fff3cd;border:1px solid #ffc107;padding:10px 20px;margin-bottom:15px;border-radius:5px;font-size:13px;';
+                    banner.innerHTML = '⚠️ <strong>ブラウザのセキュリティ制限によりデータの自動保存が使えません。</strong><br>データは「💾 CSVエクスポート」で手動保存してください。（file://で直接開いた場合に発生します）';
+                    document.querySelector('.container').insertBefore(banner, document.querySelector('.container').firstChild);
+                });
+            }
+        })();
+
+        function clearEditMode() {
+            currentEditRowIndex = null;
+            document.getElementById("add-data-form").reset();
+
+            const button = document.getElementById("add-data-button");
+            button.textContent = "追加";
+            button.classList.remove("teal");
+            button.classList.add("primary");
+
+            document.getElementById("form-title").textContent = "📅 新規データ入力";
+            document.getElementById("clear-button").style.display = 'none';
+            document.getElementById("duplicate-add-button").style.display = 'none';
+        }
+        window.clearEditMode = clearEditMode;
+
+        function handleImport(e) {
+            clearEditMode();
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const csv = event.target.result;
+                const rows = csv.split(/\r?\n/).filter(line => line.trim() !== '');
+
+                let importedData = [];
+                if (rows.length > 1) {
+                    const rawCsvHeaders = rows[0].split(',');
+                    const csvHeaders = rawCsvHeaders.map(h => h.replace(/^"|"$/g, '').trim());
+                    const PLACEHOLDER = "__COMMA_PLACEHOLDER__";
+
+                    for (let i = 1; i < rows.length; i++) {
+                        let row = rows[i];
+                        let cleanedRow = row.replace(/"(.*?)"/g, (match, p1) => {
+                            return '"' + p1.replace(/,/g, PLACEHOLDER) + '"';
+                        });
+
+                        const values = cleanedRow.split(',');
+                        const rowData = {};
+
+                        COLUMNS.forEach(col => {
+                            const colIndex = csvHeaders.indexOf(col.id);
+                            let value = colIndex !== -1 && values[colIndex] !== undefined ? values[colIndex] : '';
+                            value = value.replace(/^"|"$/g, '').trim();
+                            value = value.replace(new RegExp(PLACEHOLDER, 'g'), ',');
+
+                            if (col.type === "number") {
+                                const numValue = parseFloat(value);
+                                rowData[col.id] = isNaN(numValue) ? value : numValue;
+                            } else {
+                                rowData[col.id] = value;
+                            }
+                        });
+                        importedData.push(rowData);
+                    }
+                }
+
+                dataSet = importedData;
+                renderTable();
+                saveDataToStorage();
+                alert("CSVデータのインポートが完了しました。");
+                e.target.value = null;
+            };
+
+            reader.readAsText(file);
+        }
+
+        function handleExport() {
+            const headers = COLUMNS.map(col => `"${col.title}"`);
+            const csvRows = [];
+            csvRows.push(headers.join(','));
+
+            dataSet.forEach(row => {
+                const values = COLUMNS.map(col => {
+                    let value = row[col.id] !== undefined ? String(row[col.id]) : '';
+                    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                        value = value.replace(/"/g, '""');
+                        value = `"${value}"`;
+                    }
+                    return value;
+                });
+                csvRows.push(values.join(','));
+            });
+
+            const csvContent = csvRows.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "ガット履歴.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        function handleSortClick(e) {
+            const columnId = e.currentTarget.getAttribute('data-column-id');
+
+            if (currentSort.key === columnId) {
+                currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
+            } else {
+                currentSort.key = columnId;
+                currentSort.dir = "desc";
+            }
+
+            renderTable();
+        }
+
+        function getFormData() {
+            const date = document.getElementById("input-日付").value;
+            const tension = document.getElementById("input-テンション").value;
+            const racket = document.getElementById("input-ラケットモデル").value;
+            const gut = document.getElementById("input-ガット名").value;
+            const store = document.getElementById("input-店舗").value;
+            const price = document.getElementById("input-価格備考").value;
+
+            return {
+                "日付": isNaN(parseFloat(date)) ? date : parseFloat(date),
+                "テンション": isNaN(parseFloat(tension)) ? tension : parseFloat(tension),
+                "ラケットモデル": racket,
+                "ガット名/種類": gut,
+                "店舗/アクション": store,
+                "価格/備考": price,
+            };
+        }
+
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            const dataObject = getFormData();
+
+            if (!dataObject["日付"] || !dataObject["ガット名/種類"]) {
+                alert("日付とガット名は必須入力です。");
+                return;
+            }
+
+            if (currentEditRowIndex !== null) {
+                dataSet[currentEditRowIndex] = dataObject;
+                alert("データを更新しました。");
+                clearEditMode();
+            } else {
+                dataSet.unshift(dataObject);
+                alert("データを新規追加しました。");
+                document.getElementById("add-data-form").reset();
+            }
+
+            renderTable();
+            saveDataToStorage();
+        }
+
+        function handleDuplicateAdd() {
+            const dataObject = getFormData();
+
+            if (!dataObject["日付"] || !dataObject["ガット名/種類"]) {
+                alert("日付とガット名は必須入力です。");
+                return;
+            }
+
+            dataSet.unshift(dataObject);
+            alert("日付を変更し、新しいデータを追加しました。");
+
+            document.getElementById("input-日付").value = '';
+
+            clearEditMode();
+
+            renderTable();
+            saveDataToStorage();
+        }
+
+        function handleRowClick(e) {
+            if (e.target.closest('button')) return;
+
+            const rowIndex = parseInt(e.currentTarget.getAttribute('data-index'));
+            const data = dataSet[rowIndex];
+
+            if (!data) return;
+
+            currentEditRowIndex = rowIndex;
+
+            document.getElementById("input-日付").value = data["日付"];
+            document.getElementById("input-テンション").value = data["テンション"];
+            document.getElementById("input-ラケットモデル").value = data["ラケットモデル"];
+            document.getElementById("input-ガット名").value = data["ガット名/種類"];
+            document.getElementById("input-店舗").value = data["店舗/アクション"];
+            document.getElementById("input-価格備考").value = data["価格/備考"];
+
+            const button = document.getElementById("add-data-button");
+            button.textContent = "データを更新";
+            button.classList.remove("primary");
+            button.classList.add("teal");
+
+            document.getElementById("form-title").textContent = "✏️ 選択行のデータ修正";
+            document.getElementById("clear-button").style.display = 'inline-block';
+            document.getElementById("duplicate-add-button").style.display = 'inline-block';
+
+            document.getElementById("input-panel").scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function handleDeleteClick(e) {
+            e.stopPropagation();
+            const rowIndex = parseInt(e.currentTarget.getAttribute('data-index'));
+
+            if (confirm("この行を削除してもよろしいですか?")) {
+                dataSet.splice(rowIndex, 1);
+
+                if (rowIndex === currentEditRowIndex) {
+                    clearEditMode();
+                }
+
+                renderTable();
+                saveDataToStorage();
+            }
+        }
+
+        function handleDragStart(e) {
+            dragSourceEl = this;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', this.getAttribute('data-column-id'));
+            this.classList.add('drag-source');
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (this !== dragSourceEl) {
+                this.classList.add('drag-over');
+            }
+        }
+
+        function handleDragLeave(e) {
+            this.classList.remove('drag-over');
+        }
+
+        function handleDrop(e) {
+            e.stopPropagation();
+            this.classList.remove('drag-over');
+
+            if (dragSourceEl !== this) {
+                const sourceId = dragSourceEl.getAttribute('data-column-id');
+                const targetId = this.getAttribute('data-column-id');
+
+                const sourceIndex = COLUMNS.findIndex(col => col.id === sourceId);
+                const targetIndex = COLUMNS.findIndex(col => col.id === targetId);
+
+                const [movedColumn] = COLUMNS.splice(sourceIndex, 1);
+                COLUMNS.splice(targetIndex, 0, movedColumn);
+
+                renderTable();
+            }
+        }
+
+        function handleDragEnd(e) {
+            dragSourceEl.classList.remove('drag-source');
+            dragSourceEl = null;
+        }
+
+    </script>
+
+</body>
+
+</html>
