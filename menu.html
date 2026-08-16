@@ -1,315 +1,351 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>マイツール</title>
-<script src="https://accounts.google.com/gsi/client" async defer onload="window.__gisLoaded = true; initGoogleAuth();" onerror="window.__gisFailed = true;"></script>
-<style>
-  :root {
-    --bg: #eef2f7;
-    --bg-card: #ffffff;
-    --text: #1e293b;
-    --text-muted: #64748b;
-    --border: #e2e8f0;
-    --accent: #3b5bdb;
-    --accent-light: #edf1ff;
-    --radius: 14px;
-    --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マイツール</title>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="window.__gisLoaded = true; initGoogleAuth();"
+    onerror="window.__gisFailed = true;"></script>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --bg-card: #ffffff;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --accent: #3b5bdb;
+      --accent-light: #edf1ff;
+      --radius: 14px;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
 
-  /* ── ログイン画面 ── */
-  #loginScreen {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .login-card {
-    background: var(--bg-card);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 40px 32px;
-    text-align: center;
-    max-width: 340px;
-    width: 100%;
-  }
-  .login-icon {
-    width: 48px; height: 48px;
-    margin: 0 auto 18px;
-    border-radius: 12px;
-    background: var(--accent-light);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
-  }
-  .login-card h1 {
-    font-size: 17px;
-    margin: 0 0 6px;
-    font-weight: 700;
-  }
-  .login-card p {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin: 0 0 24px;
-    line-height: 1.6;
-  }
-  #googleBtnContainer {
-    display: flex;
-    justify-content: center;
-  }
-  #loginError {
-    margin-top: 16px;
-    font-size: 12.5px;
-    color: #dc2626;
-    background: #fef2f2;
-    border-radius: 8px;
-    padding: 10px 12px;
-    display: none;
-    line-height: 1.5;
-  }
+    * {
+      box-sizing: border-box;
+    }
 
-  /* ── メニュー画面 ── */
-  #menuScreen { display: none; }
-  .header {
-    padding: 24px 20px 8px;
-    max-width: 720px;
-    margin: 0 auto;
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .header h1 {
-    font-size: 19px;
-    font-weight: 700;
-    margin: 0;
-  }
-  .header .sub {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .logout-btn {
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text-muted);
-    font-size: 12px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .logout-btn:hover { background: var(--accent-light); color: var(--accent); }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
 
-  .grid {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 16px 20px 60px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 14px;
-  }
-  .tool-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 18px;
-    text-decoration: none;
-    color: var(--text);
-    box-shadow: var(--shadow);
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-  }
-  .tool-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(15,23,42,0.08), 0 12px 28px rgba(15,23,42,0.06);
-  }
-  .tool-icon {
-    width: 40px; height: 40px;
-    border-radius: 10px;
-    background: var(--accent-light);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 19px;
-    flex-shrink: 0;
-  }
-  .tool-name {
-    font-size: 14.5px;
-    font-weight: 600;
-    margin-bottom: 3px;
-  }
-  .tool-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    line-height: 1.5;
-  }
-  .tool-tag {
-    display: inline-block;
-    margin-top: 6px;
-    font-size: 10.5px;
-    color: var(--accent);
-    background: var(--accent-light);
-    padding: 1px 7px;
-    border-radius: 20px;
-  }
-</style>
+    /* ── ログイン画面 ── */
+    #loginScreen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .login-card {
+      background: var(--bg-card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 40px 32px;
+      text-align: center;
+      max-width: 340px;
+      width: 100%;
+    }
+
+    .login-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 18px;
+      border-radius: 12px;
+      background: var(--accent-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+
+    .login-card h1 {
+      font-size: 17px;
+      margin: 0 0 6px;
+      font-weight: 700;
+    }
+
+    .login-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0 0 24px;
+      line-height: 1.6;
+    }
+
+    #googleBtnContainer {
+      display: flex;
+      justify-content: center;
+    }
+
+    #loginError {
+      margin-top: 16px;
+      font-size: 12.5px;
+      color: #dc2626;
+      background: #fef2f2;
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: none;
+      line-height: 1.5;
+    }
+
+    /* ── メニュー画面 ── */
+    #menuScreen {
+      display: none;
+    }
+
+    .header {
+      padding: 24px 20px 8px;
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .header h1 {
+      font-size: 19px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .header .sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .logout-btn {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .logout-btn:hover {
+      background: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .grid {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 20px 60px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .tool-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      text-decoration: none;
+      color: var(--text);
+      box-shadow: var(--shadow);
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .tool-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(15, 23, 42, 0.08), 0 12px 28px rgba(15, 23, 42, 0.06);
+    }
+
+    .tool-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--accent-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 19px;
+      flex-shrink: 0;
+    }
+
+    .tool-name {
+      font-size: 14.5px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .tool-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .tool-tag {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 10.5px;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 1px 7px;
+      border-radius: 20px;
+    }
+  </style>
 </head>
+
 <body>
 
-<!-- ═══════ ログイン画面 ═══════ -->
-<div id="loginScreen">
-  <div class="login-card">
-    <div class="login-icon">🔐</div>
-    <h1>マイツール</h1>
-    <p>Googleアカウントでログインしてください。<br>登録済みのアカウントのみアクセスできます。</p>
-    <div id="googleBtnContainer"></div>
-    <div id="loginError"></div>
-  </div>
-</div>
-
-<!-- ═══════ メニュー画面 ═══════ -->
-<div id="menuScreen">
-  <div class="header">
-    <div>
+  <!-- ═══════ ログイン画面 ═══════ -->
+  <div id="loginScreen">
+    <div class="login-card">
+      <div class="login-icon">🔐</div>
       <h1>マイツール</h1>
-      <div class="sub" id="welcomeText"></div>
+      <p>Googleアカウントでログインしてください。<br>登録済みのアカウントのみアクセスできます。</p>
+      <div id="googleBtnContainer"></div>
+      <div id="loginError"></div>
     </div>
-    <button class="logout-btn" onclick="logout()">ログアウト</button>
   </div>
-  <div class="grid" id="toolGrid"></div>
-</div>
 
-<script>
-/* ════════════════════════════════════════════════
-   設定：ここを編集してツールを追加・変更できます
-   ════════════════════════════════════════════════ */
+  <!-- ═══════ メニュー画面 ═══════ -->
+  <div id="menuScreen">
+    <div class="header">
+      <div>
+        <h1>マイツール</h1>
+        <div class="sub" id="welcomeText"></div>
+      </div>
+      <button class="logout-btn" onclick="logout()">ログアウト</button>
+    </div>
+    <div class="grid" id="toolGrid"></div>
+  </div>
 
-// ① Google OAuth Client ID
-const GOOGLE_CLIENT_ID = '685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com';
+  <script>
+    /* ════════════════════════════════════════════════
+       設定：ここを編集してツールを追加・変更できます
+       ════════════════════════════════════════════════ */
 
-// ② ログインを許可するGmailアドレス（複数可）
-const ALLOWED_EMAILS = [
-  'ginchanzu@gmail.com'
-];
+    // ① Google OAuth Client ID
+    const GOOGLE_CLIENT_ID = '685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com';
 
-// ③ ログイン状態を保持するキー（localStorage = 永続 / ブラウザ再起動後も維持）
-const AUTH_STORAGE_KEY = 'myToolsAuthUser';
+    // ② ログインを許可するGmailアドレス（複数可）
+    const ALLOWED_EMAILS = [
+      'ginchanzu@gmail.com',
+      'ederer.plusf@gmail.com'
+    ];
 
-// ④ ツール一覧（アイコンは絵文字、自由に変更可）
-const TOOLS = [
-  {
-    icon: '🛠️',
-    name: 'インシデント管理',
-    desc: 'gm1 / Drive連携版',
-    url: 'https://egmassa.github.io/koukai/Netlify/incdent/gm1_drive_integrated.html'
-  },
-  {
-    icon: '⚡',
-    name: '光熱費・EV管理',
-    desc: '電気・ガス・EV按分の統合ダッシュボード',
-    url: 'https://egmassa.github.io/koukai/Netlify/%E9%9B%BB%E6%B0%97/%E5%85%89%E7%86%B1%E8%B2%BBEV%E7%AE%A1%E7%90%86_v1.0.html'
-  },
-  {
-    icon: '🚗',
-    name: 'EV車使用履歴',
-    desc: 'Drive連携版',
-    url: 'https://egmassa.github.io/koukai/Netlify/%E9%9B%BB%E6%B0%97/EV%E8%BB%8A%E4%BD%BF%E7%94%A8%E5%B1%A5%E6%AD%B4_drive.html'
-  },
-  {
-    icon: '🎾',
-    name: 'テニス (CCCLI)',
-    desc: '',
-    url: 'https://egmassa.github.io/koukai/Netlify/tennis/CCCLI/index.html'
-  },
-  {
-    icon: '🧵',
-    name: 'ガット張り替え履歴',
-    desc: '※ローカルファイル（G:ドライブ）。この端末以外では開けません',
-    url: 'file:///G:/%E3%83%9E%E3%82%A4%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96/%E5%AE%B6%E8%A8%88%E7%B0%BF/%E3%82%AC%E3%83%83%E3%83%88%E5%B1%A5%E6%AD%B4V1_2.html'
-  }
-];
+    // ③ ログイン状態を保持するキー（localStorage = 永続 / ブラウザ再起動後も維持）
+    const AUTH_STORAGE_KEY = 'myToolsAuthUser';
 
-/* ════════════════════════════════════════════════
-   認証ロジック（通常は編集不要）
-   ════════════════════════════════════════════════ */
+    // ④ ツール一覧（アイコンは絵文字、自由に変更可）
+    const TOOLS = [
+      {
+        icon: '🛠️',
+        name: 'インシデント管理',
+        desc: 'gm1 / Drive連携版',
+        url: 'https://egmassa.github.io/koukai/Netlify/incdent/gm1_drive_integrated.html'
+      },
+      {
+        icon: '⚡',
+        name: '光熱費・EV管理',
+        desc: '電気・ガス・EV按分の統合ダッシュボード',
+        url: 'https://egmassa.github.io/koukai/Netlify/%E9%9B%BB%E6%B0%97/%E5%85%89%E7%86%B1%E8%B2%BBEV%E7%AE%A1%E7%90%86_v1.0.html'
+      },
+      {
+        icon: '🚗',
+        name: 'EV車使用履歴',
+        desc: 'Drive連携版',
+        url: 'https://egmassa.github.io/koukai/Netlify/%E9%9B%BB%E6%B0%97/EV%E8%BB%8A%E4%BD%BF%E7%94%A8%E5%B1%A5%E6%AD%B4_drive.html'
+      },
+      {
+        icon: '🎾',
+        name: 'テニス (CCCLI)',
+        desc: '',
+        url: 'https://egmassa.github.io/koukai/Netlify/tennis/CCCLI/index.html'
+      },
+      {
+        icon: '🧵',
+        name: 'ガット張り替え履歴',
+        desc: '※ローカルファイル（G:ドライブ）。この端末以外では開けません',
+        url: 'file:///G:/%E3%83%9E%E3%82%A4%E3%83%89%E3%83%A9%E3%82%A4%E3%83%96/%E5%AE%B6%E8%A8%88%E7%B0%BF/%E3%82%AC%E3%83%83%E3%83%88%E5%B1%A5%E6%AD%B4V1_2.html'
+      }
+    ];
 
-function base64UrlDecode(str) {
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (str.length % 4) str += '=';
-  return decodeURIComponent(
-    atob(str).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-  );
-}
+    /* ════════════════════════════════════════════════
+       認証ロジック（通常は編集不要）
+       ════════════════════════════════════════════════ */
 
-function decodeJwt(token) {
-  const payload = token.split('.')[1];
-  return JSON.parse(base64UrlDecode(payload));
-}
+    function base64UrlDecode(str) {
+      str = str.replace(/-/g, '+').replace(/_/g, '/');
+      while (str.length % 4) str += '=';
+      return decodeURIComponent(
+        atob(str).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+      );
+    }
 
-function showError(msg) {
-  const el = document.getElementById('loginError');
-  el.textContent = msg;
-  el.style.display = 'block';
-}
+    function decodeJwt(token) {
+      const payload = token.split('.')[1];
+      return JSON.parse(base64UrlDecode(payload));
+    }
 
-function handleCredentialResponse(response) {
-  let payload;
-  try {
-    payload = decodeJwt(response.credential);
-  } catch (e) {
-    showError('ログイン情報の読み取りに失敗しました。もう一度お試しください。');
-    return;
-  }
+    function showError(msg) {
+      const el = document.getElementById('loginError');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
 
-  if (!payload.email_verified) {
-    showError('メールアドレスが未確認のアカウントです。');
-    return;
-  }
+    function handleCredentialResponse(response) {
+      let payload;
+      try {
+        payload = decodeJwt(response.credential);
+      } catch (e) {
+        showError('ログイン情報の読み取りに失敗しました。もう一度お試しください。');
+        return;
+      }
 
-  if (!ALLOWED_EMAILS.includes(payload.email)) {
-    showError('このアカウント（' + payload.email + '）にはアクセス権がありません。');
-    return;
-  }
+      if (!payload.email_verified) {
+        showError('メールアドレスが未確認のアカウントです。');
+        return;
+      }
 
-  // 認証成功 → 永続化して表示切り替え
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
-    email: payload.email,
-    name: payload.name || payload.email,
-    loggedInAt: Date.now()
-  }));
-  showMenu(payload.name || payload.email);
-}
+      if (!ALLOWED_EMAILS.includes(payload.email)) {
+        showError('このアカウント（' + payload.email + '）にはアクセス権がありません。');
+        return;
+      }
 
-function showMenu(name) {
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('menuScreen').style.display = 'block';
-  document.getElementById('welcomeText').textContent = name + ' でログイン中';
-  renderTools();
-}
+      // 認証成功 → 永続化して表示切り替え
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+        email: payload.email,
+        name: payload.name || payload.email,
+        loggedInAt: Date.now()
+      }));
+      showMenu(payload.name || payload.email);
+    }
 
-function showLogin() {
-  document.getElementById('menuScreen').style.display = 'none';
-  document.getElementById('loginScreen').style.display = 'flex';
-}
+    function showMenu(name) {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('menuScreen').style.display = 'block';
+      document.getElementById('welcomeText').textContent = name + ' でログイン中';
+      renderTools();
+    }
 
-function logout() {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  showLogin();
-}
+    function showLogin() {
+      document.getElementById('menuScreen').style.display = 'none';
+      document.getElementById('loginScreen').style.display = 'flex';
+    }
 
-function renderTools() {
-  const grid = document.getElementById('toolGrid');
-  grid.innerHTML = TOOLS.map(t => `
+    function logout() {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      showLogin();
+    }
+
+    function renderTools() {
+      const grid = document.getElementById('toolGrid');
+      grid.innerHTML = TOOLS.map(t => `
     <a class="tool-card" href="${t.url}" target="_blank" rel="noopener">
       <div class="tool-icon">${t.icon}</div>
       <div>
@@ -318,58 +354,59 @@ function renderTools() {
       </div>
     </a>
   `).join('');
-}
+    }
 
-// 初期化
-let __authChecked = false;
+    // 初期化
+    let __authChecked = false;
 
-function checkExistingLogin() {
-  if (__authChecked) return false;
-  __authChecked = true;
-  const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (saved) {
-    try {
-      const user = JSON.parse(saved);
-      if (ALLOWED_EMAILS.includes(user.email)) {
-        showMenu(user.name);
-        return true;
+    function checkExistingLogin() {
+      if (__authChecked) return false;
+      __authChecked = true;
+      const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (saved) {
+        try {
+          const user = JSON.parse(saved);
+          if (ALLOWED_EMAILS.includes(user.email)) {
+            showMenu(user.name);
+            return true;
+          }
+        } catch (e) { /* fallthrough to login */ }
       }
-    } catch (e) { /* fallthrough to login */ }
-  }
-  return false;
-}
+      return false;
+    }
 
-// スクリプト読み込み完了時（onload属性から呼ばれる）に初期化
-function initGoogleAuth() {
-  if (checkExistingLogin()) return; // 既にログイン済みならボタン初期化不要
-  if (typeof google === 'undefined') return; // 念のためのガード
+    // スクリプト読み込み完了時（onload属性から呼ばれる）に初期化
+    function initGoogleAuth() {
+      if (checkExistingLogin()) return; // 既にログイン済みならボタン初期化不要
+      if (typeof google === 'undefined') return; // 念のためのガード
 
-  google.accounts.id.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    callback: handleCredentialResponse
-  });
-  google.accounts.id.renderButton(
-    document.getElementById('googleBtnContainer'),
-    { theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'ja' }
-  );
-}
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleCredentialResponse
+      });
+      google.accounts.id.renderButton(
+        document.getElementById('googleBtnContainer'),
+        { theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'ja' }
+      );
+    }
 
-window.onload = function () {
-  // ログイン済みなら即座にメニュー表示（Googleスクリプトの読み込みを待たない）
-  if (checkExistingLogin()) return;
+    window.onload = function () {
+      // ログイン済みなら即座にメニュー表示（Googleスクリプトの読み込みを待たない）
+      if (checkExistingLogin()) return;
 
-  // スクリプトが既に読み込み済みならすぐ初期化、まだなら onload 属性側に任せる
-  if (typeof google !== 'undefined') {
-    initGoogleAuth();
-  } else {
-    // 5秒待っても読み込まれない場合はエラー表示（ネットワーク遮断や拡張機能の可能性）
-    setTimeout(function () {
-      if (typeof google === 'undefined') {
-        showError('Googleのログイン機能を読み込めませんでした。通常のブラウザでこのページ（GitHub Pages等にアップロードしたURL）を開いているか、広告ブロッカー等が accounts.google.com への通信を妨げていないか確認してください。');
+      // スクリプトが既に読み込み済みならすぐ初期化、まだなら onload 属性側に任せる
+      if (typeof google !== 'undefined') {
+        initGoogleAuth();
+      } else {
+        // 5秒待っても読み込まれない場合はエラー表示（ネットワーク遮断や拡張機能の可能性）
+        setTimeout(function () {
+          if (typeof google === 'undefined') {
+            showError('Googleのログイン機能を読み込めませんでした。通常のブラウザでこのページ（GitHub Pages等にアップロードしたURL）を開いているか、広告ブロッカー等が accounts.google.com への通信を妨げていないか確認してください。');
+          }
+        }, 5000);
       }
-    }, 5000);
-  }
-};
-</script>
+    };
+  </script>
 </body>
+
 </html>
