@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      4.1.0
+// @version      4.2.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -19,10 +19,10 @@
   // 監視対象施設・コート設定（⚙設定画面から追加・編集・取得ON/OFF可、保存される）
   // ============================================================
   const DEFAULT_TARGETS = [
-    { facilityId: 5,  roomId: 37,  name: '新川テニスコート',       note: 'クレー4面', enabled: true },
-    { facilityId: 3,  roomId: 24,  name: '大沢総合グラウンド',     note: '人工芝6面', enabled: true },
-    { facilityId: 36, roomId: 134, name: '第一中学校',             note: 'テニスコート', enabled: true },
-    { facilityId: 41, roomId: 144, name: '第六中学校',             note: 'テニスコート', enabled: true },
+    { facilityId: 5,  roomId: 37,  name: '新川テニスコート',       note: 'クレー4面', enabled: true, excludeCourts: [4] },
+    { facilityId: 3,  roomId: 24,  name: '大沢総合グラウンド',     note: '人工芝6面', enabled: true, excludeCourts: [6] },
+    { facilityId: 36, roomId: 134, name: '第一中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 41, roomId: 144, name: '第六中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
   ];
   const STORAGE_KEY = 'mtc_targets_v1';
 
@@ -46,9 +46,15 @@
   function loadTargets() {
     const saved = gmGet(STORAGE_KEY, null);
     if (Array.isArray(saved) && saved.length > 0) {
-      return saved.map((t) => ({ enabled: true, ...t }));
+      return saved.map((t) => {
+        if (t.excludeCourts !== undefined) return { enabled: true, ...t };
+        // 過去バージョンの保存データにはexcludeCourtsが無いため、
+        // roomIdが一致する既定値があればそれを補完し、無ければ除外なしにする
+        const match = DEFAULT_TARGETS.find((d) => d.roomId === t.roomId);
+        return { enabled: true, excludeCourts: match ? match.excludeCourts.slice() : [], ...t };
+      });
     }
-    return DEFAULT_TARGETS.map((t) => ({ ...t }));
+    return DEFAULT_TARGETS.map((t) => ({ ...t, excludeCourts: t.excludeCourts.slice() }));
   }
   function saveTargets(targets) {
     gmSet(STORAGE_KEY, targets);
@@ -255,7 +261,7 @@
       }
       #mtc-settings h2 { margin: 0 0 10px; font-size: 16px; }
       #mtc-settings .mtc-row {
-        display: grid; grid-template-columns: 36px 60px 60px 1fr 1fr;
+        display: grid; grid-template-columns: 36px 55px 55px 1fr 1fr 90px;
         gap: 6px; margin-bottom: 6px; align-items: center;
       }
       #mtc-settings .mtc-row input[type="checkbox"] { width: 18px; height: 18px; justify-self: center; }
@@ -293,15 +299,40 @@
     return opts;
   }
 
-  function computeFilteredStatus(cell, startMin, endMin) {
+  // 団体登録では予約できない等、集計から除外したいコートの判定
+  function facilityHasExclusion(ti) {
+    const t = TARGETS[ti];
+    return !!(t && Array.isArray(t.excludeCourts) && t.excludeCourts.length > 0);
+  }
+  function filterExcludedUnits(ti, units) {
+    const t = TARGETS[ti];
+    const excluded = (t && t.excludeCourts) || [];
+    if (excluded.length === 0) return units;
+    return units.filter((u) => {
+      const m = (u.name || '').match(/(\d+)/);
+      if (!m) return true;
+      return !excluded.includes(Number(m[1]));
+    });
+  }
+
+  function computeFilteredStatus(ti, cell, startMin, endMin) {
     if (!cell) return { status: STATUS.NO_SCHEDULE, openCourts: 0, totalCourts: 0 };
-    if (startMin === 0 && endMin === 24 * 60) {
+    const hasExclusion = facilityHasExclusion(ti);
+
+    if (!hasExclusion && startMin === 0 && endMin === 24 * 60) {
       return { status: cell.status, openCourts: null, totalCourts: null };
     }
-    if (!cell.tooltip || !cell.tooltip.units || cell.tooltip.units.length === 0) {
+
+    const allUnits = (cell.tooltip && cell.tooltip.units) || [];
+    if (allUnits.length === 0) {
       return { status: cell.status, openCourts: null, totalCourts: null };
     }
-    const units = cell.tooltip.units;
+    const units = hasExclusion ? filterExcludedUnits(ti, allUnits) : allUnits;
+    if (units.length === 0) {
+      // 対象コートが全て除外設定に該当した（このコートは団体登録不可のみ、等）
+      return { status: STATUS.NO_SCHEDULE, openCourts: 0, totalCourts: 0 };
+    }
+
     let overlapFound = false;
     let openCourts = 0;
     units.forEach((u) => {
@@ -323,10 +354,11 @@
     return { status: STATUS.PARTIALLY_AVAILABLE, openCourts, totalCourts };
   }
 
-  function openSlotsInRange(cell, startMin, endMin) {
+  function openSlotsInRange(ti, cell, startMin, endMin) {
     if (!cell || !cell.tooltip || !cell.tooltip.units) return new Map();
+    const units = facilityHasExclusion(ti) ? filterExcludedUnits(ti, cell.tooltip.units) : cell.tooltip.units;
     const slotMap = new Map();
-    cell.tooltip.units.forEach((u) => {
+    units.forEach((u) => {
       u.timeslots.forEach((ts) => {
         if (ts.status !== 1) return;
         const sMin = timeToMin(ts.start_time);
@@ -382,12 +414,15 @@
     indices.forEach((ti) => {
       const facilityData = lastData[ti] || {};
       const cell = facilityData[dateStr];
-      const filtered = computeFilteredStatus(cell, startMin, endMin);
+      const filtered = computeFilteredStatus(ti, cell, startMin, endMin);
       if (STATUS_PRIORITY[filtered.status] > STATUS_PRIORITY[bestStatus]) bestStatus = filtered.status;
 
-      const slotMap = openSlotsInRange(cell, startMin, endMin);
-      const totalCourtsForCell =
-        cell && cell.tooltip && cell.tooltip.units ? cell.tooltip.units.length : filtered.totalCourts;
+      const slotMap = openSlotsInRange(ti, cell, startMin, endMin);
+      let totalCourtsForCell = filtered.totalCourts;
+      if (totalCourtsForCell === null || totalCourtsForCell === undefined) {
+        const allUnits = (cell && cell.tooltip && cell.tooltip.units) || [];
+        totalCourtsForCell = facilityHasExclusion(ti) ? filterExcludedUnits(ti, allUnits).length : allUnits.length;
+      }
       Array.from(slotMap.entries())
         .sort(([a], [b]) => (a < b ? -1 : 1))
         .forEach(([time, courts]) => {
@@ -739,7 +774,7 @@
         let any = false;
         indices.forEach((ti) => {
           const cell = (lastData[ti] || {})[dateStr];
-          const slotMap = openSlotsInRange(cell, state.startMin, state.endMin);
+          const slotMap = openSlotsInRange(ti, cell, state.startMin, state.endMin);
           if (slotMap.size === 0) return;
           any = true;
           inner += `<div style="font-weight:bold;color:${facilityColor(ti)};margin-top:4px;">${TARGETS[ti] ? TARGETS[ti].name : ''}</div>`;
@@ -792,6 +827,7 @@
     const legendH = indices.length > 1 ? 22 : 0;
     const dowList = [0, 1, 2, 3, 4, 5, 6].filter((d) => state.selectedDow.has(d));
     const colCount = Math.max(1, dowList.length);
+    const canvasW = cellW * colCount;
 
     const summaryLines = [
       `${state.year}年${state.month}月　施設: ${indices.map((i) => (TARGETS[i] ? TARGETS[i].name : '')).join('・')}`,
@@ -828,10 +864,58 @@
     if (week.some((c) => c !== null)) weeks.push(week);
 
     const cellH = 20 + Math.max(1, maxChipsInAnyCell) * chipH + 6;
-    const totalH = 12 + summaryLines.length * 18 + 10 + legendH + headerH + weeks.length * cellH + 16;
+
+    // ---- 「空きあり日の詳細」の折り返しレイアウトを、実際に描く前に計測しておく ----
+    // (canvasの高さを先に決める必要があるため、計測専用の一時canvasでmeasureTextする)
+    const measureCanvas = document.createElement('canvas');
+    const mctx = measureCanvas.getContext('2d');
+    const detailFont = '10px sans-serif';
+    const detailChipH = 16;
+    const detailChipGapX = 4;
+    const detailChipGapY = 4;
+    const detailPaddingX = 6;
+    const detailMaxWidth = canvasW - 16;
+
+    function layoutDetailChips(chips) {
+      mctx.font = detailFont;
+      const rows = [];
+      let currentRow = [];
+      let currentX = 0;
+      chips.forEach((c) => {
+        const text = `${c.label} ${c.timeText}（${c.nText}）`;
+        const w = mctx.measureText(text).width + detailPaddingX * 2;
+        if (currentX + w > detailMaxWidth && currentRow.length > 0) {
+          rows.push(currentRow);
+          currentRow = [];
+          currentX = 0;
+        }
+        currentRow.push({ text, w, color: c.color });
+        currentX += w + detailChipGapX;
+      });
+      if (currentRow.length) rows.push(currentRow);
+      return rows;
+    }
+
+    const detailEntries = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d0 = new Date(state.year, state.month - 1, day);
+      if (!state.selectedDow.has(d0.getDay())) continue;
+      const dateStr = `${state.year}-${pad2(state.month)}-${pad2(day)}`;
+      const info = computeDayCellMulti(indices, dateStr, state.startMin, state.endMin);
+      if (info.chips.length === 0) continue;
+      const rows = layoutDetailChips(info.chips);
+      const entryH = 16 + rows.length * (detailChipH + detailChipGapY);
+      detailEntries.push({ day, dow: d0.getDay(), rows, h: entryH });
+    }
+
+    const detailHeaderH = detailEntries.length > 0 ? 26 : 0;
+    const detailTotalH =
+      detailHeaderH + detailEntries.reduce((sum, e) => sum + e.h, 0) + (detailEntries.length > 0 ? 10 : 0);
+
+    const totalH = 12 + summaryLines.length * 18 + 10 + legendH + headerH + weeks.length * cellH + 16 + detailTotalH;
 
     const canvas = document.createElement('canvas');
-    canvas.width = cellW * colCount;
+    canvas.width = canvasW;
     canvas.height = totalH;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#fff';
@@ -926,11 +1010,43 @@
       y += cellH;
     });
 
+    // ---- 空きあり日の詳細（カレンダーでは省略された分も含め全件） ----
+    if (detailEntries.length > 0) {
+      y += 10;
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('空きあり日の詳細', 8, y);
+      y += detailHeaderH;
+
+      detailEntries.forEach((entry) => {
+        const dowColor = entry.dow === 0 ? '#c62828' : entry.dow === 6 ? '#1565c0' : '#333';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = dowColor;
+        ctx.fillText(`${state.month}/${entry.day}(${DOW[entry.dow]})`, 8, y);
+        y += 15;
+
+        entry.rows.forEach((row) => {
+          let x = 8;
+          row.forEach((chip) => {
+            ctx.fillStyle = '#e8f5e9';
+            ctx.fillRect(x, y, chip.w, detailChipH - 2);
+            ctx.fillStyle = chip.color;
+            ctx.fillRect(x, y, 3, detailChipH - 2);
+            ctx.font = detailFont;
+            ctx.fillStyle = '#1b5e20';
+            ctx.fillText(chip.text, x + detailPaddingX, y + 3);
+            x += chip.w + detailChipGapX;
+          });
+          y += detailChipH + detailChipGapY;
+        });
+      });
+    }
+
     canvas.toBlob((blob) => {
       if (!blob) return;
       try {
         navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        alert('画像をクリップボードにコピーしました（フィルタ条件も含まれています）。LINEに貼り付けできます。');
+        alert('画像をクリップボードにコピーしました（フィルタ条件・詳細も含まれています）。LINEに貼り付けできます。');
       } catch (e) {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1055,10 +1171,11 @@
       <h2>監視する施設・コート設定</h2>
       <p style="font-size:11px;color:#888;">
         「取得」のチェックを外すとその施設は取得・表示されなくなります（設定情報は消えないので、いつでもチェックを戻せば元通りです）。<br>
+        「除外コート番号」に数字をカンマ区切りで入れると（例: 6 や 4,5）、そのコートは団体登録不可などの理由で空きとしてカウントしません。空欄なら全コートを対象にします。<br>
         新しい施設を追加する場合、facility_idとroom_idは対象施設の空き状況カレンダーページのソース（Ctrl+U）から
         <code>data-room-id</code> や <code>x-init="facilityId = N"</code> を探して確認できます。
       </p>
-      <div class="mtc-row mtc-row-head"><div>取得</div><div>施設ID</div><div>コートID</div><div>表示名</div><div>備考</div></div>
+      <div class="mtc-row mtc-row-head"><div>取得</div><div>施設ID</div><div>コートID</div><div>表示名</div><div>備考</div><div>除外コート番号</div></div>
       <div id="mtc-settings-rows"></div>
       <div class="mtc-toolbar" style="margin-top:10px;">
         <button class="mtc-btn secondary" id="mtc-settings-add" type="button">＋ 行を追加</button>
@@ -1082,6 +1199,7 @@
         <input type="number" data-field="roomId" value="${t.roomId ?? ''}">
         <input type="text" data-field="name" value="${t.name ?? ''}" placeholder="表示名">
         <input type="text" data-field="note" value="${t.note ?? ''}" placeholder="備考">
+        <input type="text" data-field="excludeCourts" value="${Array.isArray(t.excludeCourts) ? t.excludeCourts.join(',') : ''}" placeholder="例: 6">
       `;
       container.appendChild(row);
     });
@@ -1114,6 +1232,15 @@
     });
   }
 
+  function parseExcludeCourts(text) {
+    return (text || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter((n) => !Number.isNaN(n));
+  }
+
   function readSettingsRows(modal, options) {
     options = options || {};
     const rows = Array.from(modal.querySelectorAll('#mtc-settings-rows .mtc-row'));
@@ -1126,8 +1253,9 @@
         const roomId = Number(get('roomId'));
         const name = get('name').trim();
         const note = get('note').trim();
+        const excludeCourts = parseExcludeCourts(get('excludeCourts'));
         if (!options.keepEmpty && (!roomId || !name)) return null;
-        return { facilityId, roomId, name, note, enabled };
+        return { facilityId, roomId, name, note, enabled, excludeCourts };
       })
       .filter(Boolean);
   }
@@ -1150,7 +1278,7 @@
       settingsModal.style.display = 'none';
     };
     settingsModal.querySelector('#mtc-settings-add').onclick = () => {
-      workingTargets.push({ facilityId: '', roomId: '', name: '', note: '', enabled: true });
+      workingTargets.push({ facilityId: '', roomId: '', name: '', note: '', enabled: true, excludeCourts: [] });
       renderSettingsRows(settingsModal, workingTargets);
     };
     settingsModal.querySelector('#mtc-settings-reset').onclick = () => {
