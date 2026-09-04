@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      4.2.0
+// @version      4.3.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -272,12 +272,38 @@
       }
       #mtc-settings .mtc-row-head { font-size: 11px; color: #888; }
     `;
-    if (typeof GM_addStyle === 'function') {
-      GM_addStyle(css);
-    } else {
-      const style = document.createElement('style');
-      style.textContent = css;
-      document.head.appendChild(style);
+    // CSPの厳しいサイトでは<style>タグやGM_addStyleが効かない環境があるため、
+    // 複数の方法を順番に試す。Constructable Stylesheets（JSでスタイルシートを
+    // 直接組み込む方式）はCSPのstyle-src制限を受けにくいので最優先で試す。
+    let applied = false;
+    try {
+      if ('adoptedStyleSheets' in document && typeof CSSStyleSheet === 'function') {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(css);
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+        applied = true;
+      }
+    } catch (e) {
+      console.error('[mitaka-tennis-checker] adoptedStyleSheets failed', e);
+    }
+
+    if (!applied && typeof GM_addStyle === 'function') {
+      try {
+        GM_addStyle(css);
+        applied = true;
+      } catch (e) {
+        console.error('[mitaka-tennis-checker] GM_addStyle failed', e);
+      }
+    }
+
+    if (!applied) {
+      try {
+        const style = document.createElement('style');
+        style.textContent = css;
+        document.head.appendChild(style);
+      } catch (e) {
+        console.error('[mitaka-tennis-checker] style tag injection failed', e);
+      }
     }
   }
 
@@ -1205,21 +1231,22 @@
     });
   }
 
-  function bindSettingsToggle(modal, panel) {
+  function bindSettingsAutoSave(modal, panel) {
     const container = modal.querySelector('#mtc-settings-rows');
     container.addEventListener('change', (e) => {
-      const cb = e.target.closest('input[data-field="enabled"]');
-      if (!cb) return;
+      if (!e.target.matches('input')) return;
+      const cb = e.target.matches('[data-field="enabled"]') ? e.target : null;
 
       workingTargets = readSettingsRows(modal, { keepEmpty: true });
-      const idx = Number(cb.dataset.index);
-      if (workingTargets[idx]) workingTargets[idx].enabled = cb.checked;
 
       const anyEnabled = workingTargets.some((t) => t.enabled !== false && t.roomId && t.name);
       if (!anyEnabled) {
         alert('少なくとも1件は「取得」を有効にしてください。');
-        cb.checked = true;
-        if (workingTargets[idx]) workingTargets[idx].enabled = true;
+        if (cb) {
+          cb.checked = true;
+          const idx = Number(cb.dataset.index);
+          if (workingTargets[idx]) workingTargets[idx].enabled = true;
+        }
       }
 
       renderSettingsRows(modal, workingTargets);
@@ -1271,7 +1298,7 @@
     }
     workingTargets = TARGETS.map((t) => ({ ...t }));
     renderSettingsRows(settingsModal, workingTargets);
-    if (isNewModal) bindSettingsToggle(settingsModal, panel);
+    if (isNewModal) bindSettingsAutoSave(settingsModal, panel);
     settingsModal.style.display = 'block';
 
     settingsModal.querySelector('#mtc-settings-close').onclick = () => {
