@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>テニススコア</title>
+<style>
+  :root{
+    --bg:#0a1210;
+    --panel:#12201a;
+    --line:#2a3a32;
+    --text:#f2f5f0;
+    --dim:#8fa89a;
+    --teal:#159c86;
+    --orange:#f0793a;
+    --danger:#c96a4e;
+    --safe: 13%;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  html,body{margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Roboto","Segoe UI",system-ui,sans-serif; overflow:hidden;}
+  #app{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;}
+  .screen{display:none; width:100%; height:100%; padding:var(--safe); flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;}
+  .screen.active{display:flex;}
+
+  /* setup (scrollable: config has more content than fits at once) */
+  #setup{overflow-y:auto; justify-content:flex-start; padding-top:16%; padding-bottom:10%;}
+  #setup h1{font-size:14px; font-weight:600; margin:0 0 8px; color:var(--dim);}
+  .grp-label{font-size:9px; color:var(--dim); margin:8px 0 3px;}
+  .mode-toggle{display:flex; gap:5px; width:100%; max-width:170px;}
+  .mode-btn{flex:1; padding:6px 4px; border-radius:16px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:10px; font-weight:600;}
+  .mode-btn.active{background:var(--line); color:var(--text);}
+  #setup input{width:100%; max-width:150px; margin-top:8px; padding:8px 10px; border-radius:14px;
+    border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:13px; text-align:center;}
+  #setup input::placeholder{color:var(--dim);}
+  .primary{margin-top:12px; padding:9px 22px; border-radius:20px; border:none;
+    background:var(--teal); color:#04231d; font-weight:700; font-size:13px;}
+
+  /* score screen */
+  #scoreScreen{padding:7% 8% 5%; justify-content:flex-start;}
+  .topbar{width:100%; display:flex; justify-content:center; margin-bottom:2px;}
+  #undoBtn{width:34px; height:34px; border-radius:50%; border:1.5px solid #3a6fd0;
+    background:transparent; color:#5c8ff0; font-size:16px; display:flex; align-items:center; justify-content:center;}
+  #cloudRow{width:100%; display:flex; justify-content:flex-end; margin:2px 0 4px;}
+  #cloudBtn{width:22px; height:22px; border-radius:50%; border:1px solid var(--line);
+    background:var(--panel); color:var(--dim); font-size:11px;}
+  #cloudBtn.busy{color:#e0d75a; border-color:#e0d75a;}
+  #cloudBtn.ok{color:var(--teal); border-color:var(--teal);}
+  #cloudBtn.err{color:var(--danger); border-color:var(--danger);}
+
+  table.score-table{width:100%; border-collapse:collapse; font-size:11px; margin-bottom:4px;}
+  table.score-table th{color:var(--dim); font-weight:600; font-size:9px; padding-bottom:3px;}
+  table.score-table td{padding:3px 2px; font-size:15px; font-weight:700;}
+  table.score-table td.name{font-size:11px; font-weight:600; text-align:left; max-width:60px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text);}
+  table.score-table tr.a td{color:var(--teal);}
+  table.score-table tr.b td{color:var(--orange);}
+  table.score-table td.pt{color:var(--text) !important; font-size:16px;}
+
+  .setinfo{font-size:9px; color:var(--dim); margin-bottom:4px; min-height:11px;}
+  .rulesinfo{font-size:8px; color:var(--dim); margin-bottom:4px; opacity:0.8;}
+  .serveinfo{font-size:10px; color:var(--ball, var(--teal)); margin-bottom:3px; font-weight:600;}
+  .match-row{cursor:pointer;}
+  .match-row:active{background:var(--panel);}
+  .pt-row{font-size:9px; padding:2px 0; border-bottom:1px solid var(--line); text-align:left;}
+  .pt-set{color:var(--dim); margin-right:4px;}
+  .detail-head{font-size:11px; font-weight:600; margin-bottom:6px; text-align:left;}
+  .detail-back{margin-top:8px; padding:6px 14px; border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:10px;}
+
+  .util-row{width:100%; display:flex; gap:6px; margin-bottom:6px;}
+  .util-row button{flex:1; padding:4px 2px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel); color:var(--dim); font-size:9px;}
+
+  .tap-row{width:100%; flex:1; display:flex; flex-direction:column; gap:5px; min-height:0;}
+  .tap-btn{flex:1; border:none; border-radius:16px; color:#04231d; font-size:15px; font-weight:700;}
+  .tap-btn.a{background:var(--teal);}
+  .tap-btn.b{background:var(--orange); color:#2a1200;}
+  .tap-btn:active{filter:brightness(0.85);}
+
+  /* history screen */
+  #historyScreen{overflow-y:auto;}
+  #historyScreen h2{font-size:13px; color:var(--dim); margin:0 0 6px;}
+  #historyList{width:100%; font-size:11px; max-height:60%; overflow-y:auto;}
+  .match-row{padding:5px 0; border-bottom:1px solid var(--line);}
+  .match-row .d{color:var(--dim); font-size:9px;}
+  .match-row .sync{font-size:8px; color:var(--teal);}
+  .hist-btns{display:flex; gap:6px; margin-top:8px;}
+  .hist-btns button{padding:6px 12px; border-radius:16px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:10px;}
+
+  #toast{position:fixed; bottom:6%; left:50%; transform:translateX(-50%); background:var(--panel);
+    color:var(--text); font-size:10px; padding:5px 12px; border-radius:12px; border:1px solid var(--line);
+    opacity:0; transition:opacity .3s; pointer-events:none; max-width:80%;}
+  #toast.show{opacity:1;}
+
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+    align-items:center; justify-content:center; z-index:10;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal-box{
+    width:78%; max-width:220px; background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; padding:14px 12px; text-align:center;
+  }
+  .modal-text{font-size:11px; color:var(--text); margin-bottom:10px; line-height:1.4;}
+  .modal-btns{display:flex; gap:6px;}
+  .modal-btns button{flex:1; padding:7px 4px; border-radius:12px; border:1px solid var(--line);
+    background:transparent; color:var(--text); font-size:11px; font-weight:600;}
+  #confirmYes{background:var(--teal); color:#04231d; border:none;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <section id="setup" class="screen active">
+    <h1>試合設定</h1>
+
+    <div class="grp-label">形式</div>
+    <div class="mode-toggle" data-group="mode">
+      <button class="mode-btn active" data-value="singles">シングルス</button>
+      <button class="mode-btn" data-value="doubles">ダブルス</button>
+    </div>
+
+    <div class="grp-label">1セットのゲーム数</div>
+    <div class="mode-toggle" data-group="gamesPerSet">
+      <button class="mode-btn" data-value="4">4</button>
+      <button class="mode-btn active" data-value="6">6</button>
+      <button class="mode-btn" data-value="8">8</button>
+    </div>
+
+    <div class="grp-label">セット決着</div>
+    <div class="mode-toggle" data-group="setFinishMode">
+      <button class="mode-btn active" data-value="winByTwo">2差必要</button>
+      <button class="mode-btn" data-value="firstTo">先取のみ</button>
+      <button class="mode-btn" data-value="fixed">総ゲーム数固定</button>
+    </div>
+
+    <div class="grp-label">デュース方式</div>
+    <div class="mode-toggle" data-group="deuceMode">
+      <button class="mode-btn active" data-value="ad">アドバンテージ</button>
+      <button class="mode-btn" data-value="noAd">ノーアド</button>
+      <button class="mode-btn" data-value="oneDeuce">1デュース</button>
+    </div>
+
+    <div class="grp-label">最初のサーブ</div>
+    <div class="mode-toggle" data-group="firstServer">
+      <button class="mode-btn active" data-value="a">じぶん</button>
+      <button class="mode-btn" data-value="b">あいて</button>
+    </div>
+
+    <input id="nameA" placeholder="じぶん" maxlength="10">
+    <input id="nameB" placeholder="あいて" maxlength="10">
+    <button class="primary" id="startBtn">開始</button>
+  </section>
+
+  <section id="scoreScreen" class="screen">
+    <div class="topbar">
+      <button id="undoBtn" title="ひとつ戻す">&#8617;</button>
+    </div>
+    <div id="cloudRow"><button id="cloudBtn" title="Google Driveに保存">&#9729;</button></div>
+
+    <div class="serveinfo" id="serveInfo"></div>
+    <table class="score-table">
+      <thead>
+        <tr><th class="name">Player</th><th>得点</th><th>ゲーム</th><th>セット</th></tr>
+      </thead>
+      <tbody>
+        <tr class="a"><td class="name" id="labelA">じぶん</td><td class="pt" id="ptA">0</td><td id="gA">0</td><td id="sA">0</td></tr>
+        <tr class="b"><td class="name" id="labelB">あいて</td><td class="pt" id="ptB">0</td><td id="gB">0</td><td id="sB">0</td></tr>
+      </tbody>
+    </table>
+    <div class="setinfo" id="setInfo"></div>
+    <div class="rulesinfo" id="rulesInfo"></div>
+
+    <div class="util-row">
+      <button id="historyBtn">履歴</button>
+      <button id="finishMatchBtn">新しい試合</button>
+    </div>
+
+    <div class="tap-row">
+      <button class="tap-btn a" id="tapA">じぶん</button>
+      <button class="tap-btn b" id="tapB">あいて</button>
+    </div>
+  </section>
+
+  <section id="historyScreen" class="screen">
+    <h2>試合の履歴</h2>
+    <div id="historyList"></div>
+    <div class="hist-btns">
+      <button id="syncBtn">Driveと同期</button>
+      <button id="backBtn">戻る</button>
+    </div>
+  </section>
+
+  <div id="toast"></div>
+
+  <div id="confirmModal" class="modal-overlay">
+    <div class="modal-box">
+      <div id="confirmText" class="modal-text"></div>
+      <div class="modal-btns">
+        <button id="confirmNo">いいえ</button>
+        <button id="confirmYes">はい</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ====================== 設定(Google Drive) ====================== */
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DATA_FILENAME = "tennis-watch-score-data.json";
+const LOCAL_DB_KEY = "tennis-watch-matches"; // ローカル永続DB(Drive未接続でも履歴閲覧可能)
+
+/* ====================== セットアップ入力の一時保持 ====================== */
+let pendingSettings = { mode:"singles", gamesPerSet:6, setFinishMode:"winByTwo", deuceMode:"ad", firstServer:"a" };
+
+document.querySelectorAll(".mode-toggle").forEach(group=>{
+  const key = group.dataset.group;
+  group.querySelectorAll(".mode-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      group.querySelectorAll(".mode-btn").forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+      let v = btn.dataset.value;
+      if(!isNaN(v) && v!=="") v=Number(v); // 数値項目(ゲーム数)のみ数値化。文字列の設定値はそのまま保持
+      pendingSettings[key]=v;
+    });
+  });
+});
+
+/* ====================== 状態 ====================== */
+let state = null; // 開始後にセットされる
+const $ = id => document.getElementById(id);
+
+function showScreen(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $(id).classList.add("active");
+}
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 1800);
+}
+
+// window.confirm() はWear OSのWebView等で未実装/エラーになることがあるため、
+// アプリ内蔵の確認モーダルで代用する。
+function customConfirm(message, onYes){
+  const modal = $("confirmModal");
+  $("confirmText").textContent = message;
+  modal.classList.add("show");
+
+  const yesBtn = $("confirmYes");
+  const noBtn = $("confirmNo");
+
+  function cleanup(){
+    modal.classList.remove("show");
+    yesBtn.removeEventListener("click", onYesClick);
+    noBtn.removeEventListener("click", onNoClick);
+  }
+  function onYesClick(){ cleanup(); onYes(); }
+  function onNoClick(){ cleanup(); }
+
+  yesBtn.addEventListener("click", onYesClick);
+  noBtn.addEventListener("click", onNoClick);
+}
+
+function newMatchState(nameA, nameB){
+  return {
+    matchId: "m" + Date.now(),
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    mode: pendingSettings.mode,
+    settings: { gamesPerSet: pendingSettings.gamesPerSet, setFinishMode: pendingSettings.setFinishMode, deuceMode: pendingSettings.deuceMode },
+    nameA, nameB,
+    points: {a:0,b:0},
+    games: {a:0,b:0},
+    sets: [],
+    deuceCount: 0, // 現在のゲーム内でデュースに到達した回数(1デュース判定用)
+    server: pendingSettings.firstServer, // 'a' | 'b' 現在サーブ権を持つ側
+    pointLog: [], // ポイントごとの履歴 {ts, side, server, setNumber, gameNumber, scoreA, scoreB}
+    finished: false,
+    synced: false,
+    history: [] // undoスナップショット(端末内のみ・保存はしない)
+  };
+}
+
+$("startBtn").addEventListener("click", ()=>{
+  const nameA = $("nameA").value.trim() || (pendingSettings.mode==="doubles" ? "自チーム" : "じぶん");
+  const nameB = $("nameB").value.trim() || "あいて";
+  state = newMatchState(nameA, nameB);
+  render();
+  showScreen("scoreScreen");
+  persist();
+});
+
+/* ====================== テニスの得点ロジック(設定反映) ====================== */
+function pushHistory(){
+  state.history.push(JSON.stringify({points:state.points, games:state.games, sets:state.sets, deuceCount:state.deuceCount||0, server:state.server}));
+  if(state.history.length>100) state.history.shift();
+}
+
+function addPoint(side){
+  pushHistory();
+  const server = state.server;
+  const setNumber = state.sets.length + 1;
+  const gameNumber = state.games.a + state.games.b + 1;
+
+  state.points[side]++;
+
+  state.pointLog.push({
+    ts: Date.now(),
+    side, server, setNumber, gameNumber,
+    scoreA: pointText(state.points.a, state.points.b),
+    scoreB: pointText(state.points.b, state.points.a)
+  });
+  if(state.pointLog.length > 2000) state.pointLog.shift(); // 上限を設けて肥大化を防ぐ
+
+  maybeFinishGame();
+  maybeFinishSet();
+  render();
+  persist();
+}
+
+function maybeFinishGame(){
+  const {a,b} = state.points;
+  const mode = state.settings.deuceMode; // 'ad' | 'noAd' | 'oneDeuce'
+
+  // デュース(40-40相当、両者3点以上で同点)に到達した回数を記録する。
+  // 1デュース方式の「2回目のデュースからは次の1点で決着」の判定に使う。
+  if(a===b && a>=3){
+    state.deuceCount = (state.deuceCount||0) + 1;
+  }
+
+  let winner = null;
+
+  if(a>=4 || b>=4){
+    if(mode==="noAd"){
+      // ノーアド: 40-40の次の1点で常に決着(アドバンテージなし)
+      if(Math.abs(a-b) >= 1) winner = a>b ? "a" : "b";
+    } else if(mode==="oneDeuce"){
+      // 1デュース: 最初のデュースは通常のアドバンテージ制。
+      // 2回目のデュース(アドバンテージを取り切れず再度同点)に戻ったら、次の1点で決着。
+      if((state.deuceCount||0) >= 2){
+        if(a!==b) winner = a>b ? "a" : "b";
+      } else {
+        if(Math.abs(a-b) >= 2) winner = a>b ? "a" : "b";
+      }
+    } else {
+      // 通常のアドバンテージ制: 2点差が必要
+      if(Math.abs(a-b) >= 2) winner = a>b ? "a" : "b";
+    }
+  }
+
+  if(winner){
+    state.games[winner]++;
+    state.points = {a:0, b:0};
+    state.deuceCount = 0; // 次のゲームに向けてリセット
+    state.server = (state.server==="a") ? "b" : "a"; // ゲームごとにサーブを交代
+  }
+}
+
+function maybeFinishSet(){
+  const {a,b} = state.games;
+  const N = state.settings.gamesPerSet;
+  const mode = state.settings.setFinishMode; // 'winByTwo' | 'firstTo' | 'fixed'
+  let win = false;
+
+  if(mode==="firstTo"){
+    // 先取のみ: 勝敗マージン不問でNゲームに先に到達した時点で決着
+    win = (a>=N || b>=N);
+  } else if(mode==="fixed"){
+    // 総ゲーム数固定: 勝ち負けに関係なく必ずNゲーム消化してから多い方の勝ち(同数なら引き分け)
+    win = (a+b) >= N;
+  } else {
+    // 2差必要: N-Nからは1ゲームで決着する簡易タイブレーク扱い
+    const normalWin = (a>=N || b>=N) && Math.abs(a-b)>=2;
+    const tiebreakWin = (a===N+1 || b===N+1);
+    win = normalWin || tiebreakWin;
+  }
+
+  if(win){
+    state.sets.push({a, b});
+    state.games = {a:0, b:0};
+  }
+}
+
+function pointText(mine, other){
+  const labels = ["0","15","30","40"];
+  if(mine>=3 && other>=3){
+    if(mine===other) return "40";
+    if(state.settings.deuceMode==="noAd") return "40"; // ノーアドは常時40表示のまま次の1点で決着
+    return mine>other ? "Ad" : "40";
+  }
+  return labels[Math.min(mine,3)];
+}
+
+$("tapA").addEventListener("click", ()=>addPoint("a"));
+$("tapB").addEventListener("click", ()=>addPoint("b"));
+
+$("undoBtn").addEventListener("click", ()=>{
+  if(!state) return;
+  const snap = state.history.pop();
+  if(!snap) return;
+  const s = JSON.parse(snap);
+  state.points = s.points; state.games = s.games; state.sets = s.sets; state.deuceCount = s.deuceCount||0;
+  state.server = s.server || state.server;
+  state.pointLog.pop(); // このundoで取り消される1ポイント分のログを削除
+  render();
+  persist();
+});
+
+$("finishMatchBtn").addEventListener("click", ()=>{
+  customConfirm("この試合を終了して新しい試合を始めますか？\n(記録は履歴に残ります)", ()=>{
+    state.finished = true;
+    persist();
+    showScreen("setup");
+  });
+});
+
+$("historyBtn").addEventListener("click", ()=>{
+  renderHistoryList();
+  showScreen("historyScreen");
+});
+$("backBtn").addEventListener("click", ()=> showScreen("scoreScreen"));
+
+function render(){
+  if(!state) return;
+  const serverName = state.server==="a" ? state.nameA : state.nameB;
+  $("serveInfo").textContent = "🎾 " + serverName + " のサーブ";
+  $("labelA").textContent = state.nameA;
+  $("labelB").textContent = state.nameB;
+  $("tapA").textContent = state.nameA;
+  $("tapB").textContent = state.nameB;
+
+  $("ptA").textContent = pointText(state.points.a, state.points.b);
+  $("ptB").textContent = pointText(state.points.b, state.points.a);
+  $("gA").textContent = state.games.a;
+  $("gB").textContent = state.games.b;
+
+  const setsWonA = state.sets.filter(s=>s.a>s.b).length;
+  const setsWonB = state.sets.filter(s=>s.b>s.a).length;
+  $("sA").textContent = setsWonA;
+  $("sB").textContent = setsWonB;
+
+  const setDetail = state.sets.map((s,i)=>`第${i+1}: ${s.a}-${s.b}`).join("　");
+  $("setInfo").textContent = setDetail;
+
+  const st = state.settings;
+  const finishLabel = {winByTwo:"2差必要", firstTo:"先取のみ", fixed:"総ゲーム数固定"}[st.setFinishMode] || st.setFinishMode;
+  const deuceLabel = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"}[st.deuceMode] || st.deuceMode;
+  $("rulesInfo").textContent = `${st.gamesPerSet}ゲーム制・${finishLabel}・${deuceLabel}`;
+}
+
+/* ====================== ローカル永続DB(Drive未接続でも履歴を保持・閲覧) ====================== */
+function loadDb(){
+  try{ return JSON.parse(localStorage.getItem(LOCAL_DB_KEY) || '{"matches":[]}'); }
+  catch(e){ return {matches:[]}; }
+}
+function saveDb(db){
+  try{ localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db)); }catch(e){}
+}
+function buildRecord(){
+  const {history, ...rest} = state; // undoスタックは保存対象外
+  rest.updatedAt = new Date().toISOString();
+  return rest;
+}
+function persist(){
+  if(!state) return;
+  const db = loadDb();
+  const idx = db.matches.findIndex(m=>m.matchId===state.matchId);
+  const rec = buildRecord();
+  if(idx>=0) db.matches[idx]=rec; else db.matches.push(rec);
+  saveDb(db);
+}
+
+function findResumable(){
+  const db = loadDb();
+  if(db.matches.length===0) return null;
+  const last = db.matches[db.matches.length-1];
+  return last.finished ? null : last;
+}
+
+function resumeIfPossible(){
+  const rec = findResumable();
+  if(rec){
+    state = Object.assign({history:[]}, rec);
+    render();
+    showScreen("scoreScreen");
+  }
+}
+
+/* ====================== Google Drive 連携(なくてもローカル履歴は閲覧可) ====================== */
+let tokenClient = null;
+let accessToken = null;
+
+function ensureGis(cb){
+  if(window.google && google.accounts && google.accounts.oauth2){ cb(); return; }
+  const s = document.createElement("script");
+  s.src = "https://accounts.google.com/gsi/client";
+  s.onload = cb;
+  s.onerror = ()=>cb();
+  document.head.appendChild(s);
+}
+
+function getAccessToken(cb){
+  ensureGis(()=>{
+    if(!(window.google && google.accounts && google.accounts.oauth2)){ cb(null); return; }
+    if(!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: DRIVE_SCOPE,
+        callback: (resp)=>{
+          if(resp.error){ cb(null); return; }
+          accessToken = resp.access_token;
+          cb(accessToken);
+        }
+      });
+    }
+    tokenClient.requestAccessToken({prompt: accessToken ? "" : "consent"});
+  });
+}
+
+async function driveFindFile(name, token){
+  const q = encodeURIComponent(`name='${name}' and trashed=false`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+    headers:{ Authorization:`Bearer ${token}` }
+  });
+  const data = await res.json();
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+async function driveGetContent(fileId, token){
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers:{ Authorization:`Bearer ${token}` }
+  });
+  if(!res.ok) return null;
+  try{ return await res.json(); }catch(e){ return null; }
+}
+async function driveCreateFile(name, content, token){
+  const boundary = "boundary_tennis_watch";
+  const meta = { name, mimeType: "application/json" };
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(content)}\r\n--${boundary}--`;
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+    method:"POST",
+    headers:{ Authorization:`Bearer ${token}`, "Content-Type":`multipart/related; boundary=${boundary}` },
+    body
+  });
+  return res.json();
+}
+async function driveUpdateFile(fileId, content, token){
+  await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method:"PATCH",
+    headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
+    body: JSON.stringify(content)
+  });
+}
+
+// ローカルDBとDrive上のDBをmatchId単位でマージ(updatedAtが新しい方を採用)
+function mergeMatches(localList, remoteList){
+  const map = {};
+  (remoteList||[]).forEach(m=> map[m.matchId]=m );
+  (localList||[]).forEach(m=>{
+    const ex = map[m.matchId];
+    if(!ex || new Date(m.updatedAt||0) > new Date(ex.updatedAt||0)) map[m.matchId]=m;
+  });
+  return Object.values(map).sort((x,y)=> new Date(x.startedAt||0)-new Date(y.startedAt||0));
+}
+
+async function syncWithDrive(){
+  const btn = $("cloudBtn");
+  btn.classList.remove("ok","err"); btn.classList.add("busy");
+  getAccessToken(async (token)=>{
+    if(!token){ btn.classList.remove("busy"); btn.classList.add("err"); toast("Drive未接続:ローカル履歴のみ表示します"); return; }
+    try{
+      const existingId = await driveFindFile(DATA_FILENAME, token);
+      let remote = { matches: [] };
+      if(existingId){
+        const c = await driveGetContent(existingId, token);
+        if(c) remote = c;
+      }
+      const localDb = loadDb();
+      const merged = mergeMatches(localDb.matches, remote.matches);
+      const mergedDb = { matches: merged };
+
+      if(existingId) await driveUpdateFile(existingId, mergedDb, token);
+      else await driveCreateFile(DATA_FILENAME, mergedDb, token);
+
+      saveDb(mergedDb); // ローカルにもマージ結果を反映
+      if(state){
+        const cur = merged.find(m=>m.matchId===state.matchId);
+        if(cur) state.synced = true;
+      }
+      btn.classList.remove("busy"); btn.classList.add("ok");
+      toast("Google Driveと同期しました");
+    }catch(e){
+      btn.classList.remove("busy"); btn.classList.add("err");
+      toast("同期に失敗しました(ローカル履歴は保持されています)");
+    }
+  });
+}
+$("cloudBtn").addEventListener("click", syncWithDrive);
+$("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive(); renderHistoryList(); });
+
+let historyDetailId = null;
+
+function renderMatchDetail(m){
+  const list = $("historyList");
+  const rows = (m.pointLog||[]).map(p=>{
+    const serverName = p.server==="a" ? m.nameA : m.nameB;
+    const winnerName = p.side==="a" ? m.nameA : m.nameB;
+    return `<div class="pt-row"><span class="pt-set">S${p.setNumber}-G${p.gameNumber}</span>${serverName}サーブ→<b>${winnerName}</b>(${p.scoreA}-${p.scoreB})</div>`;
+  }).join("");
+  list.innerHTML =
+    `<div class="detail-head">${m.nameA} vs ${m.nameB}</div>` +
+    (rows || '<div class="d">記録されたポイントはありません</div>') +
+    `<button id="detailBackBtn" class="detail-back">一覧に戻る</button>`;
+  const backBtn = document.getElementById("detailBackBtn");
+  if(backBtn) backBtn.addEventListener("click", ()=>{ historyDetailId=null; renderHistoryList(); });
+}
+
+function renderHistoryList(){
+  // Drive未接続でも常にローカルDBを即時表示する
+  const db = loadDb();
+
+  if(historyDetailId){
+    const m = db.matches.find(x=>x.matchId===historyDetailId);
+    if(m){ renderMatchDetail(m); return; }
+    historyDetailId = null;
+  }
+
+  const matches = db.matches.slice().reverse();
+  const list = $("historyList");
+  if(matches.length===0){ list.textContent = "保存された試合はありません"; return; }
+  list.innerHTML = matches.map(m=>{
+    const setsText = (m.sets||[]).map(s=>`${s.a}-${s.b}${s.a===s.b?"(引分)":""}`).join(" ") || "―";
+    const date = m.updatedAt ? new Date(m.updatedAt).toLocaleDateString("ja-JP") : "";
+    const syncTag = m.synced ? '<span class="sync">☁同期済</span>' : '';
+    return `<div class="match-row" data-matchid="${m.matchId}"><div class="d">${date}　${m.mode==="doubles"?"ダブルス":"シングルス"} ${syncTag}</div>${m.nameA} vs ${m.nameB}: ${setsText}</div>`;
+  }).join("");
+  list.querySelectorAll(".match-row").forEach(row=>{
+    row.addEventListener("click", ()=>{ historyDetailId = row.dataset.matchid; renderHistoryList(); });
+  });
+}
+
+/* ====================== 起動 ====================== */
+resumeIfPossible();
+</script>
+</body>
+</html>
