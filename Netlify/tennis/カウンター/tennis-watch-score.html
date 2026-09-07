@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>テニススコア</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0a1210">
 <style>
   :root{
     --bg:#0a1210;
@@ -25,42 +27,43 @@
   .screen.active{display:flex;}
 
   /* setup (scrollable: config has more content than fits at once) */
-  #setup{overflow-y:auto; justify-content:flex-start; padding-top:16%; padding-bottom:10%;}
-  #setup h1{font-size:14px; font-weight:600; margin:0 0 8px; color:var(--dim);}
-  .grp-label{font-size:9px; color:var(--dim); margin:8px 0 3px;}
-  .mode-toggle{display:flex; gap:5px; width:100%; max-width:170px;}
-  .mode-btn{flex:1; padding:6px 4px; border-radius:16px; border:1px solid var(--line);
-    background:transparent; color:var(--dim); font-size:10px; font-weight:600;}
+  #setup{overflow-y:auto; justify-content:flex-start; padding-top:18%; padding-bottom:12%;
+    padding-left:16%; padding-right:16%;}
+  #setup h1{font-size:13px; font-weight:600; margin:0 0 6px; color:var(--dim);}
+  .grp-label{font-size:8px; color:var(--dim); margin:7px 0 2px;}
+  .mode-toggle{display:flex; flex-wrap:wrap; gap:4px; width:100%; max-width:180px; justify-content:center;}
+  .mode-btn{flex:0 1 auto; padding:5px 8px; border-radius:14px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:9px; font-weight:600; white-space:nowrap;}
   .mode-btn.active{background:var(--line); color:var(--text);}
-  #setup input{width:100%; max-width:150px; margin-top:8px; padding:8px 10px; border-radius:14px;
-    border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:13px; text-align:center;}
+  #setup input{width:100%; max-width:145px; margin-top:6px; padding:7px 10px; border-radius:14px;
+    border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:12px; text-align:center;}
   #setup input::placeholder{color:var(--dim);}
-  .primary{margin-top:12px; padding:9px 22px; border-radius:20px; border:none;
-    background:var(--teal); color:#04231d; font-weight:700; font-size:13px;}
+  .primary{margin-top:10px; padding:8px 20px; border-radius:20px; border:none;
+    background:var(--teal); color:#04231d; font-weight:700; font-size:12px;}
 
   /* score screen */
-  #scoreScreen{padding:7% 8% 5%; justify-content:flex-start;}
-  .topbar{width:100%; display:flex; justify-content:center; margin-bottom:2px;}
-  #undoBtn{width:34px; height:34px; border-radius:50%; border:1.5px solid #3a6fd0;
-    background:transparent; color:#5c8ff0; font-size:16px; display:flex; align-items:center; justify-content:center;}
-  #cloudRow{width:100%; display:flex; justify-content:flex-end; margin:2px 0 4px;}
-  #cloudBtn{width:22px; height:22px; border-radius:50%; border:1px solid var(--line);
-    background:var(--panel); color:var(--dim); font-size:11px;}
+  #scoreScreen{padding:9% 11% 5%; justify-content:flex-start;}
+  .topbar{width:100%; display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:3px;}
+  #undoBtn{width:30px; height:30px; border-radius:50%; border:1.5px solid #3a6fd0;
+    background:transparent; color:#5c8ff0; font-size:14px; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  #cloudBtn{width:24px; height:24px; border-radius:50%; border:1px solid var(--line);
+    background:var(--panel); color:var(--dim); font-size:11px; flex-shrink:0;}
   #cloudBtn.busy{color:#e0d75a; border-color:#e0d75a;}
   #cloudBtn.ok{color:var(--teal); border-color:var(--teal);}
   #cloudBtn.err{color:var(--danger); border-color:var(--danger);}
 
-  table.score-table{width:100%; border-collapse:collapse; font-size:11px; margin-bottom:4px;}
-  table.score-table th{color:var(--dim); font-weight:600; font-size:9px; padding-bottom:3px;}
-  table.score-table td{padding:3px 2px; font-size:15px; font-weight:700;}
-  table.score-table td.name{font-size:11px; font-weight:600; text-align:left; max-width:60px;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text);}
+  table.score-table{width:92%; margin:0 auto 3px; table-layout:fixed; border-collapse:collapse; font-size:11px;}
+  table.score-table th{color:var(--dim); font-weight:600; font-size:8px; padding-bottom:2px;}
+  table.score-table th.name-h{width:34%;} table.score-table th:not(.name-h){width:22%;}
+  table.score-table td{padding:2px 1px; font-size:14px; font-weight:700; text-align:center;}
+  table.score-table td.name{font-size:10px; font-weight:600; text-align:left; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; color:var(--text);}
   table.score-table tr.a td{color:var(--teal);}
   table.score-table tr.b td{color:var(--orange);}
-  table.score-table td.pt{color:var(--text) !important; font-size:16px;}
+  table.score-table td.pt{color:var(--text) !important; font-size:15px;}
 
-  .setinfo{font-size:9px; color:var(--dim); margin-bottom:4px; min-height:11px;}
-  .rulesinfo{font-size:8px; color:var(--dim); margin-bottom:4px; opacity:0.8;}
+  .setinfo{font-size:9px; color:var(--dim); margin-bottom:3px; min-height:11px;
+    width:100%; white-space:nowrap; overflow-x:auto;}
   .serveinfo{font-size:10px; color:var(--ball, var(--teal)); margin-bottom:3px; font-weight:600;}
   .match-row{cursor:pointer;}
   .match-row:active{background:var(--panel);}
@@ -70,9 +73,9 @@
   .detail-back{margin-top:8px; padding:6px 14px; border-radius:14px; border:1px solid var(--line);
     background:var(--panel); color:var(--text); font-size:10px;}
 
-  .util-row{width:100%; display:flex; gap:6px; margin-bottom:6px;}
+  .util-row{width:100%; display:flex; gap:5px; margin-bottom:5px;}
   .util-row button{flex:1; padding:4px 2px; border-radius:10px; border:1px solid var(--line);
-    background:var(--panel); color:var(--dim); font-size:9px;}
+    background:var(--panel); color:var(--dim); font-size:9px; white-space:nowrap;}
 
   .tap-row{width:100%; flex:1; display:flex; flex-direction:column; gap:5px; min-height:0;}
   .tap-btn{flex:1; border:none; border-radius:16px; color:#04231d; font-size:15px; font-weight:700;}
@@ -120,8 +123,8 @@
 
     <div class="grp-label">形式</div>
     <div class="mode-toggle" data-group="mode">
-      <button class="mode-btn active" data-value="singles">シングルス</button>
-      <button class="mode-btn" data-value="doubles">ダブルス</button>
+      <button class="mode-btn active" data-value="singles">シングル</button>
+      <button class="mode-btn" data-value="doubles">ダブル</button>
     </div>
 
     <div class="grp-label">1セットのゲーム数</div>
@@ -133,14 +136,14 @@
 
     <div class="grp-label">セット決着</div>
     <div class="mode-toggle" data-group="setFinishMode">
-      <button class="mode-btn active" data-value="winByTwo">2差必要</button>
-      <button class="mode-btn" data-value="firstTo">先取のみ</button>
-      <button class="mode-btn" data-value="fixed">総ゲーム数固定</button>
+      <button class="mode-btn active" data-value="winByTwo">2差要</button>
+      <button class="mode-btn" data-value="firstTo">先取</button>
+      <button class="mode-btn" data-value="fixed">総数固定</button>
     </div>
 
     <div class="grp-label">デュース方式</div>
     <div class="mode-toggle" data-group="deuceMode">
-      <button class="mode-btn active" data-value="ad">アドバンテージ</button>
+      <button class="mode-btn active" data-value="ad">通常</button>
       <button class="mode-btn" data-value="noAd">ノーアド</button>
       <button class="mode-btn" data-value="oneDeuce">1デュース</button>
     </div>
@@ -159,13 +162,13 @@
   <section id="scoreScreen" class="screen">
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617;</button>
+      <button id="cloudBtn" title="Google Driveに保存">&#9729;</button>
     </div>
-    <div id="cloudRow"><button id="cloudBtn" title="Google Driveに保存">&#9729;</button></div>
 
     <div class="serveinfo" id="serveInfo"></div>
     <table class="score-table">
       <thead>
-        <tr><th class="name">Player</th><th>得点</th><th>ゲーム</th><th>セット</th></tr>
+        <tr><th class="name-h">選手</th><th>点</th><th>G</th><th>S</th></tr>
       </thead>
       <tbody>
         <tr class="a"><td class="name" id="labelA">じぶん</td><td class="pt" id="ptA">0</td><td id="gA">0</td><td id="sA">0</td></tr>
@@ -173,11 +176,10 @@
       </tbody>
     </table>
     <div class="setinfo" id="setInfo"></div>
-    <div class="rulesinfo" id="rulesInfo"></div>
 
     <div class="util-row">
       <button id="historyBtn">履歴</button>
-      <button id="finishMatchBtn">新しい試合</button>
+      <button id="finishMatchBtn">新規試合</button>
     </div>
 
     <div class="tap-row">
@@ -295,6 +297,7 @@ $("startBtn").addEventListener("click", ()=>{
   render();
   showScreen("scoreScreen");
   persist();
+  toast(rulesSummary(state.settings));
 });
 
 /* ====================== テニスの得点ロジック(設定反映) ====================== */
@@ -449,10 +452,12 @@ function render(){
   const setDetail = state.sets.map((s,i)=>`第${i+1}: ${s.a}-${s.b}`).join("　");
   $("setInfo").textContent = setDetail;
 
-  const st = state.settings;
+}
+
+function rulesSummary(st){
   const finishLabel = {winByTwo:"2差必要", firstTo:"先取のみ", fixed:"総ゲーム数固定"}[st.setFinishMode] || st.setFinishMode;
   const deuceLabel = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"}[st.deuceMode] || st.deuceMode;
-  $("rulesInfo").textContent = `${st.gamesPerSet}ゲーム制・${finishLabel}・${deuceLabel}`;
+  return `${st.gamesPerSet}ゲーム制・${finishLabel}・${deuceLabel}`;
 }
 
 /* ====================== ローカル永続DB(Drive未接続でも履歴を保持・閲覧) ====================== */
