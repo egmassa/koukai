@@ -564,6 +564,63 @@
       font-size: 12px;
     }
 
+    #connSettingsScreen {
+      overflow-y: auto;
+      padding-top: 16%;
+    }
+
+    #connSettingsScreen h2 {
+      font-size: 16px;
+      color: var(--dim);
+      margin: 0 0 8px;
+      font-weight: 700;
+    }
+
+    #connSettingsScreen .desc {
+      font-size: 11px;
+      color: var(--dim);
+      margin-bottom: 14px;
+      line-height: 1.6;
+    }
+
+    #connSettingsScreen input {
+      width: 100%;
+      max-width: 220px;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      border-radius: 16px;
+      border: 1.5px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    #connSettingsScreen input::placeholder {
+      color: var(--dim);
+    }
+
+    #connSettingsScreen .primary {
+      margin-top: 6px;
+      padding: 10px 24px;
+      border-radius: 20px;
+      border: none;
+      background: var(--teal);
+      color: #04231d;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    #connSettingsScreen #connBackBtn {
+      margin-top: 8px;
+      padding: 6px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--dim);
+      font-size: 11px;
+    }
+
     /* スマホ向けの見やすい試合詳細(ゲーム×ポイントのグリッド) */
     .grid-wrap {
       width: 100%;
@@ -757,6 +814,19 @@
         <button id="undoSyncBtn">↩ 同期を取り消す</button>
         <button id="resetSyncBtn">全データを再送信</button>
       </div>
+      <div class="hist-btns hist-btns-sub">
+        <button id="connSettingsBtn">⚙ 接続設定</button>
+      </div>
+    </section>
+
+    <section id="connSettingsScreen" class="screen">
+      <h2>接続設定</h2>
+      <div class="desc">
+        合言葉(好きな文章でOK。音声入力推奨)をこの端末に保存します。実際の通信にはこの文章をハッシュ化した値を使うので、ソースコードには書き込まれません。URLは開発者があらかじめコード内に設定しています(公開されても、合言葉が分からなければ書き込みはできません)。
+      </div>
+      <input id="connTokenInput" placeholder="合言葉(自由なフレーズでOK)" maxlength="200">
+      <button class="primary" id="connSaveBtn">保存</button>
+      <button id="connBackBtn">戻る</button>
     </section>
 
     <div id="toast"></div>
@@ -1094,11 +1164,32 @@
        watchのブラウザはGoogleのポップアップ認証(OAuth)に対応していないため、
        代わりに script.google.com で公開したApps Scriptへ単純なPOSTを送るだけで
        Drive上のデータを更新する方式にしている。セットアップ手順は同梱の
-       tennis-drive-sync.gs.txt を参照。 */
+       tennis-drive-sync.gs.txt を参照。
+    
+       URLは公開されても実害がない(合言葉が無ければ書き込みできない)ので、
+       ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
+       watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
+       (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec"; // 例: https://script.google.com/macros/s/xxxxx/exec
-    const APPS_SCRIPT_TOKEN = "UWy5XuXyasSx1N8Sfaac"; // tennis-drive-sync.gs.txt のSCRIPT_TOKENと同じ文字列にする
+    const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
     const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
     const APPS_SCRIPT_CHECKPOINT_PREV_KEY = "tennis-watch-appsscript-checkpoint-prev"; // 誤操作からの復元用(1段階だけ)
+
+    function loadAppsScriptConfig() {
+      try { return JSON.parse(localStorage.getItem(APPS_SCRIPT_CONFIG_KEY) || "{}"); }
+      catch (e) { return {}; }
+    }
+    function saveAppsScriptConfig(token) {
+      try { localStorage.setItem(APPS_SCRIPT_CONFIG_KEY, JSON.stringify({ token })); } catch (e) { }
+    }
+
+    // 好きなフレーズ(合言葉)をSHA-256でハッシュ化して、実際の通信トークンとして使う。
+    // 音声入力しやすい自然な文章のまま、通信上は十分ランダムな値になるようにするため。
+    async function sha256Hex(text) {
+      const enc = new TextEncoder().encode(text);
+      const digest = await crypto.subtle.digest("SHA-256", enc);
+      return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
 
     function loadAppsScriptCheckpoint() {
       try { return JSON.parse(localStorage.getItem(APPS_SCRIPT_CHECKPOINT_KEY) || '{"ts":0}').ts || 0; }
@@ -1129,7 +1220,13 @@
 
       if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) {
         if (btn) { btn.classList.remove("busy"); btn.classList.add("err"); }
-        toast("APPS_SCRIPT_URLが未設定です(tennis-drive-sync.gs.txt参照)");
+        toast("APPS_SCRIPT_URLが未設定です(ソースコードを確認してください)");
+        return;
+      }
+      const cfg = loadAppsScriptConfig();
+      if (!cfg.token) {
+        if (btn) { btn.classList.remove("busy"); btn.classList.add("err"); }
+        toast("合言葉が未設定です(履歴画面の「接続設定」から入力してください)");
         return;
       }
 
@@ -1147,7 +1244,7 @@
         const res = await fetch(APPS_SCRIPT_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ token: APPS_SCRIPT_TOKEN, ms, sr, pts })
+          body: JSON.stringify({ token: cfg.token, ms, sr, pts })
         });
         if (!res.ok) throw new Error(`送信エラー ${res.status}`);
         const data = await res.json();
@@ -1181,6 +1278,25 @@
         toast("次回の同期で全データを送り直します");
       });
     });
+
+    $("connSettingsBtn").addEventListener("click", () => {
+      const cfg = loadAppsScriptConfig();
+      // 合言葉は保存時にハッシュ化されるため、元の文章は復元できない(そういう設計)。
+      // 空欄のままにして、変更したい時だけ入力してもらう。
+      $("connTokenInput").value = "";
+      $("connTokenInput").placeholder = cfg.token ? "設定済み(変更する場合のみ入力)" : "合言葉(自由なフレーズでOK)";
+      showScreen("connSettingsScreen");
+    });
+    $("connSaveBtn").addEventListener("click", async () => {
+      const phrase = $("connTokenInput").value.trim();
+      if (!phrase) { toast("合言葉を入力してください"); return; }
+      const token = await sha256Hex(phrase);
+      saveAppsScriptConfig(token);
+      toast("接続設定を保存しました");
+      showScreen("historyScreen");
+      renderHistoryList();
+    });
+    $("connBackBtn").addEventListener("click", () => showScreen("historyScreen"));
 
     let historyDetailId = null;
 
@@ -1337,7 +1453,24 @@
       wireDeleteButton(m.matchId, `${m.nameA} vs ${m.nameB}`);
     }
 
+    // URLのクエリパラメータ(?astoken=合言葉)が含まれていたら、タップするだけで自動保存する
+    // (watch上での音声入力すら不要にする、任意のショートカット手段)。
+    // astokenは合言葉の文章そのものを想定し、手入力時と同じくSHA-256でハッシュ化してから保存する。
+    // 保存後はURLからパラメータを消し、履歴やブラウザバーに合言葉を残さないようにする。
+    async function importConfigFromUrlIfPresent() {
+      const params = new URLSearchParams(location.search);
+      const phrase = params.get("astoken");
+      if (phrase) {
+        const token = await sha256Hex(phrase);
+        saveAppsScriptConfig(token);
+        toast("接続設定をリンクから保存しました");
+        const cleanUrl = location.pathname + location.hash;
+        history.replaceState(null, "", cleanUrl);
+      }
+    }
+
     /* ====================== 起動 ====================== */
+    importConfigFromUrlIfPresent();
     resumeIfPossible();
   </script>
 </body>
