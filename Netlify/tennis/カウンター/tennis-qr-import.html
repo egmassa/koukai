@@ -10325,12 +10325,14 @@ $("mergeBtn").addEventListener("click", ()=>{
   const byId = {};
   (db.matches||[]).forEach(m=> byId[m.matchId]=m);
 
-  const msAll = {}; const srAll = [];
-  pages.forEach(pg=>{
-    (pg.ms||[]).forEach(m=> msAll[m.id]=m);
-    (pg.sr||[]).forEach(s=> srAll.push(s));
-  });
-  Object.values(msAll).forEach(m=>{
+  // ms配列(試合メタ情報)は「メタ情報だけの専用ページ」1枚にまとまっている想定。
+  // sr/ptsはmatchIdの文字列ではなく、このms配列内のインデックス番号で試合を参照している。
+  let msArray = [];
+  pages.forEach(pg=>{ if(pg.ms && pg.ms.length) msArray = msArray.concat(pg.ms); });
+  const srAll = [];
+  pages.forEach(pg=> (pg.sr||[]).forEach(s=> srAll.push(s)));
+
+  msArray.forEach(m=>{
     if(!byId[m.id]){
       byId[m.id] = {
         matchId: m.id, nameA: m.a, nameB: m.b, mode: m.md,
@@ -10340,14 +10342,16 @@ $("mergeBtn").addEventListener("click", ()=>{
       };
     }
   });
-  srAll.forEach(([mid, setNumber, a, b])=>{
-    const m = byId[mid]; if(!m) return;
+  srAll.forEach(([matchIndex, setNumber, a, b])=>{
+    const meta = msArray[matchIndex]; if(!meta) return;
+    const m = byId[meta.id]; if(!m) return;
     m.sets = m.sets || [];
     m.sets[setNumber-1] = {a, b};
   });
   pages.forEach(pg=>{
-    (pg.pts||[]).forEach(([mid, ts, sN, gN, pN, side, server, scoreA, scoreB])=>{
-      const m = byId[mid]; if(!m) return;
+    (pg.pts||[]).forEach(([matchIndex, ts, sN, gN, pN, side, server, scoreA, scoreB])=>{
+      const meta = msArray[matchIndex]; if(!meta) return;
+      const m = byId[meta.id]; if(!m) return;
       m.pointLog = m.pointLog || [];
       if(m.pointLog.some(p=>p.setNumber===sN && p.gameNumber===gN && p.pointInGame===pN)) return;
       m.pointLog.push({

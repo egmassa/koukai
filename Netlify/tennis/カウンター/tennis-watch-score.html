@@ -13274,7 +13274,8 @@ function renderHistoryList(){
 /* ====================== QR書き出し(watch → 他端末への差分エクスポート) ====================== */
 const QR_CHECKPOINT_KEY = "tennis-watch-qr-checkpoint";
 const QR_CHECKPOINT_PREV_KEY = "tennis-watch-qr-checkpoint-prev"; // 誤操作からの復元用(1段階だけ)
-const QR_PAGE_BYTE_BUDGET = 900; // 1ページあたりの目安バイト数(カメラで読み取りやすい密度に抑える)
+const QR_PAGE_BYTE_BUDGET = 220; // 1ページの目安バイト数(密度とページ数のバランス調整済み)
+const QR_AUTO_ADVANCE_MS = 2500; // 自動でページを送る間隔(スマホ側で1枚読み取るのに十分な時間)
 
 function loadQrCheckpoint(){
   try{ return JSON.parse(localStorage.getItem(QR_CHECKPOINT_KEY) || '{"ts":0}').ts || 0; }
@@ -13295,26 +13296,29 @@ function undoQrCheckpoint(){
   }catch(e){ return false; }
 }
 
-// チェックポイント以降の新しいポイントだけを集めて、QRページに分割する
+// チェックポイント以降の新しいポイントだけを集めて、QRページに分割する。
+// 各ポイントには試合IDの文字列をそのまま入れず、ms配列内のインデックス(0,1,2…)だけを入れることで、
+// 小さいQRページの中でもポイント数を稼げるようにしている。
 function buildQrPages(){
   const db = loadDb();
   const checkpoint = loadQrCheckpoint();
-  const ms = []; // 対象になった試合のメタ情報
-  const sr = [];  // セット結果 [matchId, setNumber, a, b]
+  const ms = []; // 対象になった試合のメタ情報(このインデックス番号をポイント側から参照する)
+  const sr = [];  // セット結果 [matchIndex, setNumber, a, b]
   const allPts = []; // 新しいポイント記録
   let maxTs = checkpoint;
 
   (db.matches||[]).forEach(m=>{
     const newPts = (m.pointLog||[]).filter(p=> (p.ts||0) > checkpoint);
     if(newPts.length===0) return;
+    const idx = ms.length;
     ms.push({
       id: m.matchId, a: m.nameA, b: m.nameB, md: m.mode,
       gs: (m.settings&&m.settings.gamesPerSet), fm: (m.settings&&m.settings.setFinishMode),
       dm: (m.settings&&m.settings.deuceMode)
     });
-    (m.sets||[]).forEach((s,i)=> sr.push([m.matchId, i+1, s.a, s.b]));
+    (m.sets||[]).forEach((s,i)=> sr.push([idx, i+1, s.a, s.b]));
     newPts.forEach(p=>{
-      allPts.push([m.matchId, p.ts, p.setNumber, p.gameNumber, p.pointInGame,
+      allPts.push([idx, p.ts, p.setNumber, p.gameNumber, p.pointInGame,
         p.side, p.server, p.scoreA, p.scoreB]);
       if(p.ts > maxTs) maxTs = p.ts;
     });
@@ -13322,17 +13326,20 @@ function buildQrPages(){
 
   if(allPts.length===0) return { pages: [], maxTs };
 
-  const overheadStr = JSON.stringify({p:1,n:1,ms,sr,pts:[]});
-  const overhead = overheadStr.length;
-  const budget = Math.max(QR_PAGE_BYTE_BUDGET - overhead, 200);
-  // 1件あたりの平均バイト数を概算して、1ページに入る件数を決める
+  // ms・srは全ページ共通で同じ内容になるため、まず「メタ情報だけの専用ページ」を1枚作り、
+  // 残りのページは純粋にポイントの記録だけを詰めることで、各ページの密度を安定して抑える。
+  const ptsOverheadStr = JSON.stringify({p:1, n:1, ms:[], sr:[], pts:[]});
+  const ptsOverhead = ptsOverheadStr.length;
+  const budget = Math.max(QR_PAGE_BYTE_BUDGET - ptsOverhead, 40);
   const sampleLen = JSON.stringify(allPts[0]).length + 1;
   const perPage = Math.max(1, Math.floor(budget / sampleLen));
 
   const chunks = [];
   for(let i=0; i<allPts.length; i+=perPage) chunks.push(allPts.slice(i, i+perPage));
-  const n = chunks.length;
-  const pages = chunks.map((pts, idx)=> JSON.stringify({p: idx+1, n, ms, sr, pts}));
+  const n = chunks.length + 1; // +1はメタ情報ページの分
+  const pages = [];
+  pages.push(JSON.stringify({p:1, n, ms, sr, pts:[]}));
+  chunks.forEach((pts, idx)=> pages.push(JSON.stringify({p: idx+2, n, ms:[], sr:[], pts})));
 
   return { pages, maxTs };
 }
@@ -13340,6 +13347,7 @@ function buildQrPages(){
 let qrPages = [];
 let qrMaxTs = 0;
 let qrPageIndex = 0;
+let qrAutoTimer = null;
 
 function renderQrPage(){
   if(qrPages.length===0){
@@ -13351,7 +13359,22 @@ function renderQrPage(){
   qr.addData(qrPages[qrPageIndex]);
   qr.make();
   $("qrBox").innerHTML = qr.createSvgTag({scalable:true});
-  $("qrPageInfo").textContent = `${qrPageIndex+1} / ${qrPages.length} ページ`;
+  $("qrPageInfo").textContent = `${qrPageIndex+1} / ${qrPages.length} ページ(自動で切り替わります)`;
+}
+
+function qrGoToPage(delta){
+  if(qrPages.length===0) return;
+  qrPageIndex = (qrPageIndex + delta + qrPages.length) % qrPages.length;
+  renderQrPage();
+}
+
+function startQrAutoAdvance(){
+  stopQrAutoAdvance();
+  if(qrPages.length<=1) return; // 1ページしかなければ自動送り不要
+  qrAutoTimer = setInterval(()=> qrGoToPage(1), QR_AUTO_ADVANCE_MS);
+}
+function stopQrAutoAdvance(){
+  if(qrAutoTimer){ clearInterval(qrAutoTimer); qrAutoTimer=null; }
 }
 
 $("qrExportBtn").addEventListener("click", ()=>{
@@ -13359,18 +13382,18 @@ $("qrExportBtn").addEventListener("click", ()=>{
   qrPages = built.pages; qrMaxTs = built.maxTs; qrPageIndex = 0;
   showScreen("qrScreen");
   renderQrPage();
+  startQrAutoAdvance();
 });
 $("qrPrevBtn").addEventListener("click", ()=>{
-  if(qrPages.length===0) return;
-  qrPageIndex = (qrPageIndex - 1 + qrPages.length) % qrPages.length;
-  renderQrPage();
+  qrGoToPage(-1);
+  startQrAutoAdvance(); // 手動操作した場合も、そこから改めて自動送りを再開する
 });
 $("qrNextBtn").addEventListener("click", ()=>{
-  if(qrPages.length===0) return;
-  qrPageIndex = (qrPageIndex + 1) % qrPages.length;
-  renderQrPage();
+  qrGoToPage(1);
+  startQrAutoAdvance();
 });
 $("qrDoneBtn").addEventListener("click", ()=>{
+  stopQrAutoAdvance();
   if(qrPages.length>0) saveQrCheckpoint(qrMaxTs);
   toast("送信済みにしました。次回はここからの続きになります");
   showScreen("historyScreen");
@@ -13380,7 +13403,11 @@ $("qrUndoCheckpointBtn").addEventListener("click", ()=>{
   undoQrCheckpoint();
   toast("直前の「読み取り完了」を取り消しました");
 });
-$("qrBackBtn").addEventListener("click", ()=> { showScreen("historyScreen"); renderHistoryList(); });
+$("qrBackBtn").addEventListener("click", ()=>{
+  stopQrAutoAdvance();
+  showScreen("historyScreen");
+  renderHistoryList();
+});
 
 /* ====================== QR取り込み(スマホ側でwatchのQR写真を読み取って合体) ====================== */
 let importPages = {}; // { pageNumber: {ms, sr, pts} }
@@ -13463,12 +13490,15 @@ function applyImportedPages(pages){
   const byId = {};
   (db.matches||[]).forEach(m=> byId[m.matchId]=m);
 
-  const msAll = {}; const srAll = [];
-  pages.forEach(pg=>{
-    (pg.ms||[]).forEach(m=> msAll[m.id]=m);
-    (pg.sr||[]).forEach(s=> srAll.push(s));
-  });
-  Object.values(msAll).forEach(m=>{
+  // ms配列は「メタ情報だけの専用ページ」1枚にまとまっている想定(古い形式との互換のため、
+  // 複数ページにまたがっていても一応マージする)。sr/ptsはmatchIdの文字列ではなく、
+  // このms配列内のインデックス番号で試合を参照している。
+  let msArray = [];
+  pages.forEach(pg=>{ if(pg.ms && pg.ms.length) msArray = msArray.concat(pg.ms); });
+  const srAll = [];
+  pages.forEach(pg=> (pg.sr||[]).forEach(s=> srAll.push(s)));
+
+  msArray.forEach(m=>{
     if(!byId[m.id]){
       byId[m.id] = {
         matchId: m.id, nameA: m.a, nameB: m.b, mode: m.md,
@@ -13478,14 +13508,16 @@ function applyImportedPages(pages){
       };
     }
   });
-  srAll.forEach(([mid, setNumber, a, b])=>{
-    const m = byId[mid]; if(!m) return;
+  srAll.forEach(([matchIndex, setNumber, a, b])=>{
+    const meta = msArray[matchIndex]; if(!meta) return;
+    const m = byId[meta.id]; if(!m) return;
     m.sets = m.sets || [];
     m.sets[setNumber-1] = {a, b};
   });
   pages.forEach(pg=>{
-    (pg.pts||[]).forEach(([mid, ts, sN, gN, pN, side, server, scoreA, scoreB])=>{
-      const m = byId[mid]; if(!m) return;
+    (pg.pts||[]).forEach(([matchIndex, ts, sN, gN, pN, side, server, scoreA, scoreB])=>{
+      const meta = msArray[matchIndex]; if(!meta) return;
+      const m = byId[meta.id]; if(!m) return;
       m.pointLog = m.pointLog || [];
       // 重複防止: タイムスタンプは同一ミリ秒に複数ポイントが記録され得るため、
       // セット番号・ゲーム番号・ポイント番号の組み合わせで一意性を判定する
