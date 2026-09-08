@@ -13377,12 +13377,43 @@ function stopQrAutoAdvance(){
   if(qrAutoTimer){ clearInterval(qrAutoTimer); qrAutoTimer=null; }
 }
 
+/* 画面消灯対策: QR表示中はWake Lockで画面が消えないようにする。
+   消灯している間もタイマー自体は進む(またはブラウザ側で間引かれて後でまとめて進む)ため、
+   消灯すると表示上いくつかページを見逃した(飛んだ)ように見えてしまう。 */
+let wakeLock = null;
+let wantWakeLock = false;
+
+async function acquireWakeLock(){
+  wantWakeLock = true;
+  try{
+    if("wakeLock" in navigator){
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  }catch(e){ /* 対応していない機種もあるので失敗しても無視 */ }
+}
+function releaseWakeLock(){
+  wantWakeLock = false;
+  if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; }
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(!wantWakeLock) return;
+  if(document.visibilityState==="visible"){
+    // Wake Lockは画面が隠れると自動解除されるため再取得。タイマーも現在のページから再開する(見逃し防止)。
+    acquireWakeLock();
+    startQrAutoAdvance();
+  } else {
+    // 非表示の間は自動送りタイマーも止めて、裏でページが進んでしまわないようにする
+    stopQrAutoAdvance();
+  }
+});
+
 $("qrExportBtn").addEventListener("click", ()=>{
   const built = buildQrPages();
   qrPages = built.pages; qrMaxTs = built.maxTs; qrPageIndex = 0;
   showScreen("qrScreen");
   renderQrPage();
   startQrAutoAdvance();
+  acquireWakeLock();
 });
 $("qrPrevBtn").addEventListener("click", ()=>{
   qrGoToPage(-1);
@@ -13394,6 +13425,7 @@ $("qrNextBtn").addEventListener("click", ()=>{
 });
 $("qrDoneBtn").addEventListener("click", ()=>{
   stopQrAutoAdvance();
+  releaseWakeLock();
   if(qrPages.length>0) saveQrCheckpoint(qrMaxTs);
   toast("送信済みにしました。次回はここからの続きになります");
   showScreen("historyScreen");
@@ -13405,6 +13437,7 @@ $("qrUndoCheckpointBtn").addEventListener("click", ()=>{
 });
 $("qrBackBtn").addEventListener("click", ()=>{
   stopQrAutoAdvance();
+  releaseWakeLock();
   showScreen("historyScreen");
   renderHistoryList();
 });
