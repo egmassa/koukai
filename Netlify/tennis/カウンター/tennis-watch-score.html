@@ -153,6 +153,7 @@
   #importScreen{overflow-y:auto;}
   #importScreen h2{font-size:14px; color:var(--dim); margin:0 0 8px;}
   #importStatus{font-size:12px; color:var(--dim); margin:8px 0; line-height:1.6;}
+  .import-page-list{font-size:11px; color:var(--teal); margin:4px 0; line-height:1.5;}
   .import-file-btn{display:inline-block; margin-top:8px; padding:10px 20px; border-radius:18px;
     border:1.5px solid var(--teal); background:rgba(21,156,134,0.15); color:var(--teal);
     font-size:13px; font-weight:700;}
@@ -297,10 +298,11 @@
 
   <section id="importScreen" class="screen">
     <h2>QRから取り込む</h2>
-    <div id="importStatus">watchで表示したQRを順番に撮影してください</div>
+    <div id="importStatus">watchで表示したQRを撮影(複数枚まとめてもOK)してから選んでください</div>
+    <div id="importPageList" class="import-page-list"></div>
     <label class="import-file-btn">
-      写真を選ぶ
-      <input type="file" id="importFileInput" accept="image/*" capture="environment" style="display:none">
+      写真を選ぶ(複数選択可)
+      <input type="file" id="importFileInput" accept="image/*" multiple style="display:none">
     </label>
     <button id="importMergeBtn">取り込む</button>
     <button id="importBackBtn">戻る</button>
@@ -13386,49 +13388,74 @@ let importTotalPages = 0;
 
 $("qrImportBtn").addEventListener("click", ()=>{
   importPages = {}; importTotalPages = 0;
-  $("importStatus").textContent = "watchで表示したQRを順番に撮影してください";
+  $("importStatus").textContent = "watchで表示したQRを撮影(複数枚まとめてもOK)してから選んでください";
+  $("importPageList").textContent = "";
   $("importMergeBtn").style.display = "none";
   showScreen("importScreen");
 });
 $("importBackBtn").addEventListener("click", ()=> { showScreen("historyScreen"); renderHistoryList(); });
 
-function decodeImageFileToQr(file, cb){
-  const img = new Image();
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    img.onload = ()=>{
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width; canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const result = jsQR(imageData.data, canvas.width, canvas.height);
-      cb(result ? result.data : null);
+function decodeImageFileToQr(file){
+  return new Promise((resolve)=>{
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      img.onload = ()=>{
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width; canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(imageData.data, canvas.width, canvas.height);
+        resolve(result ? result.data : null);
+      };
+      img.onerror = ()=> resolve(null);
+      img.src = e.target.result;
     };
-    img.onerror = ()=> cb(null);
-    img.src = e.target.result;
-  };
-  reader.onerror = ()=> cb(null);
-  reader.readAsDataURL(file);
+    reader.onerror = ()=> resolve(null);
+    reader.readAsDataURL(file);
+  });
 }
 
-$("importFileInput").addEventListener("change", (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  decodeImageFileToQr(file, (text)=>{
-    e.target.value = ""; // 同じファイルを連続選択できるようにリセット
-    if(!text){ toast("QRを認識できませんでした"); return; }
+function renderImportPageList(){
+  const collectedNums = Object.keys(importPages).map(Number).sort((a,b)=>a-b);
+  $("importPageList").textContent = collectedNums.length
+    ? `読み取り済みページ: ${collectedNums.join(", ")}` + (importTotalPages ? ` (全${importTotalPages}ページ中)` : "")
+    : "";
+}
+
+$("importFileInput").addEventListener("change", async (e)=>{
+  const files = Array.from(e.target.files || []);
+  if(files.length===0) return;
+  $("importStatus").textContent = `${files.length}枚を読み取り中…`;
+
+  let okCount = 0, failCount = 0, dupCount = 0;
+  for(const file of files){
+    const text = await decodeImageFileToQr(file);
+    if(!text){ failCount++; continue; }
     let data;
-    try{ data = JSON.parse(text); }catch(err){ toast("QRの内容が読み取れませんでした"); return; }
-    if(!data || typeof data.p!=="number" || typeof data.n!=="number"){
-      toast("このQRは対応していない形式です"); return;
+    try{ data = JSON.parse(text); }catch(err){ failCount++; continue; }
+    if(!data || typeof data.p!=="number" || typeof data.n!=="number"){ failCount++; continue; }
+    if(importTotalPages && data.n !== importTotalPages){
+      // 別バッチのQRが混ざっている可能性(前回の書き出しの残りなど)
+      toast(`ページ構成が異なるQRが含まれていました(全${data.n}枚 vs 全${importTotalPages}枚)`);
     }
+    if(importPages[data.p]) dupCount++;
     importTotalPages = data.n;
     importPages[data.p] = data;
-    const collected = Object.keys(importPages).length;
-    $("importStatus").textContent = `${collected} / ${data.n} ページ読み取り済み`;
-    if(collected >= data.n) $("importMergeBtn").style.display = "inline-block";
-  });
+    okCount++;
+  }
+
+  e.target.value = ""; // 同じファイルを連続選択できるようにリセット
+
+  const collected = Object.keys(importPages).length;
+  let msg = `${collected} / ${importTotalPages || "?"} ページ読み取り済み`;
+  if(failCount) msg += `(認識できなかった写真: ${failCount}枚)`;
+  if(dupCount) msg += `(同じページを再読み込み: ${dupCount}枚)`;
+  $("importStatus").textContent = msg;
+  renderImportPageList();
+
+  if(importTotalPages && collected >= importTotalPages) $("importMergeBtn").style.display = "inline-block";
 });
 
 function applyImportedPages(pages){
