@@ -10199,8 +10199,16 @@ function handleDecodedText(text){
   lastDecodedText = text;
 
   let data;
-  try{ data = JSON.parse(text); }catch(e){ return; } // QR以外の模様を誤検知した場合は無視
-  if(!data || typeof data.p !== "number" || typeof data.n !== "number") return;
+  try{ data = JSON.parse(text); }
+  catch(e){
+    // QRとしては読めたがJSONとして壊れている場合、内容が分かるよう表示しておく
+    $("debugInfo").textContent = `QRらしき模様を検出しましたが内容が読めません: ${text.slice(0,40)}`;
+    return;
+  }
+  if(!data || typeof data.p !== "number" || typeof data.n !== "number"){
+    $("debugInfo").textContent = `QRを検出しましたが対応形式ではありません`;
+    return;
+  }
 
   if(totalPages && data.n !== totalPages){
     toast(`ページ構成が違うQRです(全${data.n}枚)。前回の続きなら「最初からやり直す」を押してください`);
@@ -10218,9 +10226,34 @@ function handleDecodedText(text){
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
 const SCAN_INTERVAL_MS = 200; // 毎フレーム(60回/秒)は重いので間引く
-const SCAN_MAX_DIM = 700;     // 高解像度カメラだと処理が重いので縮小してからデコードする
+const SCAN_MAX_DIM = 900;     // 高解像度カメラだと処理が重いので縮小してからデコードする
 let scanTimer = null;
 let scanCount = 0;
+let detectCount = 0;
+
+// object-fit:coverでプレビューに実際に表示されている範囲(切り取り後)を計算する。
+// これをしないと、画面には大きく見えるQRも、解析対象の画像内では
+// 実際より小さく(周囲の映らない部分まで含めた全体)扱われてしまい、細部が潰れて読めなくなる。
+function getVisibleCropRect(video, containerEl){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const cw = containerEl.clientWidth, ch = containerEl.clientHeight;
+  const videoRatio = vw / vh, containerRatio = cw / ch;
+  let sx, sy, sw, sh;
+  if(videoRatio > containerRatio){
+    // 映像の方が横長 → 左右が切り取られる
+    sh = vh;
+    sw = vh * containerRatio;
+    sx = (vw - sw) / 2;
+    sy = 0;
+  } else {
+    // 映像の方が縦長(または同じ) → 上下が切り取られる
+    sw = vw;
+    sh = vw / containerRatio;
+    sx = 0;
+    sy = (vh - sh) / 2;
+  }
+  return { sx, sy, sw, sh };
+}
 
 function scanOnce(){
   const video = $("video");
@@ -10228,12 +10261,14 @@ function scanOnce(){
     $("debugInfo").textContent = "映像待ち…";
     return;
   }
-  // 大きすぎる映像はデコードが重くなるので、長辺がSCAN_MAX_DIMになるよう縮小する
-  const scale = Math.min(1, SCAN_MAX_DIM / Math.max(video.videoWidth, video.videoHeight));
-  const w = Math.max(1, Math.round(video.videoWidth * scale));
-  const h = Math.max(1, Math.round(video.videoHeight * scale));
+
+  const { sx, sy, sw, sh } = getVisibleCropRect(video, $("camWrap"));
+  const scale = Math.min(1, SCAN_MAX_DIM / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
   canvas.width = w; canvas.height = h;
-  ctx.drawImage(video, 0, 0, w, h);
+  // プレビューに実際に見えている範囲だけを切り出して描画する(画面表示と解析対象を一致させる)
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
 
   let imageData;
   try{ imageData = ctx.getImageData(0, 0, w, h); }
@@ -10242,7 +10277,8 @@ function scanOnce(){
   // 反転(明暗が逆)のQRも検出できるよう、デフォルトの両対応モードで試す
   const result = jsQR(imageData.data, w, h);
   scanCount++;
-  $("debugInfo").textContent = `スキャン中(${scanCount}回・${w}x${h})`;
+  if(result && result.data) detectCount++;
+  $("debugInfo").textContent = `スキャン${scanCount}回・QR検出${detectCount}回(解析画像${w}x${h})`;
 
   if(result && result.data){
     handleDecodedText(result.data);
