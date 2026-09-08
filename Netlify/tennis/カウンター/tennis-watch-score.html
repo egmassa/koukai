@@ -144,6 +144,8 @@
     background:var(--panel); color:var(--text); font-size:12px;}
   #qrDoneBtn{margin-top:14px; padding:9px 20px; border-radius:18px; border:none;
     background:var(--teal); color:#04231d; font-weight:700; font-size:13px;}
+  #qrUndoCheckpointBtn{margin-top:8px; padding:6px 14px; border-radius:14px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:11px;}
   #qrBackBtn{margin-top:8px; padding:6px 14px; border-radius:14px; border:1px solid var(--line);
     background:transparent; color:var(--dim); font-size:11px;}
 
@@ -289,6 +291,7 @@
       <button id="qrNextBtn">次へ ▶</button>
     </div>
     <button id="qrDoneBtn">読み取り完了(送信済みにする)</button>
+    <button id="qrUndoCheckpointBtn">↩ さっきの完了を取り消す</button>
     <button id="qrBackBtn">戻る</button>
   </section>
 
@@ -13268,6 +13271,7 @@ function renderHistoryList(){
 
 /* ====================== QR書き出し(watch → 他端末への差分エクスポート) ====================== */
 const QR_CHECKPOINT_KEY = "tennis-watch-qr-checkpoint";
+const QR_CHECKPOINT_PREV_KEY = "tennis-watch-qr-checkpoint-prev"; // 誤操作からの復元用(1段階だけ)
 const QR_PAGE_BYTE_BUDGET = 900; // 1ページあたりの目安バイト数(カメラで読み取りやすい密度に抑える)
 
 function loadQrCheckpoint(){
@@ -13275,7 +13279,18 @@ function loadQrCheckpoint(){
   catch(e){ return 0; }
 }
 function saveQrCheckpoint(ts){
-  try{ localStorage.setItem(QR_CHECKPOINT_KEY, JSON.stringify({ts})); }catch(e){}
+  try{
+    const prev = loadQrCheckpoint();
+    localStorage.setItem(QR_CHECKPOINT_PREV_KEY, JSON.stringify({ts: prev}));
+    localStorage.setItem(QR_CHECKPOINT_KEY, JSON.stringify({ts}));
+  }catch(e){}
+}
+function undoQrCheckpoint(){
+  try{
+    const prev = JSON.parse(localStorage.getItem(QR_CHECKPOINT_PREV_KEY) || '{"ts":0}').ts || 0;
+    localStorage.setItem(QR_CHECKPOINT_KEY, JSON.stringify({ts: prev}));
+    return true;
+  }catch(e){ return false; }
 }
 
 // チェックポイント以降の新しいポイントだけを集めて、QRページに分割する
@@ -13358,6 +13373,10 @@ $("qrDoneBtn").addEventListener("click", ()=>{
   toast("送信済みにしました。次回はここからの続きになります");
   showScreen("historyScreen");
   renderHistoryList();
+});
+$("qrUndoCheckpointBtn").addEventListener("click", ()=>{
+  undoQrCheckpoint();
+  toast("直前の「読み取り完了」を取り消しました");
 });
 $("qrBackBtn").addEventListener("click", ()=> { showScreen("historyScreen"); renderHistoryList(); });
 
