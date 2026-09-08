@@ -129,6 +129,8 @@
 // 判定しながら1点ずつ再生する。
 // ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
+// ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
+// 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 function replayGame(pointsInOrder, server, deuceMode){
   let a = 0, b = 0;
   let deuceCount = 0;
@@ -254,6 +256,69 @@ function computeMatchStats(match){
     deuceGamesTotal,
 
     gamesServedA, gamesServedB, bpFacedA, bpFacedB
+  };
+}
+
+
+
+// ダブルスの「自分 vs パートナー」分析(match.settings.pairFirstServer / selfReturnSide が
+// 設定されている試合のみ計算できる。設定なしの過去の試合はhasPairData:falseになる)
+function computePairStats(match){
+  const settings = match.settings || {};
+  if(match.mode !== "doubles" || !settings.pairFirstServer || !settings.selfReturnSide) {
+    return { hasPairData: false };
+  }
+  const games = {};
+  (match.pointLog||[]).forEach(p=>{
+    const key = p.setNumber+"-"+p.gameNumber;
+    (games[key] = games[key] || []).push(p);
+  });
+  const gameKeys = Object.keys(games).sort((x,y)=>{
+    const [xs,xg]=x.split("-").map(Number), [ys,yg]=y.split("-").map(Number);
+    return xs-ys || xg-yg;
+  });
+
+  let selfTurn = (settings.pairFirstServer === "self");
+  let selfServePtsTotal=0, selfServePtsWon=0, partnerServePtsTotal=0, partnerServePtsWon=0;
+  let selfServeGames=0, selfServeGamesWon=0, partnerServeGames=0, partnerServeGamesWon=0;
+  let selfReturnPtsTotal=0, selfReturnPtsWon=0, partnerReturnPtsTotal=0, partnerReturnPtsWon=0;
+
+  gameKeys.forEach(key=>{
+    const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
+    const server = pts[0].server;
+    const winner = pts[pts.length-1].side;
+
+    if(server === "a"){
+      // 自チームのサービスゲーム: 自分/パートナーで交互に割り当て(1ゲームは同じ人が最後まで担当)
+      const isSelf = selfTurn;
+      pts.forEach(p=>{
+        if(isSelf){ selfServePtsTotal++; if(p.side==="a") selfServePtsWon++; }
+        else { partnerServePtsTotal++; if(p.side==="a") partnerServePtsWon++; }
+      });
+      if(isSelf){ selfServeGames++; if(winner==="a") selfServeGamesWon++; }
+      else { partnerServeGames++; if(winner==="a") partnerServeGamesWon++; }
+      selfTurn = !selfTurn;
+    } else {
+      // 相手のサービスゲーム: リターンはコートサイド(デュース/アド)で自分/パートナーに分ける
+      pts.forEach((p, idx)=>{
+        const courtSide = (idx % 2 === 0) ? "deuce" : "ad";
+        const isSelfSide = (courtSide === settings.selfReturnSide);
+        if(isSelfSide){ selfReturnPtsTotal++; if(p.side==="a") selfReturnPtsWon++; }
+        else { partnerReturnPtsTotal++; if(p.side==="a") partnerReturnPtsWon++; }
+      });
+    }
+  });
+
+  const pct = (n,d)=> d>0 ? Math.round((n/d)*1000)/10 : null;
+  return {
+    hasPairData: true,
+    selfServeGames, partnerServeGames,
+    selfServeWinPct: pct(selfServePtsWon, selfServePtsTotal),
+    partnerServeWinPct: pct(partnerServePtsWon, partnerServePtsTotal),
+    selfHoldPct: pct(selfServeGamesWon, selfServeGames),
+    partnerHoldPct: pct(partnerServeGamesWon, partnerServeGames),
+    selfReturnWinPct: pct(selfReturnPtsWon, selfReturnPtsTotal),
+    partnerReturnWinPct: pct(partnerReturnPtsWon, partnerReturnPtsTotal)
   };
 }
 </script>
@@ -394,6 +459,7 @@ const GLOSSARY = [
   ["デュース側/アド側", "サーブ・リターンした時にいたコートの左右。ポイントの通し番号が偶数本目ならデュース側、奇数本目ならアド側として自動判定しています(利き手やフォア/バックまでは今のデータからは分からないため未対応です)。"],
   ["デュースゲーム勝率", "ゲームが40-40(デュース)以降までもつれた「競った場面」に限定した勝率。地力の差が出やすい通常のゲームと分けて、競った場面での強さを見る指標です。"],
   ["対戦相手別成績", "対戦相手(またはその相手チーム名)ごとに、自分側の勝率・各種スタッツをまとめたもの。同じ相手と複数回対戦していれば自動で合算されます。"],
+  ["自分 vs パートナー", "ダブルスの試合設定で「自チームの最初のサーブは自分/パートナーどちらか」「自分のリターン側」を設定した試合でのみ表示されます。設定した試合からは、自チームのサービスゲームを自分/パートナーで交互に割り当てて集計し、リターンはコートサイド(デュース側/アド側)で自分/パートナーを判定します。設定していない過去の試合には出ません。"],
 ];
 
 function renderGlossary(){
@@ -550,8 +616,22 @@ function showMatchDetail(matchId){
   const m = allMatches.find(x=>x.matchId===matchId);
   if(!m) return;
   const st = computeMatchStats(m);
+  const pair = computePairStats(m);
   const panel = $("detailPanel");
   panel.style.display = "block";
+
+  const pairHtml = pair.hasPairData ? `
+    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(${m.nameA}内の内訳)</div>
+    <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">サービスキープ率(自分・${pair.selfServeGames}ゲーム)</div><div class="val a">${pair.selfHoldPct??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サービスキープ率(パートナー・${pair.partnerServeGames}ゲーム)</div><div class="val a">${pair.partnerHoldPct??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率(自分)</div><div class="val a">${pair.selfServeWinPct??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率(パートナー)</div><div class="val a">${pair.partnerServeWinPct??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率(自分)</div><div class="val a">${pair.selfReturnWinPct??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率(パートナー)</div><div class="val a">${pair.partnerReturnWinPct??"―"}%</div></div>
+    </div>
+  ` : "";
+
   panel.innerHTML = `
     <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
 
@@ -563,6 +643,8 @@ function showMatchDetail(matchId){
       <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameA})</div><div class="val a">${st.returnWinPctA??"―"}%</div></div>
       <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameB})</div><div class="val b">${st.returnWinPctB??"―"}%</div></div>
     </div>
+
+    ${pairHtml}
 
     <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
     <div class="stat-grid">
