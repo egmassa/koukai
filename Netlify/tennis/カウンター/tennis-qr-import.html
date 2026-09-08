@@ -25,6 +25,7 @@
 
   #status{padding:10px 12px 2px; font-size:13px; font-weight:700;}
   #pageList{padding:0 12px 6px; font-size:11px; color:var(--teal); min-height:14px;}
+  .debug-info{padding:0 12px; font-size:10px; color:var(--dim); opacity:0.8;}
 
   .btn-row{display:flex; gap:8px; padding:10px 12px 16px;}
   .btn-row button{flex:1; padding:11px 4px; border-radius:14px; border:1px solid var(--line);
@@ -49,6 +50,7 @@
     <div id="camHint">watchのQRをこの枠に映してください(自動で読み取ります)</div>
   </div>
   <div id="status">カメラを起動しています…</div>
+  <div id="debugInfo" class="debug-info"></div>
   <div id="pageList"></div>
   <div class="btn-row">
     <button id="resetBtn">最初からやり直す</button>
@@ -10176,7 +10178,6 @@ let collectedPages = {};   // { pageNumber: pageObject }
 let totalPages = 0;
 let lastDecodedText = null;
 let stream = null;
-let rafId = null;
 
 function updateStatusUI(){
   const nums = Object.keys(collectedPages).map(Number).sort((a,b)=>a-b);
@@ -10216,32 +10217,55 @@ function handleDecodedText(text){
 
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const SCAN_INTERVAL_MS = 200; // 毎フレーム(60回/秒)は重いので間引く
+const SCAN_MAX_DIM = 700;     // 高解像度カメラだと処理が重いので縮小してからデコードする
+let scanTimer = null;
+let scanCount = 0;
 
-function scanFrame(){
+function scanOnce(){
   const video = $("video");
-  if(video.readyState === video.HAVE_ENOUGH_DATA){
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const result = jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: "dontInvert" });
-    if(result && result.data) handleDecodedText(result.data);
-    else lastDecodedText = null; // 枠内にQRが無くなったらリセットして、同じコードの再検出を許可する
+  if(video.readyState < video.HAVE_ENOUGH_DATA || !video.videoWidth){
+    $("debugInfo").textContent = "映像待ち…";
+    return;
   }
-  rafId = requestAnimationFrame(scanFrame);
+  // 大きすぎる映像はデコードが重くなるので、長辺がSCAN_MAX_DIMになるよう縮小する
+  const scale = Math.min(1, SCAN_MAX_DIM / Math.max(video.videoWidth, video.videoHeight));
+  const w = Math.max(1, Math.round(video.videoWidth * scale));
+  const h = Math.max(1, Math.round(video.videoHeight * scale));
+  canvas.width = w; canvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
+
+  let imageData;
+  try{ imageData = ctx.getImageData(0, 0, w, h); }
+  catch(e){ $("debugInfo").textContent = "映像取得エラー: " + e.message; return; }
+
+  // 反転(明暗が逆)のQRも検出できるよう、デフォルトの両対応モードで試す
+  const result = jsQR(imageData.data, w, h);
+  scanCount++;
+  $("debugInfo").textContent = `スキャン中(${scanCount}回・${w}x${h})`;
+
+  if(result && result.data){
+    handleDecodedText(result.data);
+  } else {
+    lastDecodedText = null; // 枠内にQRが無くなったらリセットして、同じコードの再検出を許可する
+  }
 }
 
 async function startCamera(){
   try{
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
       audio: false
     });
     const video = $("video");
     video.srcObject = stream;
     await video.play();
     updateStatusUI();
-    scanFrame();
+    scanTimer = setInterval(scanOnce, SCAN_INTERVAL_MS);
   }catch(e){
     $("camWrap").style.display = "none";
     $("status").textContent = "";
