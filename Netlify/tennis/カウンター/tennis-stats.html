@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>テニススタッツ分析</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root{
+    --bg:#0a1210; --panel:#12201a; --panel2:#182821; --line:#25382f; --text:#f2f5f0;
+    --dim:#8fa89a; --teal:#159c86; --orange:#f0793a; --danger:#c96a4e;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Roboto","Segoe UI",system-ui,sans-serif;}
+  #app{max-width:1000px; margin:0 auto; padding:20px 16px 60px;}
+
+  header{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;
+    margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line);}
+  header h1{font-size:20px; margin:0; font-weight:700;}
+  header .sub{font-size:12px; color:var(--dim);}
+
+  .toolbar{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px;}
+  .toolbar button, .toolbar label{
+    padding:8px 14px; border-radius:10px; border:1px solid var(--line); background:var(--panel);
+    color:var(--text); font-size:13px; cursor:pointer;}
+  .toolbar button.primary{background:var(--teal); color:#04231d; border:none; font-weight:700;}
+  .toolbar input[type=file]{display:none;}
+  #loadStatus{font-size:12px; color:var(--dim); align-self:center;}
+
+  section{margin-bottom:34px;}
+  section > h2{font-size:15px; font-weight:700; margin:0 0 12px; color:var(--text);}
+  section > .desc{font-size:12px; color:var(--dim); margin:-8px 0 14px;}
+
+  .chart-box{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:8px;}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th, td{padding:8px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap;}
+  th:first-child, td:first-child{text-align:left;}
+  th{color:var(--dim); font-weight:600; font-size:11px; cursor:pointer; user-select:none;}
+  th.sorted{color:var(--teal);}
+  th .arrow{font-size:9px; margin-left:2px; opacity:0.7;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:var(--panel2);}
+  td.name{font-weight:600;}
+  .pct-cell{position:relative;}
+  .pct-bar{position:absolute; left:0; top:0; bottom:0; background:rgba(21,156,134,0.18); z-index:0;}
+  .pct-val{position:relative; z-index:1;}
+
+  .table-wrap{overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px;}
+  .table-wrap table{min-width:640px;}
+
+  #detailPanel{display:none; margin-top:16px; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:16px;}
+  #detailPanel h3{margin:0 0 10px; font-size:14px;}
+  #detailPanel .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:14px;}
+  .stat-chip{background:var(--panel2); border-radius:10px; padding:8px 10px;}
+  .stat-chip .lbl{font-size:10px; color:var(--dim);}
+  .stat-chip .val{font-size:18px; font-weight:700;}
+  .stat-chip .val.a{color:var(--teal);} .stat-chip .val.b{color:var(--orange);}
+  #detailClose{margin-top:8px; padding:6px 14px; border-radius:10px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:12px; cursor:pointer;}
+
+  .empty{font-size:13px; color:var(--dim); padding:24px; text-align:center;
+    background:var(--panel); border:1px dashed var(--line); border-radius:12px;}
+
+  .glossary{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:4px 16px;}
+  .glossary dt{font-weight:700; font-size:13px; margin-top:12px;}
+  .glossary dd{font-size:12px; color:var(--dim); margin:2px 0 0; line-height:1.6;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>テニススタッツ分析</h1>
+    <div class="sub">Google Driveの試合データを時系列・スタッツで見る</div>
+  </header>
+
+  <div class="toolbar">
+    <button id="driveLoadBtn" class="primary">Driveから読み込む</button>
+    <label>ファイルから読み込む<input type="file" id="fileInput" accept="application/json"></label>
+    <span id="loadStatus"></span>
+  </div>
+
+  <div id="content" style="display:none;">
+    <section>
+      <h2>自分の通算成績</h2>
+      <div class="desc">チーム名(ペア)にかかわらず、記録した全試合をまとめた「自分側」の成績です</div>
+      <div class="stat-grid" id="overallSummary"></div>
+    </section>
+
+    <section>
+      <h2>勝率・サーブ指標の推移</h2>
+      <div class="desc">試合ごとの累積勝率と、サービスキープ率の推移(チーム名ごと)</div>
+      <div class="chart-box"><div id="trendChart" style="height:340px;"></div></div>
+    </section>
+
+    <section>
+      <h2>チーム(ペア)別スタッツ</h2>
+      <div class="desc">watchで入力した自分側のチーム名ごとの成績。列の見出しをタップすると並び替えられます</div>
+      <div class="table-wrap"><table id="leaderboardTable"></table></div>
+    </section>
+
+    <section>
+      <h2>対戦相手別成績</h2>
+      <div class="desc">誰(どのペア)に対して勝率・キープ率が良い/悪いか(自分側の成績を相手ごとに集計)</div>
+      <div class="table-wrap"><table id="opponentTable"></table></div>
+    </section>
+
+    <section>
+      <h2>試合一覧</h2>
+      <div class="desc">日付順。行をタップすると詳細が見られます</div>
+      <div class="table-wrap"><table id="matchTable"></table></div>
+      <div id="detailPanel"></div>
+    </section>
+
+    <section>
+      <h2>指標の説明</h2>
+      <div class="glossary" id="glossary"></div>
+    </section>
+  </div>
+
+  <div id="emptyState" class="empty">まだデータが読み込まれていません。上のボタンからDriveまたはファイルを読み込んでください。</div>
+</div>
+
+<script>
+// ゲーム内のポイント勝者列(['a','b','a',...])を、そのゲームのルール(deuceMode)で
+// 「サーブ側/レシーブ側から見て今のポイントがゲームポイントか、ブレークポイントか」を
+// 判定しながら1点ずつ再生する。
+// ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
+// 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
+function replayGame(pointsInOrder, server, deuceMode){
+  let a = 0, b = 0;
+  let deuceCount = 0;
+  let reachedDeuce = false;
+  const receiver = server === "a" ? "b" : "a";
+  const steps = [];
+
+  pointsInOrder.forEach((pt, idx)=>{
+    const willFinishIfServerWins = wouldFinishGame(server==="a"?a+1:a, server==="b"?b+1:b, deuceMode, deuceCount);
+    const willFinishIfReceiverWins = wouldFinishGame(receiver==="a"?a+1:a, receiver==="b"?b+1:b, deuceMode, deuceCount);
+    const courtSide = (idx % 2 === 0) ? "deuce" : "ad"; // その回の「開始前の合計本数」が偶数ならデュースサイド
+
+    steps.push({
+      beforeA: a, beforeB: b,
+      isGamePointForServer: willFinishIfServerWins,
+      isBreakPointForReceiver: willFinishIfReceiverWins,
+      courtSide,
+      winner: pt.side
+    });
+
+    if(pt.side==="a") a++; else b++;
+    if(a===b && a>=3){ deuceCount++; reachedDeuce = true; }
+  });
+  return { steps, reachedDeuce, winner: pointsInOrder.length ? pointsInOrder[pointsInOrder.length-1].side : null };
+}
+
+function wouldFinishGame(aAfter, bAfter, deuceMode, deuceCountBefore){
+  const a = aAfter, b = bAfter;
+  if(a<4 && b<4) return false;
+  if(deuceMode==="noAd"){
+    return Math.abs(a-b) >= 1;
+  } else if(deuceMode==="oneDeuce"){
+    if(deuceCountBefore >= 2) return a!==b;
+    return Math.abs(a-b) >= 2;
+  } else {
+    return Math.abs(a-b) >= 2;
+  }
+}
+
+// 試合全体のポイントログから各種スタッツを計算する。
+// 新しい指標を追加したいときは、この関数に集計処理を足すだけでよい(呼び出し側は変更不要)。
+function computeMatchStats(match){
+  const games = {};
+  (match.pointLog||[]).forEach(p=>{
+    const key = p.setNumber+"-"+p.gameNumber;
+    (games[key] = games[key] || []).push(p);
+  });
+  const deuceMode = (match.settings && match.settings.deuceMode) || "ad";
+
+  let serveTotalA=0, serveWonA=0, serveTotalB=0, serveWonB=0;
+  let gamesServedA=0, gamesHeldA=0, gamesServedB=0, gamesHeldB=0;
+  let bpFacedA=0, bpSavedA=0, bpFacedB=0, bpSavedB=0;
+  let bpChanceA=0, bpConvertedA=0, bpChanceB=0, bpConvertedB=0; // リターン側から見た「チャンスと変換」
+  // コートサイド別
+  let serveDeuceTotalA=0, serveDeuceWonA=0, serveAdTotalA=0, serveAdWonA=0;
+  let serveDeuceTotalB=0, serveDeuceWonB=0, serveAdTotalB=0, serveAdWonB=0;
+  let retDeuceTotalA=0, retDeuceWonA=0, retAdTotalA=0, retAdWonA=0;
+  let retDeuceTotalB=0, retDeuceWonB=0, retAdTotalB=0, retAdWonB=0;
+  // デュースまでもつれたゲームでの勝率(競った場面での強さ)
+  let deuceGamesA=0, deuceGamesWonA=0, deuceGamesB=0, deuceGamesWonB=0; // どちらのサーブでも合算、勝者側でカウント
+  let deuceGamesTotal=0;
+
+  Object.keys(games).forEach(key=>{
+    const pts = games[key].slice().sort((x,y)=>(x.pointInGame||0)-(y.pointInGame||0));
+    const server = pts[0].server;
+    const receiver = server==="a" ? "b" : "a";
+    const { steps, reachedDeuce, winner } = replayGame(pts.map(p=>({side:p.side})), server, deuceMode);
+
+    pts.forEach((p, idx)=>{
+      const courtSide = steps[idx].courtSide;
+      if(server==="a"){
+        serveTotalA++; if(p.side==="a") serveWonA++;
+        if(courtSide==="deuce"){ serveDeuceTotalA++; if(p.side==="a") serveDeuceWonA++; retDeuceTotalB++; if(p.side==="b") retDeuceWonB++; }
+        else { serveAdTotalA++; if(p.side==="a") serveAdWonA++; retAdTotalB++; if(p.side==="b") retAdWonB++; }
+      } else {
+        serveTotalB++; if(p.side==="b") serveWonB++;
+        if(courtSide==="deuce"){ serveDeuceTotalB++; if(p.side==="b") serveDeuceWonB++; retDeuceTotalA++; if(p.side==="a") retDeuceWonA++; }
+        else { serveAdTotalB++; if(p.side==="b") serveAdWonB++; retAdTotalA++; if(p.side==="a") retAdWonA++; }
+      }
+    });
+
+    if(server==="a"){ gamesServedA++; if(winner==="a") gamesHeldA++; }
+    else { gamesServedB++; if(winner==="b") gamesHeldB++; }
+
+    steps.forEach(s=>{
+      if(s.isBreakPointForReceiver){
+        if(receiver==="b"){
+          bpFacedA++; if(s.winner==="a") bpSavedA++;
+          bpChanceB++; if(s.winner==="b") bpConvertedB++;
+        } else {
+          bpFacedB++; if(s.winner==="b") bpSavedB++;
+          bpChanceA++; if(s.winner==="a") bpConvertedA++;
+        }
+      }
+    });
+
+    if(reachedDeuce){
+      deuceGamesTotal++;
+      if(winner==="a"){ deuceGamesA++; deuceGamesWonA++; deuceGamesB++; }
+      else { deuceGamesA++; deuceGamesB++; deuceGamesWonB++; }
+    }
+  });
+
+  const pct = (n,d)=> d>0 ? Math.round((n/d)*1000)/10 : null;
+
+  return {
+    matchId: match.matchId, nameA: match.nameA, nameB: match.nameB, updatedAt: match.updatedAt,
+
+    serveWinPctA: pct(serveWonA, serveTotalA), serveWinPctB: pct(serveWonB, serveTotalB),
+    returnWinPctA: pct(serveTotalB-serveWonB, serveTotalB), returnWinPctB: pct(serveTotalA-serveWonA, serveTotalA),
+    serviceHoldPctA: pct(gamesHeldA, gamesServedA), serviceHoldPctB: pct(gamesHeldB, gamesServedB),
+
+    breakPointSavePctA: pct(bpSavedA, bpFacedA), breakPointSavePctB: pct(bpSavedB, bpFacedB),
+    breakPointConvertPctA: pct(bpConvertedA, bpChanceA), breakPointConvertPctB: pct(bpConvertedB, bpChanceB),
+    bpChanceA, bpChanceB,
+
+    serveWinPctA_deuce: pct(serveDeuceWonA, serveDeuceTotalA), serveWinPctA_ad: pct(serveAdWonA, serveAdTotalA),
+    serveWinPctB_deuce: pct(serveDeuceWonB, serveDeuceTotalB), serveWinPctB_ad: pct(serveAdWonB, serveAdTotalB),
+    returnWinPctA_deuce: pct(retDeuceWonA, retDeuceTotalA), returnWinPctA_ad: pct(retAdWonA, retAdTotalA),
+    returnWinPctB_deuce: pct(retDeuceWonB, retDeuceTotalB), returnWinPctB_ad: pct(retAdWonB, retAdTotalB),
+
+    deuceGameWinPctA: pct(deuceGamesWonA, deuceGamesA), deuceGameWinPctB: pct(deuceGamesWonB, deuceGamesB),
+    deuceGamesTotal,
+
+    gamesServedA, gamesServedB, bpFacedA, bpFacedB
+  };
+}
+</script>
+<script>
+/* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
+const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DATA_FILENAME = "tennis-watch-score-data.json";
+const DRIVE_FOLDER_ID = "1ARR8xFEX7KL6zaoU3USFAs2rjHj0cuDe";
+
+const $ = id => document.getElementById(id);
+let allMatches = [];
+
+function ensureGis(cb){
+  if(window.google && google.accounts && google.accounts.oauth2){ cb(); return; }
+  const s = document.createElement("script");
+  s.src = "https://accounts.google.com/gsi/client";
+  s.onload = cb; s.onerror = ()=>cb();
+  document.head.appendChild(s);
+}
+let tokenClient = null, accessToken = null;
+function getAccessToken(cb){
+  ensureGis(()=>{
+    if(!(window.google && google.accounts && google.accounts.oauth2)){ cb(null); return; }
+    if(!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID, scope: DRIVE_SCOPE,
+        callback: (resp)=>{ if(resp.error){ cb(null); return; } accessToken = resp.access_token; cb(accessToken); }
+      });
+    }
+    tokenClient.requestAccessToken({prompt: accessToken ? "" : "consent"});
+  });
+}
+async function driveFindFile(name, token){
+  let qStr = `name='${name}' and trashed=false`;
+  if(DRIVE_FOLDER_ID) qStr += ` and '${DRIVE_FOLDER_ID}' in parents`;
+  const q = encodeURIComponent(qStr);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,
+    { headers:{ Authorization:`Bearer ${token}` } });
+  if(!res.ok) throw new Error(`Drive検索エラー ${res.status}`);
+  const data = await res.json();
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+async function driveGetContent(fileId, token){
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers:{ Authorization:`Bearer ${token}` } });
+  if(!res.ok) return null;
+  try{ return await res.json(); }catch(e){ return null; }
+}
+
+$("driveLoadBtn").addEventListener("click", ()=>{
+  $("loadStatus").textContent = "Driveに接続中…";
+  getAccessToken(async (token)=>{
+    if(!token){ $("loadStatus").textContent = "Drive接続に失敗しました"; return; }
+    try{
+      const fileId = await driveFindFile(DATA_FILENAME, token);
+      if(!fileId){ $("loadStatus").textContent = "Drive上にデータファイルが見つかりません"; return; }
+      const data = await driveGetContent(fileId, token);
+      loadMatches((data && data.matches) || []);
+      $("loadStatus").textContent = `Driveから${(data.matches||[]).length}試合を読み込みました`;
+    }catch(e){
+      $("loadStatus").textContent = "読み込みエラー: " + e.message;
+    }
+  });
+});
+
+$("fileInput").addEventListener("change", (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = JSON.parse(ev.target.result);
+      loadMatches((data && data.matches) || []);
+      $("loadStatus").textContent = `ファイルから${(data.matches||[]).length}試合を読み込みました`;
+    }catch(err){ $("loadStatus").textContent = "ファイルの読み込みに失敗しました"; }
+  };
+  reader.readAsText(file);
+});
+
+/* ====================== データ読み込み後の描画 ====================== */
+function loadMatches(matches){
+  allMatches = matches.filter(m => (m.pointLog||[]).length > 0)
+    .sort((a,b)=> new Date(a.updatedAt||0) - new Date(b.updatedAt||0));
+  if(allMatches.length===0){
+    $("emptyState").textContent = "試合データが見つかりませんでした。";
+    $("emptyState").style.display = "block";
+    $("content").style.display = "none";
+    return;
+  }
+  $("emptyState").style.display = "none";
+  $("content").style.display = "block";
+  // グラフ描画(Plotly)が何らかの理由で失敗しても、他のテーブル表示まで巻き込まないようにする
+  try{ renderOverallSummary(); }catch(e){ console.error("通算成績描画エラー:", e); }
+  try{ renderTrendChart(); }catch(e){ console.error("グラフ描画エラー:", e); $("trendChart").textContent = "グラフを表示できませんでした"; }
+  try{ renderLeaderboard(); }catch(e){ console.error("リーダーボード描画エラー:", e); }
+  try{ renderOpponentTable(); }catch(e){ console.error("対戦相手別表描画エラー:", e); }
+  try{ renderMatchTable(); }catch(e){ console.error("試合一覧描画エラー:", e); }
+  try{ renderGlossary(); }catch(e){ console.error("指標説明描画エラー:", e); }
+}
+
+// 全試合をチーム名で分けず1つにまとめた「自分側」の通算成績
+function renderOverallSummary(){
+  let wins=0;
+  let sumServe=0,nServe=0, sumReturn=0,nReturn=0, sumHold=0,nHold=0, sumBpSave=0,nBpSave=0, sumBpConv=0,nBpConv=0;
+  allMatches.forEach(m=>{
+    const setsA=(m.sets||[]).filter(s=>s.a>s.b).length, setsB=(m.sets||[]).filter(s=>s.b>s.a).length;
+    if(setsA>setsB) wins++;
+    const st = computeMatchStats(m);
+    if(st.serveWinPctA!=null){ sumServe+=st.serveWinPctA; nServe++; }
+    if(st.returnWinPctA!=null){ sumReturn+=st.returnWinPctA; nReturn++; }
+    if(st.serviceHoldPctA!=null){ sumHold+=st.serviceHoldPctA; nHold++; }
+    if(st.breakPointSavePctA!=null){ sumBpSave+=st.breakPointSavePctA; nBpSave++; }
+    if(st.breakPointConvertPctA!=null){ sumBpConv+=st.breakPointConvertPctA; nBpConv++; }
+  });
+  const avg = (s,n)=> n>0 ? Math.round((s/n)*10)/10 : null;
+  const winRate = Math.round((wins/allMatches.length)*1000)/10;
+  const items = [
+    ["試合数", allMatches.length + "試合", ""],
+    ["勝率", winRate+"%", "a"],
+    ["サービスキープ率", (avg(sumHold,nHold)??"―")+"%", "a"],
+    ["サーブ勝率", (avg(sumServe,nServe)??"―")+"%", "a"],
+    ["リターン勝率", (avg(sumReturn,nReturn)??"―")+"%", "a"],
+    ["BPセーブ率", (avg(sumBpSave,nBpSave)??"―")+"%", "a"],
+    ["BP変換率", (avg(sumBpConv,nBpConv)??"―")+"%", "a"],
+  ];
+  $("overallSummary").innerHTML = items.map(([lbl,val,cls])=>
+    `<div class="stat-chip"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`
+  ).join("");
+}
+
+const GLOSSARY = [
+  ["サービスキープ率", "自分(のチーム)がサーブしたゲームのうち、そのゲームを取れた割合。"],
+  ["サーブ勝率", "自分(のチーム)がサーブしたポイントのうち、実際に取れたポイントの割合。"],
+  ["リターン勝率", "相手がサーブしたポイントのうち、自分(のチーム)が取り返せたポイントの割合。"],
+  ["BPセーブ率", "自分(のチーム)がサーブ中にブレークポイント(相手があと1点で取れるとゲームを失う場面)を迎えた回数のうち、実際に凌いでゲームを守れた割合。"],
+  ["BP変換率", "自分(のチーム)がリターン中にブレークチャンス(あと1点取ればブレークできる場面)を迎えた回数のうち、実際にブレークできた割合。"],
+  ["デュース側/アド側", "サーブ・リターンした時にいたコートの左右。ポイントの通し番号が偶数本目ならデュース側、奇数本目ならアド側として自動判定しています(利き手やフォア/バックまでは今のデータからは分からないため未対応です)。"],
+  ["デュースゲーム勝率", "ゲームが40-40(デュース)以降までもつれた「競った場面」に限定した勝率。地力の差が出やすい通常のゲームと分けて、競った場面での強さを見る指標です。"],
+  ["対戦相手別成績", "対戦相手(またはその相手チーム名)ごとに、自分側の勝率・各種スタッツをまとめたもの。同じ相手と複数回対戦していれば自動で合算されます。"],
+];
+
+function renderGlossary(){
+  $("glossary").innerHTML = "<dl>" + GLOSSARY.map(([term,desc])=>
+    `<dt>${term}</dt><dd>${desc}</dd>`
+  ).join("") + "</dl>";
+}
+
+/* ---------- 時系列グラフ ---------- */
+function renderTrendChart(){
+  const dates = allMatches.map(m=> m.updatedAt ? new Date(m.updatedAt) : null);
+  let wins=0, played=0;
+  const winRate = allMatches.map(m=>{
+    played++;
+    const setsA = (m.sets||[]).filter(s=>s.a>s.b).length;
+    const setsB = (m.sets||[]).filter(s=>s.b>s.a).length;
+    if(setsA>setsB) wins++;
+    return Math.round((wins/played)*1000)/10;
+  });
+  const holdRate = allMatches.map(m=> computeMatchStats(m).serviceHoldPctA);
+
+  const traceWin = { x:dates, y:winRate, name:"累積勝率(%)", type:"scatter", mode:"lines+markers",
+    line:{color:"#159c86", width:2}, marker:{size:5} };
+  const traceHold = { x:dates, y:holdRate, name:"サービスキープ率(%)", type:"scatter", mode:"lines+markers",
+    line:{color:"#f0793a", width:2, dash:"dot"}, marker:{size:5}, yaxis:"y2" };
+
+  Plotly.newPlot("trendChart", [traceWin, traceHold], {
+    paper_bgcolor:"transparent", plot_bgcolor:"transparent",
+    font:{color:"#f2f5f0", size:11},
+    margin:{l:40,r:40,t:10,b:30},
+    xaxis:{gridcolor:"#25382f"},
+    yaxis:{title:"累積勝率(%)", range:[0,100], gridcolor:"#25382f"},
+    yaxis2:{title:"サービスキープ率(%)", overlaying:"y", side:"right", range:[0,100]},
+    legend:{orientation:"h", y:-0.2}
+  }, {displayModeBar:false, responsive:true});
+}
+
+/* ---------- チーム別リーダーボード ---------- */
+function buildGroupedStats(groupField){
+  // groupField: "nameA"(自チーム別) または "nameB"(対戦相手別)。
+  // どちらの場合も「自分たち(A)から見た」成績を集計する(対戦相手別でも、対その相手への自分の成績を見たいため)。
+  const groups = {};
+  allMatches.forEach(m=>{
+    const key = m[groupField] || "(名称未設定)";
+    if(!groups[key]) groups[key] = { name:key, matches:[] };
+    groups[key].matches.push(m);
+  });
+  return Object.values(groups).map(g=>{
+    let wins=0;
+    let sumServe=0,nServe=0, sumReturn=0,nReturn=0, sumHold=0,nHold=0, sumBpSave=0,nBpSave=0, sumBpConv=0,nBpConv=0;
+    g.matches.forEach(m=>{
+      const setsA=(m.sets||[]).filter(s=>s.a>s.b).length, setsB=(m.sets||[]).filter(s=>s.b>s.a).length;
+      if(setsA>setsB) wins++;
+      const st = computeMatchStats(m);
+      if(st.serveWinPctA!=null){ sumServe+=st.serveWinPctA; nServe++; }
+      if(st.returnWinPctA!=null){ sumReturn+=st.returnWinPctA; nReturn++; }
+      if(st.serviceHoldPctA!=null){ sumHold+=st.serviceHoldPctA; nHold++; }
+      if(st.breakPointSavePctA!=null){ sumBpSave+=st.breakPointSavePctA; nBpSave++; }
+      if(st.breakPointConvertPctA!=null){ sumBpConv+=st.breakPointConvertPctA; nBpConv++; }
+    });
+    const avg = (s,n)=> n>0 ? Math.round((s/n)*10)/10 : null;
+    return {
+      name: g.name, matchCount: g.matches.length,
+      winRate: Math.round((wins/g.matches.length)*1000)/10,
+      serveWin: avg(sumServe,nServe), returnWin: avg(sumReturn,nReturn),
+      hold: avg(sumHold,nHold), bpSave: avg(sumBpSave,nBpSave), bpConvert: avg(sumBpConv,nBpConv)
+    };
+  });
+}
+
+const LEADERBOARD_COLS = [
+  {key:"name", label:"チーム名"},
+  {key:"matchCount", label:"試合数"},
+  {key:"winRate", label:"勝率%"},
+  {key:"hold", label:"サービスキープ%"},
+  {key:"serveWin", label:"サーブ勝率%"},
+  {key:"returnWin", label:"リターン勝率%"},
+  {key:"bpSave", label:"BPセーブ%"},
+  {key:"bpConvert", label:"BP変換%"},
+];
+const OPPONENT_COLS = [
+  {key:"name", label:"対戦相手"},
+  {key:"matchCount", label:"試合数"},
+  {key:"winRate", label:"対戦成績(勝率%)"},
+  {key:"hold", label:"サービスキープ%"},
+  {key:"serveWin", label:"サーブ勝率%"},
+  {key:"returnWin", label:"リターン勝率%"},
+];
+
+const sortState = {
+  leaderboardTable: { key:"winRate", dir:-1, groupField:"nameA", cols: LEADERBOARD_COLS },
+  opponentTable: { key:"winRate", dir:-1, groupField:"nameB", cols: OPPONENT_COLS },
+};
+
+function renderGroupedTable(tableId){
+  const state = sortState[tableId];
+  const rows = buildGroupedStats(state.groupField);
+  rows.sort((a,b)=>{
+    const av=a[state.key], bv=b[state.key];
+    if(av==null) return 1; if(bv==null) return -1;
+    if(typeof av==="string") return state.dir * av.localeCompare(bv);
+    return state.dir * (av-bv);
+  });
+  const table = $(tableId);
+  const thead = "<thead><tr>" + state.cols.map(c=>
+    `<th data-key="${c.key}" class="${state.key===c.key?'sorted':''}">${c.label}${state.key===c.key?`<span class="arrow">${state.dir>0?'▲':'▼'}</span>`:''}</th>`
+  ).join("") + "</tr></thead>";
+  const tbody = "<tbody>" + rows.map(r=>
+    `<tr>${state.cols.map(c=>`<td${c.key==="name"?' class="name"':''}>${r[c.key]==null?"―":r[c.key]}</td>`).join("")}</tr>`
+  ).join("") + "</tbody>";
+  table.innerHTML = thead + tbody;
+  table.querySelectorAll("th[data-key]").forEach(th=>{
+    th.addEventListener("click", ()=>{
+      const key = th.dataset.key;
+      if(state.key===key) state.dir *= -1; else { state.key = key; state.dir = -1; }
+      renderGroupedTable(tableId);
+    });
+  });
+}
+function renderLeaderboard(){ renderGroupedTable("leaderboardTable"); }
+function renderOpponentTable(){ renderGroupedTable("opponentTable"); }
+
+/* ---------- 試合一覧 ---------- */
+let matchSortDir = -1;
+function renderMatchTable(){
+  const rows = allMatches.map(m=>{
+    const st = computeMatchStats(m);
+    const setsText = (m.sets||[]).map(s=>`${s.a}-${s.b}`).join(" ") || "―";
+    return { m, st, setsText, date: m.updatedAt ? new Date(m.updatedAt) : null };
+  }).sort((a,b)=> matchSortDir * ((a.date||0) - (b.date||0)));
+
+  const table = $("matchTable");
+  table.innerHTML = `<thead><tr>
+      <th data-sort="date">日付<span class="arrow">${matchSortDir>0?'▲':'▼'}</span></th>
+      <th>対戦</th><th>形式</th><th>セット</th><th>サーブキープ%</th>
+    </tr></thead><tbody>` +
+    rows.map(r => `<tr data-id="${r.m.matchId}">
+      <td>${r.date ? r.date.toLocaleDateString("ja-JP") : "―"}</td>
+      <td class="name">${r.m.nameA} vs ${r.m.nameB}</td>
+      <td>${r.m.mode==="doubles"?"ダブルス":"シングルス"}</td>
+      <td>${r.setsText}</td>
+      <td>${r.st.serviceHoldPctA==null?"―":r.st.serviceHoldPctA+"%"}</td>
+    </tr>`).join("") + "</tbody>";
+
+  table.querySelector("th[data-sort]").addEventListener("click", ()=>{
+    matchSortDir *= -1; renderMatchTable();
+  });
+  table.querySelectorAll("tbody tr").forEach(tr=>{
+    tr.addEventListener("click", ()=> showMatchDetail(tr.dataset.id));
+  });
+}
+
+function showMatchDetail(matchId){
+  const m = allMatches.find(x=>x.matchId===matchId);
+  if(!m) return;
+  const st = computeMatchStats(m);
+  const panel = $("detailPanel");
+  panel.style.display = "block";
+  panel.innerHTML = `
+    <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
+
+    <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameA})</div><div class="val a">${st.serviceHoldPctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameB})</div><div class="val b">${st.serviceHoldPctB??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率(${m.nameA})</div><div class="val a">${st.serveWinPctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率(${m.nameB})</div><div class="val b">${st.serveWinPctB??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameA})</div><div class="val a">${st.returnWinPctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameB})</div><div class="val b">${st.returnWinPctB??"―"}%</div></div>
+    </div>
+
+    <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
+    <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">BPセーブ率(${m.nameA}のサーブ時)</div><div class="val a">${st.breakPointSavePctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">BPセーブ率(${m.nameB}のサーブ時)</div><div class="val b">${st.breakPointSavePctB??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">BP変換率(${m.nameA}のリターン時)</div><div class="val a">${st.breakPointConvertPctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">BP変換率(${m.nameB}のリターン時)</div><div class="val b">${st.breakPointConvertPctB??"―"}%</div></div>
+    </div>
+
+    <div class="desc" style="margin:14px 0 8px;">コートサイド別(デュース側/アド側)</div>
+    <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">サーブ勝率 デュース側(${m.nameA})</div><div class="val a">${st.serveWinPctA_deuce??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率 アド側(${m.nameA})</div><div class="val a">${st.serveWinPctA_ad??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率 デュース側(${m.nameB})</div><div class="val b">${st.serveWinPctB_deuce??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">サーブ勝率 アド側(${m.nameB})</div><div class="val b">${st.serveWinPctB_ad??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率 デュース側(${m.nameA})</div><div class="val a">${st.returnWinPctA_deuce??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率 アド側(${m.nameA})</div><div class="val a">${st.returnWinPctA_ad??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率 デュース側(${m.nameB})</div><div class="val b">${st.returnWinPctB_deuce??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">リターン勝率 アド側(${m.nameB})</div><div class="val b">${st.returnWinPctB_ad??"―"}%</div></div>
+    </div>
+
+    <div class="desc" style="margin:14px 0 8px;">競った場面(デュースまでもつれたゲーム、${st.deuceGamesTotal}ゲーム中)</div>
+    <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">デュースゲーム勝率(${m.nameA})</div><div class="val a">${st.deuceGameWinPctA??"―"}%</div></div>
+      <div class="stat-chip"><div class="lbl">デュースゲーム勝率(${m.nameB})</div><div class="val b">${st.deuceGameWinPctB??"―"}%</div></div>
+    </div>
+
+    <button id="detailClose">閉じる</button>
+  `;
+  $("detailClose").addEventListener("click", ()=>{ panel.style.display="none"; });
+}
+</script>
+</body>
+</html>
