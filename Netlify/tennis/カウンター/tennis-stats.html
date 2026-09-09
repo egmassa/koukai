@@ -662,7 +662,7 @@ function renderMatchTable(){
       <th>対戦</th><th>形式</th><th>セット</th><th>サーブキープ%</th>
     </tr></thead><tbody>` +
     rows.map(r => `<tr data-id="${r.m.matchId}">
-      <td>${r.date ? r.date.toLocaleDateString("ja-JP") : "―"}</td>
+      <td>${r.date ? r.date.toLocaleString("ja-JP", {year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "―"}</td>
       <td class="name">${r.m.nameA} vs ${r.m.nameB}</td>
       <td>${r.m.mode==="doubles"?"ダブルス":"シングルス"}</td>
       <td>${r.setsText}</td>
