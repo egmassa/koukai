@@ -58,6 +58,34 @@
   .stat-chip .lbl{font-size:10px; color:var(--dim);}
   .stat-chip .val{font-size:18px; font-weight:700;}
   .stat-chip .val.a{color:var(--teal);} .stat-chip .val.b{color:var(--orange);}
+
+  .grid-wrap{width:100%; overflow-x:auto;}
+  .pt-grid{border-collapse:collapse; font-size:12px; margin-top:6px;}
+  .pt-grid th, .pt-grid td{border:1px solid var(--line); padding:4px 8px; text-align:center; white-space:nowrap;}
+  .pt-grid th{color:var(--dim); font-weight:600; font-size:11px;}
+  .pt-grid td.sv{font-weight:700;}
+  .pt-grid td.sv.a{color:var(--teal);}
+  .pt-grid td.sv.b{color:var(--orange);}
+  .pt-grid td.w-mark{position:relative; padding:3px 8px; min-width:26px;}
+  .pt-grid .w-letter{font-weight:800;}
+  .pt-grid td.w-mark.a .w-letter{color:var(--teal);}
+  .pt-grid td.w-mark.b .w-letter{color:var(--orange);}
+  /* サーブ側が獲得したポイント: 塗りつぶし。リターン側が獲得(ブレーク): 枠線のみ */
+  .pt-grid td.w-mark.srv-win.a{background:rgba(21,156,134,0.22); border-radius:6px;}
+  .pt-grid td.w-mark.srv-win.b{background:rgba(240,121,58,0.22); border-radius:6px;}
+  .pt-grid td.w-mark.ret-win.a{box-shadow:inset 0 0 0 1.5px var(--teal); border-radius:6px;}
+  .pt-grid td.w-mark.ret-win.b{box-shadow:inset 0 0 0 1.5px var(--orange); border-radius:6px;}
+  .pt-grid .w-tag{position:absolute; top:0; right:1px; font-size:7px; font-weight:700; opacity:0.75; line-height:1;}
+  .pt-grid td.tally-a{color:var(--teal); font-weight:800;}
+  .pt-grid td.tally-b{color:var(--orange); font-weight:800;}
+  .pt-grid td.set-divider{background:var(--panel2); color:var(--text); font-weight:700;
+    text-align:left; padding:6px 10px; border-left:none; border-right:none;}
+
+  .grid-legend{display:flex; flex-wrap:wrap; gap:12px; font-size:10px; color:var(--dim); margin:6px 0; align-items:center;}
+  .legend-item{display:inline-flex; align-items:center; gap:4px;}
+  .legend-sample{display:inline-flex; width:16px; height:14px; align-items:center; justify-content:center;
+    border:1px solid var(--line); font-size:9px;}
+
   #detailClose{margin-top:8px; padding:6px 14px; border-radius:10px; border:1px solid var(--line);
     background:transparent; color:var(--dim); font-size:12px; cursor:pointer;}
 
@@ -127,6 +155,8 @@
 // ゲーム内のポイント勝者列(['a','b','a',...])を、そのゲームのルール(deuceMode)で
 // 「サーブ側/レシーブ側から見て今のポイントがゲームポイントか、ブレークポイントか」を
 // 判定しながら1点ずつ再生する。
+// ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
+// 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 // ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 // ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
@@ -320,6 +350,41 @@ function computePairStats(match){
     selfReturnWinPct: pct(selfReturnPtsWon, selfReturnPtsTotal),
     partnerReturnWinPct: pct(partnerReturnPtsWon, partnerReturnPtsTotal)
   };
+}
+
+// 各ポイントに「自分/パートナーどちらが関わったか」をタグ付けする(computePairStatsと同じ再現ロジック)。
+// キーは "セット番号-ゲーム番号-ゲーム内ポイント番号"。ペア設定が無い試合は空を返す。
+function computePairPointTags(match){
+  const settings = match.settings || {};
+  const tags = {};
+  if(match.mode !== "doubles" || !settings.pairFirstServer || !settings.selfReturnSide) return tags;
+
+  const games = {};
+  (match.pointLog||[]).forEach(p=>{
+    const key = p.setNumber+"-"+p.gameNumber;
+    (games[key]=games[key]||[]).push(p);
+  });
+  const gameKeys = Object.keys(games).sort((x,y)=>{
+    const [xs,xg]=x.split("-").map(Number), [ys,yg]=y.split("-").map(Number);
+    return xs-ys||xg-yg;
+  });
+
+  let selfTurn = (settings.pairFirstServer === "self");
+  gameKeys.forEach(key=>{
+    const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
+    const server = pts[0].server;
+    if(server === "a"){
+      const who = selfTurn ? "self" : "partner";
+      pts.forEach(p=> tags[`${p.setNumber}-${p.gameNumber}-${p.pointInGame}`] = who);
+      selfTurn = !selfTurn;
+    } else {
+      pts.forEach((p, idx)=>{
+        const courtSide = (idx%2===0) ? "deuce" : "ad";
+        tags[`${p.setNumber}-${p.gameNumber}-${p.pointInGame}`] = (courtSide===settings.selfReturnSide) ? "self" : "partner";
+      });
+    }
+  });
+  return tags;
 }
 </script>
 <script>
@@ -612,6 +677,69 @@ function renderMatchTable(){
   });
 }
 
+// 「どんな流れだったか」を1試合分、ゲーム×ポイントのグリッドで表示する
+// (watch側のスマホ向け履歴表示と同じ形式)
+function renderPointGrid(m){
+  const games = {};
+  (m.pointLog||[]).forEach(p=>{
+    const key = p.setNumber + "-" + p.gameNumber;
+    (games[key] = games[key] || []).push(p);
+  });
+  const gameKeys = Object.keys(games).sort((x,y)=>{
+    const [xs,xg] = x.split("-").map(Number), [ys,yg] = y.split("-").map(Number);
+    return xs-ys || xg-yg;
+  });
+  if(gameKeys.length===0) return '<div class="desc">記録されたポイントはありません</div>';
+
+  const pairTags = computePairPointTags(m); // 自分/パートナーのタグ(ペア設定がある試合のみ中身が入る)
+  const hasPairTags = Object.keys(pairTags).length > 0;
+
+  const maxPts = Math.max(...gameKeys.map(k=>games[k].length));
+  const totalCols = maxPts + 4; // Sv + Gm + ポイント(maxPts) + nameA + nameB
+
+  let tallyA = 0, tallyB = 0, lastSet = null;
+  const rows = gameKeys.map(key=>{
+    const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
+    const [setNumber] = key.split("-").map(Number);
+    const server = pts[0] ? pts[0].server : "";
+    const winnerLast = pts[pts.length-1] ? pts[pts.length-1].side : null;
+
+    let divider = "";
+    if(setNumber !== lastSet){
+      tallyA = 0; tallyB = 0;
+      const finished = (m.sets||[])[setNumber-1];
+      const label = finished ? `第${setNumber}セット 終了(${finished.a}-${finished.b})` : `第${setNumber}セット`;
+      divider = `<tr><td colspan="${totalCols}" class="set-divider">${label}</td></tr>`;
+    }
+    lastSet = setNumber;
+    if(winnerLast==="a") tallyA++; else if(winnerLast==="b") tallyB++;
+
+    const marks = pts.map(p=>{
+      const wonByServer = (p.side === p.server); // サーブ側が取ったか、リターン側(ブレーク)が取ったか
+      const tagKey = `${p.setNumber}-${p.gameNumber}-${p.pointInGame}`;
+      const tag = pairTags[tagKey]; // 'self' | 'partner' | undefined
+      const tagHtml = tag ? `<span class="w-tag">${tag==="self"?"自":"パ"}</span>` : "";
+      const scoreLabel = p.side==="a" ? p.scoreA : p.scoreB; // 得点者がその時点で到達したスコア(15/30/40/Adなど)
+      return `<td class="w-mark ${p.side} ${wonByServer?"srv-win":"ret-win"}"><span class="w-letter">${scoreLabel}</span>${tagHtml}</td>`;
+    }).join("");
+    const filler = `<td></td>`.repeat(maxPts - pts.length);
+    return divider + `<tr><td class="sv ${server}">${server==="a"?"じ":(server==="b"?"あ":"")}</td>` +
+      `<td>${key.split("-")[1]}</td>${marks}${filler}` +
+      `<td class="tally-a">${winnerLast==="a"?tallyA:""}</td>` +
+      `<td class="tally-b">${winnerLast==="b"?tallyB:""}</td></tr>`;
+  }).join("");
+
+  const legend = `<div class="grid-legend">
+      <span class="legend-item"><span class="w-mark a srv-win legend-sample"><span class="w-letter">40</span></span>塗り=サーブ側が獲得</span>
+      <span class="legend-item"><span class="w-mark a ret-win legend-sample"><span class="w-letter">40</span></span>枠のみ=リターン側が獲得(ブレーク)</span>
+      ${hasPairTags ? '<span class="legend-item">右上の「自/パ」=自分/パートナーが関わったポイント</span>' : ""}
+    </div>`;
+
+  return legend + `<div class="grid-wrap"><table class="pt-grid"><thead><tr>` +
+    `<th>Sv</th><th>Gm</th><th colspan="${maxPts}">ポイント</th><th>${m.nameA}</th><th>${m.nameB}</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function showMatchDetail(matchId){
   const m = allMatches.find(x=>x.matchId===matchId);
   if(!m) return;
@@ -634,6 +762,9 @@ function showMatchDetail(matchId){
 
   panel.innerHTML = `
     <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
+
+    <div class="desc" style="margin:10px 0 6px;">試合の流れ</div>
+    ${renderPointGrid(m)}
 
     <div class="stat-grid">
       <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameA})</div><div class="val a">${st.serviceHoldPctA??"―"}%</div></div>
