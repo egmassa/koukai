@@ -28,6 +28,21 @@
   .toolbar input[type=file]{display:none;}
   #loadStatus{font-size:12px; color:var(--dim); align-self:center;}
 
+  .filter-bar{display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:24px;
+    padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:12px;}
+  .filter-group{display:flex; align-items:center; gap:6px;}
+  .filter-label{font-size:11px; color:var(--dim);}
+  .filter-bar select, .filter-bar input[type=date]{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px;
+    padding:5px 8px; font-size:12px;}
+  .filter-tilde{color:var(--dim); font-size:12px;}
+  #filterResetBtn{padding:6px 12px; border-radius:8px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:12px; cursor:pointer;}
+  .filter-count{font-size:11px; color:var(--dim); margin-left:auto;}
+
+  .del-btn{background:transparent; border:1px solid var(--danger); color:var(--danger);
+    border-radius:8px; padding:3px 9px; font-size:11px; cursor:pointer;}
+
   section{margin-bottom:34px;}
   section > h2{font-size:15px; font-weight:700; margin:0 0 12px; color:var(--text);}
   section > .desc{font-size:12px; color:var(--dim); margin:-8px 0 14px;}
@@ -108,6 +123,31 @@
     <button id="driveLoadBtn" class="primary">Driveから読み込む</button>
     <label>ファイルから読み込む<input type="file" id="fileInput" accept="application/json"></label>
     <span id="loadStatus"></span>
+  </div>
+
+  <div id="filterBar" class="filter-bar" style="display:none;">
+    <div class="filter-group">
+      <span class="filter-label">形式</span>
+      <select id="filterMode">
+        <option value="all">すべて</option>
+        <option value="singles">シングルスのみ</option>
+        <option value="doubles">ダブルスのみ</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">チーム名</span>
+      <select id="filterTeam"><option value="all">すべて</option></select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">対戦相手</span>
+      <select id="filterOpponent"><option value="all">すべて</option></select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">期間</span>
+      <input type="date" id="filterFrom"><span class="filter-tilde">〜</span><input type="date" id="filterTo">
+    </div>
+    <button id="filterResetBtn">リセット</button>
+    <span id="filterCount" class="filter-count"></span>
   </div>
 
   <div id="content" style="display:none;">
@@ -433,6 +473,29 @@ async function driveGetContent(fileId, token){
   if(!res.ok) return null;
   try{ return await res.json(); }catch(e){ return null; }
 }
+async function driveUpdateFile(fileId, content, token){
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+    { method:"PATCH", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
+      body: JSON.stringify(content) });
+  if(!res.ok) throw new Error(`Drive更新エラー ${res.status}`);
+}
+
+// 削除など、Driveから読み込んだデータを書き換えた後に呼ぶ。
+// Drive経由で読み込んだ場合だけ、そのファイルIDとトークンを使って上書き保存できる。
+let loadedFromDriveFileId = null;
+async function saveMatchesToDriveIfLoaded(){
+  if(!loadedFromDriveFileId){
+    toast2("ファイルから読み込んだデータなので、Driveへの保存はできません。手元のファイルを直接編集してください。");
+    return;
+  }
+  try{
+    await driveUpdateFile(loadedFromDriveFileId, { matches: allMatches }, accessToken);
+    toast2("Driveに保存しました");
+  }catch(e){
+    toast2("Driveへの保存に失敗しました: " + e.message);
+  }
+}
+function toast2(msg){ $("loadStatus").textContent = msg; }
 
 $("driveLoadBtn").addEventListener("click", ()=>{
   $("loadStatus").textContent = "Driveに接続中…";
@@ -441,6 +504,7 @@ $("driveLoadBtn").addEventListener("click", ()=>{
     try{
       const fileId = await driveFindFile(DATA_FILENAME, token);
       if(!fileId){ $("loadStatus").textContent = "Drive上にデータファイルが見つかりません"; return; }
+      loadedFromDriveFileId = fileId;
       const data = await driveGetContent(fileId, token);
       loadMatches((data && data.matches) || []);
       $("loadStatus").textContent = `Driveから${(data.matches||[]).length}試合を読み込みました`;
@@ -453,6 +517,7 @@ $("driveLoadBtn").addEventListener("click", ()=>{
 $("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0];
   if(!file) return;
+  loadedFromDriveFileId = null; // ファイルからの読み込みはDriveへの書き戻し対象ではない
   const reader = new FileReader();
   reader.onload = (ev)=>{
     try{
@@ -465,6 +530,8 @@ $("fileInput").addEventListener("change", (e)=>{
 });
 
 /* ====================== データ読み込み後の描画 ====================== */
+let filteredMatches = [];
+
 function loadMatches(matches){
   allMatches = matches.filter(m => (m.pointLog||[]).length > 0)
     .sort((a,b)=> new Date(a.updatedAt||0) - new Date(b.updatedAt||0));
@@ -472,24 +539,89 @@ function loadMatches(matches){
     $("emptyState").textContent = "試合データが見つかりませんでした。";
     $("emptyState").style.display = "block";
     $("content").style.display = "none";
+    $("filterBar").style.display = "none";
     return;
   }
   $("emptyState").style.display = "none";
   $("content").style.display = "block";
-  // グラフ描画(Plotly)が何らかの理由で失敗しても、他のテーブル表示まで巻き込まないようにする
+  $("filterBar").style.display = "flex";
+  populateFilterOptions();
+  applyFilters();
+  try{ renderGlossary(); }catch(e){ console.error("指標説明描画エラー:", e); }
+}
+
+// チーム名・対戦相手のプルダウンを、実際のデータから作る
+function populateFilterOptions(){
+  const teams = [...new Set(allMatches.map(m=>m.nameA).filter(Boolean))].sort();
+  const opponents = [...new Set(allMatches.map(m=>m.nameB).filter(Boolean))].sort();
+  const fillSelect = (sel, values)=>{
+    const current = sel.value;
+    sel.innerHTML = '<option value="all">すべて</option>' +
+      values.map(v=>`<option value="${v}">${v}</option>`).join("");
+    if(values.includes(current)) sel.value = current;
+  };
+  fillSelect($("filterTeam"), teams);
+  fillSelect($("filterOpponent"), opponents);
+}
+
+// 現在のフィルター条件で allMatches を絞り込み、絞り込んだ結果で全体を再描画する
+function applyFilters(){
+  const mode = $("filterMode").value;
+  const team = $("filterTeam").value;
+  const opponent = $("filterOpponent").value;
+  const from = $("filterFrom").value ? new Date($("filterFrom").value) : null;
+  const to = $("filterTo").value ? new Date($("filterTo").value + "T23:59:59") : null;
+
+  filteredMatches = allMatches.filter(m=>{
+    if(mode!=="all" && m.mode!==mode) return false;
+    if(team!=="all" && m.nameA!==team) return false;
+    if(opponent!=="all" && m.nameB!==opponent) return false;
+    if(from || to){
+      const d = m.updatedAt ? new Date(m.updatedAt) : null;
+      if(!d) return false;
+      if(from && d < from) return false;
+      if(to && d > to) return false;
+    }
+    return true;
+  });
+
+  $("filterCount").textContent = `${filteredMatches.length} / ${allMatches.length} 試合を表示中`;
+
+  if(filteredMatches.length===0){
+    ["overallSummary","leaderboardTable","opponentTable","matchTable"].forEach(id=> $(id).innerHTML = "");
+    $("trendChart").innerHTML = "";
+    $("detailPanel").style.display = "none";
+    return;
+  }
   try{ renderOverallSummary(); }catch(e){ console.error("通算成績描画エラー:", e); }
   try{ renderTrendChart(); }catch(e){ console.error("グラフ描画エラー:", e); $("trendChart").textContent = "グラフを表示できませんでした"; }
   try{ renderLeaderboard(); }catch(e){ console.error("リーダーボード描画エラー:", e); }
   try{ renderOpponentTable(); }catch(e){ console.error("対戦相手別表描画エラー:", e); }
   try{ renderMatchTable(); }catch(e){ console.error("試合一覧描画エラー:", e); }
-  try{ renderGlossary(); }catch(e){ console.error("指標説明描画エラー:", e); }
+}
+
+["filterMode","filterTeam","filterOpponent","filterFrom","filterTo"].forEach(id=>{
+  $(id).addEventListener("change", applyFilters);
+});
+$("filterResetBtn").addEventListener("click", ()=>{
+  $("filterMode").value = "all"; $("filterTeam").value = "all"; $("filterOpponent").value = "all";
+  $("filterFrom").value = ""; $("filterTo").value = "";
+  applyFilters();
+});
+
+function deleteMatch(matchId){
+  if(!confirm("この試合を削除しますか？(元に戻せません)")) return;
+  allMatches = allMatches.filter(m=>m.matchId!==matchId);
+  populateFilterOptions();
+  applyFilters();
+  saveMatchesToDriveIfLoaded();
 }
 
 // 全試合をチーム名で分けず1つにまとめた「自分側」の通算成績
 function renderOverallSummary(){
   let wins=0;
   let sumServe=0,nServe=0, sumReturn=0,nReturn=0, sumHold=0,nHold=0, sumBpSave=0,nBpSave=0, sumBpConv=0,nBpConv=0;
-  allMatches.forEach(m=>{
+  filteredMatches.forEach(m=>{
     const setsA=(m.sets||[]).filter(s=>s.a>s.b).length, setsB=(m.sets||[]).filter(s=>s.b>s.a).length;
     if(setsA>setsB) wins++;
     const st = computeMatchStats(m);
@@ -500,9 +632,9 @@ function renderOverallSummary(){
     if(st.breakPointConvertPctA!=null){ sumBpConv+=st.breakPointConvertPctA; nBpConv++; }
   });
   const avg = (s,n)=> n>0 ? Math.round((s/n)*10)/10 : null;
-  const winRate = Math.round((wins/allMatches.length)*1000)/10;
+  const winRate = Math.round((wins/filteredMatches.length)*1000)/10;
   const items = [
-    ["試合数", allMatches.length + "試合", ""],
+    ["試合数", filteredMatches.length + "試合", ""],
     ["勝率", winRate+"%", "a"],
     ["サービスキープ率", (avg(sumHold,nHold)??"―")+"%", "a"],
     ["サーブ勝率", (avg(sumServe,nServe)??"―")+"%", "a"],
@@ -535,16 +667,16 @@ function renderGlossary(){
 
 /* ---------- 時系列グラフ ---------- */
 function renderTrendChart(){
-  const dates = allMatches.map(m=> m.updatedAt ? new Date(m.updatedAt) : null);
+  const dates = filteredMatches.map(m=> m.updatedAt ? new Date(m.updatedAt) : null);
   let wins=0, played=0;
-  const winRate = allMatches.map(m=>{
+  const winRate = filteredMatches.map(m=>{
     played++;
     const setsA = (m.sets||[]).filter(s=>s.a>s.b).length;
     const setsB = (m.sets||[]).filter(s=>s.b>s.a).length;
     if(setsA>setsB) wins++;
     return Math.round((wins/played)*1000)/10;
   });
-  const holdRate = allMatches.map(m=> computeMatchStats(m).serviceHoldPctA);
+  const holdRate = filteredMatches.map(m=> computeMatchStats(m).serviceHoldPctA);
 
   const traceWin = { x:dates, y:winRate, name:"累積勝率(%)", type:"scatter", mode:"lines+markers",
     line:{color:"#159c86", width:2}, marker:{size:5} };
@@ -567,7 +699,7 @@ function buildGroupedStats(groupField){
   // groupField: "nameA"(自チーム別) または "nameB"(対戦相手別)。
   // どちらの場合も「自分たち(A)から見た」成績を集計する(対戦相手別でも、対その相手への自分の成績を見たいため)。
   const groups = {};
-  allMatches.forEach(m=>{
+  filteredMatches.forEach(m=>{
     const key = m[groupField] || "(名称未設定)";
     if(!groups[key]) groups[key] = { name:key, matches:[] };
     groups[key].matches.push(m);
@@ -650,7 +782,7 @@ function renderOpponentTable(){ renderGroupedTable("opponentTable"); }
 /* ---------- 試合一覧 ---------- */
 let matchSortDir = -1;
 function renderMatchTable(){
-  const rows = allMatches.map(m=>{
+  const rows = filteredMatches.map(m=>{
     const st = computeMatchStats(m);
     const setsText = (m.sets||[]).map(s=>`${s.a}-${s.b}`).join(" ") || "―";
     return { m, st, setsText, date: m.updatedAt ? new Date(m.updatedAt) : null };
@@ -659,7 +791,7 @@ function renderMatchTable(){
   const table = $("matchTable");
   table.innerHTML = `<thead><tr>
       <th data-sort="date">日付<span class="arrow">${matchSortDir>0?'▲':'▼'}</span></th>
-      <th>対戦</th><th>形式</th><th>セット</th><th>サーブキープ%</th>
+      <th>対戦</th><th>形式</th><th>セット</th><th>サーブキープ%</th><th></th>
     </tr></thead><tbody>` +
     rows.map(r => `<tr data-id="${r.m.matchId}">
       <td>${r.date ? r.date.toLocaleString("ja-JP", {year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "―"}</td>
@@ -667,6 +799,7 @@ function renderMatchTable(){
       <td>${r.m.mode==="doubles"?"ダブルス":"シングルス"}</td>
       <td>${r.setsText}</td>
       <td>${r.st.serviceHoldPctA==null?"―":r.st.serviceHoldPctA+"%"}</td>
+      <td><button class="del-btn" data-del-id="${r.m.matchId}">削除</button></td>
     </tr>`).join("") + "</tbody>";
 
   table.querySelector("th[data-sort]").addEventListener("click", ()=>{
@@ -674,6 +807,12 @@ function renderMatchTable(){
   });
   table.querySelectorAll("tbody tr").forEach(tr=>{
     tr.addEventListener("click", ()=> showMatchDetail(tr.dataset.id));
+  });
+  table.querySelectorAll(".del-btn").forEach(btn=>{
+    btn.addEventListener("click", (ev)=>{
+      ev.stopPropagation(); // 行クリック(詳細表示)が発火しないようにする
+      deleteMatch(btn.dataset.delId);
+    });
   });
 }
 
@@ -741,7 +880,7 @@ function renderPointGrid(m){
 }
 
 function showMatchDetail(matchId){
-  const m = allMatches.find(x=>x.matchId===matchId);
+  const m = filteredMatches.find(x=>x.matchId===matchId) || allMatches.find(x=>x.matchId===matchId);
   if(!m) return;
   const st = computeMatchStats(m);
   const pair = computePairStats(m);
