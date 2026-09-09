@@ -153,6 +153,16 @@
   #connSettingsScreen #connBackBtn{margin-top:8px; padding:6px 14px; border-radius:14px;
     border:1px solid var(--line); background:transparent; color:var(--dim); font-size:11px;}
 
+  #pairEditScreen{overflow-y:auto; padding-top:16%;}
+  #pairEditScreen h2{font-size:18px; color:var(--dim); margin:0 0 8px; font-weight:700;}
+  #pairEditScreen .desc{font-size:11px; color:var(--dim); margin-bottom:10px; line-height:1.6; max-width:240px;}
+  #pairEditScreen .primary{margin-top:14px; padding:10px 24px; border-radius:20px; border:none;
+    background:var(--teal); color:#04231d; font-weight:700; font-size:14px;}
+  #pairEditScreen #pairEditBackBtn{margin-top:8px; padding:6px 14px; border-radius:14px;
+    border:1px solid var(--line); background:transparent; color:var(--dim); font-size:11px;}
+  #pairEditBtn{width:30px; height:30px; border-radius:50%; border:1px solid var(--line);
+    background:var(--panel); color:var(--dim); font-size:13px; flex-shrink:0;}
+
   /* スマホ向けの見やすい試合詳細(ゲーム×ポイントのグリッド) */
   .grid-wrap{width:100%; overflow-x:auto;}
   .pt-grid{border-collapse:collapse; font-size:11px; margin-top:6px;}
@@ -244,6 +254,7 @@
   <section id="scoreScreen" class="screen">
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
+      <button id="pairEditBtn" title="ペア設定">&#128101;</button>
       <button id="cloudBtn" title="Google Driveに保存">&#9729;</button>
     </div>
 
@@ -309,6 +320,28 @@
     <input id="connTokenInput" placeholder="合言葉(自由なフレーズでOK)" maxlength="200">
     <button class="primary" id="connSaveBtn">保存</button>
     <button id="connBackBtn">戻る</button>
+  </section>
+
+  <section id="pairEditScreen" class="screen">
+    <h2>ペア設定</h2>
+    <div class="desc">試合中いつでも変更できます(得点計算には影響せず、後の分析にだけ使う情報です)。</div>
+
+    <div class="grp-label">自チームの最初のサーブは</div>
+    <div class="mode-toggle" data-group="editPairFirstServer">
+      <button class="mode-btn" data-value="">未設定</button>
+      <button class="mode-btn" data-value="self">じぶん</button>
+      <button class="mode-btn" data-value="partner">パートナー</button>
+    </div>
+
+    <div class="grp-label">じぶんのリターン側</div>
+    <div class="mode-toggle" data-group="editSelfReturnSide">
+      <button class="mode-btn" data-value="">未設定</button>
+      <button class="mode-btn" data-value="deuce">デュース側</button>
+      <button class="mode-btn" data-value="ad">アド側</button>
+    </div>
+
+    <button class="primary" id="pairEditSaveBtn">保存</button>
+    <button id="pairEditBackBtn">戻る</button>
   </section>
 
   <div id="toast"></div>
@@ -460,6 +493,69 @@ function startMatch(){
 $("startBtn").addEventListener("click", startMatch);
 $("quickStartBtn").addEventListener("click", startMatch);
 
+// ペア設定(自チームの最初のサーブ・自分のリターン側)は、得点計算に使わない
+// 分析専用の情報なので、ライブのスコア画面からでも、終わった試合の履歴からでも、
+// 後からいつでも編集できるようにする。pairEditTargetMatchId が null なら
+// 「今プレイ中の試合」、matchIdが入っていれば「履歴上のその試合」を編集する。
+let pairEditTargetMatchId = null;
+
+function openPairEditFor(matchId, settingsObj){
+  pairEditTargetMatchId = matchId; // null = ライブの試合
+  ["editPairFirstServer","editSelfReturnSide"].forEach((key, i)=>{
+    const settingsKey = i===0 ? "pairFirstServer" : "selfReturnSide";
+    const current = (settingsObj && settingsObj[settingsKey]) || "";
+    pendingSettings[key] = current;
+    const group = document.querySelector(`.mode-toggle[data-group="${key}"]`);
+    if(!group) return;
+    group.querySelectorAll(".mode-btn").forEach(b=>{
+      b.classList.toggle("active", b.dataset.value===current);
+    });
+  });
+  showScreen("pairEditScreen");
+}
+
+$("pairEditBtn").addEventListener("click", ()=>{
+  if(!state) return;
+  openPairEditFor(null, state.settings);
+});
+$("pairEditSaveBtn").addEventListener("click", ()=>{
+  const newPfs = pendingSettings.editPairFirstServer || "";
+  const newSrs = pendingSettings.editSelfReturnSide || "";
+  if(pairEditTargetMatchId === null){
+    // ライブの試合を編集
+    if(!state) return;
+    state.settings.pairFirstServer = newPfs;
+    state.settings.selfReturnSide = newSrs;
+    persist();
+    toast("ペア設定を保存しました");
+    showScreen("scoreScreen");
+  } else {
+    // 履歴上の(終わった)試合を編集
+    const db = loadDb();
+    const m = (db.matches||[]).find(x=>x.matchId===pairEditTargetMatchId);
+    if(m){
+      m.settings = m.settings || {};
+      m.settings.pairFirstServer = newPfs;
+      m.settings.selfReturnSide = newSrs;
+      m.updatedAt = new Date().toISOString();
+      saveDb(db);
+    }
+    toast("ペア設定を保存しました");
+    historyDetailId = pairEditTargetMatchId;
+    showScreen("historyScreen");
+    renderHistoryList();
+  }
+});
+$("pairEditBackBtn").addEventListener("click", ()=>{
+  if(pairEditTargetMatchId === null){
+    showScreen("scoreScreen");
+  } else {
+    historyDetailId = pairEditTargetMatchId;
+    showScreen("historyScreen");
+    renderHistoryList();
+  }
+});
+
 
 /* ====================== テニスの得点ロジック(設定反映) ====================== */
 function pushHistory(){
@@ -598,6 +694,7 @@ $("backBtn").addEventListener("click", ()=> showScreen("scoreScreen"));
 
 function render(){
   if(!state) return;
+  $("pairEditBtn").style.display = (state.mode==="doubles") ? "flex" : "none";
   const serverName = state.server==="a" ? state.nameA : state.nameB;
   const serveEl = $("serveInfo");
   serveEl.textContent = "🎾 " + serverName + " のサーブ";
@@ -831,13 +928,17 @@ function renderMatchDetail(m){
     const winnerName = p.side==="a" ? m.nameA : m.nameB;
     return `<div class="pt-row"><span class="pt-set">S${p.setNumber}-G${p.gameNumber}</span>${serverName}サーブ→<b>${winnerName}</b>(${p.scoreA}-${p.scoreB})</div>`;
   }).join("");
+  const pairEditBtnHtml = m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 ペア設定を編集</button>` : "";
   list.innerHTML =
     `<div class="detail-head">${m.nameA} vs ${m.nameB}</div>` +
     (rows || '<div class="d">記録されたポイントはありません</div>') +
     `<button id="detailBackBtn" class="detail-back">一覧に戻る</button>` +
+    pairEditBtnHtml +
     `<button id="detailDeleteBtn" class="detail-delete">この試合を削除</button>`;
   const backBtn = document.getElementById("detailBackBtn");
   if(backBtn) backBtn.addEventListener("click", ()=>{ historyDetailId=null; renderHistoryList(); });
+  const pairBtn = document.getElementById("detailPairEditBtn");
+  if(pairBtn) pairBtn.addEventListener("click", ()=> openPairEditFor(m.matchId, m.settings));
   wireDeleteButton(m.matchId, `${m.nameA} vs ${m.nameB}`);
 }
 
@@ -953,9 +1054,12 @@ function renderMatchDetailGrid(m){
       `</tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="d">記録されたポイントはありません</div>') +
     `<button id="detailBackBtn" class="detail-back">一覧に戻る</button>` +
+    (m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 ペア設定を編集</button>` : "") +
     `<button id="detailDeleteBtn" class="detail-delete">この試合を削除</button>`;
   const backBtn = document.getElementById("detailBackBtn");
   if(backBtn) backBtn.addEventListener("click", ()=>{ historyDetailId=null; renderHistoryList(); });
+  const pairBtn = document.getElementById("detailPairEditBtn");
+  if(pairBtn) pairBtn.addEventListener("click", ()=> openPairEditFor(m.matchId, m.settings));
   wireDeleteButton(m.matchId, `${m.nameA} vs ${m.nameB}`);
 }
 
