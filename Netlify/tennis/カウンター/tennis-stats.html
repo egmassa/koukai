@@ -9,6 +9,7 @@
   :root{
     --bg:#0a1210; --panel:#12201a; --panel2:#182821; --line:#25382f; --text:#f2f5f0;
     --dim:#8fa89a; --teal:#159c86; --orange:#f0793a; --danger:#c96a4e;
+    --court-deuce:#4a90d9; --court-ad:#b46fd1;
   }
   *{box-sizing:border-box;}
   html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
@@ -81,8 +82,17 @@
   .pt-grid td.sv{font-weight:700;}
   .pt-grid td.sv.a{color:var(--teal);}
   .pt-grid td.sv.b{color:var(--orange);}
-  .pt-grid td.w-mark{position:relative; padding:3px 8px; min-width:26px;}
-  .pt-grid .w-letter{font-weight:800;}
+  .pt-grid td.side-name{font-size:11px; font-weight:600; text-align:left; max-width:70px;
+    overflow:hidden; text-overflow:ellipsis;}
+  .pt-grid td.side-name.a{color:var(--teal);}
+  .pt-grid td.side-name.b{color:var(--orange);}
+  .pt-grid td.w-mark{position:relative; padding:12px 8px 3px; min-width:26px;}
+  .pt-grid .w-letter{font-weight:800; display:block;}
+  .court-tag{position:absolute; top:1px; left:50%; transform:translateX(-50%); font-size:8px;
+    font-weight:800; line-height:1; padding:0 3px; border-radius:3px; color:#fff;}
+  .court-tag.court-deuce{background:var(--court-deuce);}
+  .court-tag.court-ad{background:var(--court-ad);}
+  .court-tag.legend-badge{position:static; transform:none; font-size:11px; padding:1px 5px;}
   .pt-grid td.w-mark.a .w-letter{color:var(--teal);}
   .pt-grid td.w-mark.b .w-letter{color:var(--orange);}
   /* サーブ側が獲得したポイント: 塗りつぶし。リターン側が獲得(ブレーク): 枠線のみ */
@@ -90,7 +100,9 @@
   .pt-grid td.w-mark.srv-win.b{background:rgba(240,121,58,0.22); border-radius:6px;}
   .pt-grid td.w-mark.ret-win.a{box-shadow:inset 0 0 0 1.5px var(--teal); border-radius:6px;}
   .pt-grid td.w-mark.ret-win.b{box-shadow:inset 0 0 0 1.5px var(--orange); border-radius:6px;}
-  .pt-grid .w-tag{position:absolute; top:0; right:1px; font-size:7px; font-weight:700; opacity:0.75; line-height:1;}
+  /* コートサイド(デュース側/アド側)は、勝った側のセルに付くD/Aバッジだけで示す(縦の色線は廃止) */
+  .sv-pair{display:inline-block; margin-left:3px; font-size:11px; padding:1px 5px; border-radius:5px;
+    background:var(--panel2); font-weight:800; color:var(--text);}
   .pt-grid td.tally-a{color:var(--teal); font-weight:800;}
   .pt-grid td.tally-b{color:var(--orange); font-weight:800;}
   .pt-grid td.set-divider{background:var(--panel2); color:var(--text); font-weight:700;
@@ -98,6 +110,7 @@
 
   .grid-legend{display:flex; flex-wrap:wrap; gap:12px; font-size:10px; color:var(--dim); margin:6px 0; align-items:center;}
   .legend-item{display:inline-flex; align-items:center; gap:4px;}
+  .legend-item.legend-strong{color:var(--text); font-weight:700; font-size:11px;}
   .legend-sample{display:inline-flex; width:16px; height:14px; align-items:center; justify-content:center;
     border:1px solid var(--line); font-size:9px;}
 
@@ -473,25 +486,51 @@ async function driveGetContent(fileId, token){
   if(!res.ok) return null;
   try{ return await res.json(); }catch(e){ return null; }
 }
-async function driveUpdateFile(fileId, content, token){
-  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
-    { method:"PATCH", headers:{ Authorization:`Bearer ${token}`, "Content-Type":"application/json" },
-      body: JSON.stringify(content) });
-  if(!res.ok) throw new Error(`Drive更新エラー ${res.status}`);
+// watch側と同じApps Scriptを使って書き戻す。drive.fileスコープ経由の直接書き込みは、
+// Apps Scriptが作成したファイルに対して403(権限エラー)になることがあるため、
+// 削除の保存もwatchと同じApps Script経由に統一している。
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
+const STATS_TOKEN_KEY = "tennis-stats-appsscript-token";
+
+async function sha256Hex(text){
+  const enc = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-// 削除など、Driveから読み込んだデータを書き換えた後に呼ぶ。
-// Drive経由で読み込んだ場合だけ、そのファイルIDとトークンを使って上書き保存できる。
+async function getAppsScriptToken(){
+  let token = localStorage.getItem(STATS_TOKEN_KEY);
+  if(token) return token;
+  const phrase = prompt("Driveに保存するための合言葉を入力してください(watchの接続設定と同じもの)");
+  if(!phrase) return null;
+  token = await sha256Hex(phrase);
+  localStorage.setItem(STATS_TOKEN_KEY, token);
+  return token;
+}
+
+// 削除など、データを書き換えた後に呼ぶ。Driveから読み込んだ場合のみ書き戻せる
+// (ファイルから読み込んだだけの場合は、どこにも書き戻す先が無いため)。
 let loadedFromDriveFileId = null;
 async function saveMatchesToDriveIfLoaded(){
   if(!loadedFromDriveFileId){
     toast2("ファイルから読み込んだデータなので、Driveへの保存はできません。手元のファイルを直接編集してください。");
     return;
   }
+  const token = await getAppsScriptToken();
+  if(!token){ toast2("合言葉が未入力のため、保存をキャンセルしました"); return; }
   try{
-    await driveUpdateFile(loadedFromDriveFileId, { matches: allMatches }, accessToken);
-    toast2("Driveに保存しました");
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ token, action: "replaceAll", matches: allMatches })
+    });
+    if(!res.ok) throw new Error(`送信エラー ${res.status}`);
+    const data = await res.json();
+    if(!data.ok) throw new Error(data.error || "不明なエラー");
+    toast2(`Driveに保存しました(${data.matchCount}試合)`);
   }catch(e){
+    // 合言葉が間違っている可能性があるので、失敗時はキャッシュを消して次回また聞き直す
+    localStorage.removeItem(STATS_TOKEN_KEY);
     toast2("Driveへの保存に失敗しました: " + e.message);
   }
 }
@@ -832,9 +871,31 @@ function renderPointGrid(m){
 
   const pairTags = computePairPointTags(m); // 自分/パートナーのタグ(ペア設定がある試合のみ中身が入る)
   const hasPairTags = Object.keys(pairTags).length > 0;
+  const selfReturnSide = (m.settings && m.settings.selfReturnSide) || "";
 
   const maxPts = Math.max(...gameKeys.map(k=>games[k].length));
-  const totalCols = maxPts + 4; // Sv + Gm + ポイント(maxPts) + nameA + nameB
+  const totalCols = maxPts + 5; // Sv + Gm + 選手名 + ポイント(maxPts) + nameA + nameB
+
+  // コートサイド(デュース側/アド側)はポイントの通し番号の偶奇で決まる(サーブ・リターン共通の物理的な位置)
+  function courtSideOf(p){
+    const idx = (p.pointInGame||1) - 1;
+    return (idx % 2 === 0) ? "deuce" : "ad";
+  }
+
+  function cellFor(p, side, showCourt){
+    if(p.side !== side) return `<td></td>`; // このポイントはこちら側が取っていないので空欄
+    if(!showCourt){
+      const wonByServer = (p.side === p.server);
+      const scoreLabel = side==="a" ? p.scoreA : p.scoreB;
+      return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}"><span class="w-letter">${scoreLabel}</span></td>`;
+    }
+    const courtSide = courtSideOf(p);
+    const courtLetter = courtSide==="deuce" ? "D" : "A";
+    const courtTag = `<span class="court-tag court-${courtSide}">${courtLetter}</span>`;
+    const wonByServer = (p.side === p.server);
+    const scoreLabel = side==="a" ? p.scoreA : p.scoreB;
+    return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${courtTag}<span class="w-letter">${scoreLabel}</span></td>`;
+  }
 
   let tallyA = 0, tallyB = 0, lastSet = null;
   const rows = gameKeys.map(key=>{
@@ -853,29 +914,44 @@ function renderPointGrid(m){
     lastSet = setNumber;
     if(winnerLast==="a") tallyA++; else if(winnerLast==="b") tallyB++;
 
-    const marks = pts.map(p=>{
-      const wonByServer = (p.side === p.server); // サーブ側が取ったか、リターン側(ブレーク)が取ったか
-      const tagKey = `${p.setNumber}-${p.gameNumber}-${p.pointInGame}`;
-      const tag = pairTags[tagKey]; // 'self' | 'partner' | undefined
-      const tagHtml = tag ? `<span class="w-tag">${tag==="self"?"自":"パ"}</span>` : "";
-      const scoreLabel = p.side==="a" ? p.scoreA : p.scoreB; // 得点者がその時点で到達したスコア(15/30/40/Adなど)
-      return `<td class="w-mark ${p.side} ${wonByServer?"srv-win":"ret-win"}"><span class="w-letter">${scoreLabel}</span>${tagHtml}</td>`;
-    }).join("");
-    const filler = `<td></td>`.repeat(maxPts - pts.length);
-    return divider + `<tr><td class="sv ${server}">${server==="a"?"じ":(server==="b"?"あ":"")}</td>` +
-      `<td>${key.split("-")[1]}</td>${marks}${filler}` +
-      `<td class="tally-a">${winnerLast==="a"?tallyA:""}</td>` +
-      `<td class="tally-b">${winnerLast==="b"?tallyB:""}</td></tr>`;
+    // 自チームがサーブのゲームは、誰がサーブしたか(自分/パートナー)がゲーム全体で一定なので
+    // 「Sv」欄に大きめの文字でまとめて表示する(小さい添え字より読みやすいため)
+    let svLabel = server==="a" ? "じ" : (server==="b" ? "あ" : "");
+    if(server==="a" && hasPairTags && pts[0]){
+      const tag = pairTags[`${pts[0].setNumber}-${pts[0].gameNumber}-${pts[0].pointInGame}`];
+      if(tag) svLabel += `<span class="sv-pair">${tag==="self"?"自":"パ"}</span>`;
+    }
+
+    const fillerA = `<td></td>`.repeat(maxPts - pts.length);
+    const fillerB = `<td></td>`.repeat(maxPts - pts.length);
+    // D/A(コートサイド)は「自チームがリターンしている時、自分/パートナーどちらが守っているか」を
+    // 示すためのものなので、自チームがサーブのゲームでは意味を持たない(相手側のペア内訳は分からない
+    // ため、そちらに付けても紛らわしいだけ)。ペア設定が無い試合でも表示しない。
+    const showCourt = hasPairTags && server === "b";
+    const rowA = pts.map(p=>cellFor(p,"a",showCourt)).join("");
+    const rowB = pts.map(p=>cellFor(p,"b",showCourt)).join("");
+
+    return divider +
+      `<tr><td rowspan="2" class="sv ${server}">${svLabel}</td>` +
+      `<td rowspan="2">${key.split("-")[1]}</td>` +
+      `<td class="side-name a">${m.nameA}</td>${rowA}${fillerA}` +
+      `<td rowspan="2" class="tally-a">${winnerLast==="a"?tallyA:""}</td>` +
+      `<td rowspan="2" class="tally-b">${winnerLast==="b"?tallyB:""}</td></tr>` +
+      `<tr><td class="side-name b">${m.nameB}</td>${rowB}${fillerB}</tr>`;
   }).join("");
 
+  const sideLabel = { deuce:"デュース側", ad:"アド側" };
   const legend = `<div class="grid-legend">
       <span class="legend-item"><span class="w-mark a srv-win legend-sample"><span class="w-letter">40</span></span>塗り=サーブ側が獲得</span>
       <span class="legend-item"><span class="w-mark a ret-win legend-sample"><span class="w-letter">40</span></span>枠のみ=リターン側が獲得(ブレーク)</span>
-      ${hasPairTags ? '<span class="legend-item">右上の「自/パ」=自分/パートナーが関わったポイント</span>' : ""}
+      <span class="legend-item"><span class="court-tag court-deuce legend-badge">D</span>デュース側</span>
+      <span class="legend-item"><span class="court-tag court-ad legend-badge">A</span>アド側</span>
+      ${hasPairTags ? `<span class="legend-item">Sv欄の「自/パ」=サーブが自分/パートナーどちらか</span>` : ""}
+      ${selfReturnSide ? `<span class="legend-item legend-strong">自分のリターン: ${sideLabel[selfReturnSide]||selfReturnSide}(パートナーは${sideLabel[selfReturnSide==="deuce"?"ad":"deuce"]})</span>` : ""}
     </div>`;
 
   return legend + `<div class="grid-wrap"><table class="pt-grid"><thead><tr>` +
-    `<th>Sv</th><th>Gm</th><th colspan="${maxPts}">ポイント</th><th>${m.nameA}</th><th>${m.nameB}</th>` +
+    `<th>Sv</th><th>Gm</th><th></th><th colspan="${maxPts}">ポイント</th><th>${m.nameA}</th><th>${m.nameB}</th>` +
     `</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
