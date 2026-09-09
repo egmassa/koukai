@@ -32,6 +32,8 @@
   #setup h1, #matchSetup h1{font-size:21px; font-weight:700; margin:0 0 16px; color:var(--dim);}
   #setupBackBtn{margin-top:10px; padding:7px 16px; border-radius:16px; border:1px solid var(--line);
     background:transparent; color:var(--dim); font-size:12px;}
+  #quickStartBtn{margin-top:8px; padding:7px 16px; border-radius:16px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); font-size:12px;}
   .pair-note{font-size:11px; color:var(--dim); line-height:1.6; margin:6px 0 4px; max-width:240px;}
   .grp-label{font-size:17px; color:var(--dim); margin:20px 0 8px; font-weight:600;}
   .mode-toggle{display:flex; flex-wrap:wrap; gap:8px; width:100%; max-width:280px; justify-content:center;}
@@ -202,29 +204,32 @@
       <button class="mode-btn" data-value="oneDeuce">1デュース</button>
     </div>
 
-    <button class="primary" id="setupNextBtn">次へ(参加者の設定)</button>
-  </section>
-
-  <section id="matchSetup" class="screen">
-    <h1>参加者設定</h1>
-
     <div class="grp-label">最初のサーブ</div>
     <div class="mode-toggle" data-group="firstServer">
       <button class="mode-btn active" data-value="a">じぶん</button>
       <button class="mode-btn" data-value="b">あいて</button>
     </div>
 
+    <button class="primary" id="setupNextBtn">次へ(参加者の設定)</button>
+    <button id="quickStartBtn">参加者設定なしで開始</button>
+  </section>
+
+  <section id="matchSetup" class="screen">
+    <h1>参加者設定</h1>
+
     <div id="pairSettings">
-      <div class="pair-note">この2つは分析用の任意項目です。触らなければ「未設定」として記録され、自分/パートナー別の分析は行われません(誤った集計を防ぐため、デフォルト選択はあえて用意していません)。</div>
+      <div class="pair-note">この2つは分析用の任意項目です。「未設定」のままで開始してもOK(自分/パートナー別の分析は行われないだけです)。前回選んだ内容をやめたい時は「未設定」を押せばリセットできます。</div>
 
       <div class="grp-label">自チームの最初のサーブは</div>
       <div class="mode-toggle" data-group="pairFirstServer">
+        <button class="mode-btn active" data-value="">未設定</button>
         <button class="mode-btn" data-value="self">じぶん</button>
         <button class="mode-btn" data-value="partner">パートナー</button>
       </div>
 
       <div class="grp-label">じぶんのリターン側</div>
       <div class="mode-toggle" data-group="selfReturnSide">
+        <button class="mode-btn active" data-value="">未設定</button>
         <button class="mode-btn" data-value="deuce">デュース側</button>
         <button class="mode-btn" data-value="ad">アド側</button>
       </div>
@@ -335,7 +340,7 @@ const LOCAL_DB_KEY = "tennis-watch-matches"; // ローカル永続DB(Drive未接
 
 /* ====================== セットアップ入力の一時保持 ====================== */
 let pendingSettings = { mode:"doubles", gamesPerSet:4, setFinishMode:"firstTo", deuceMode:"noAd", firstServer:"a",
-  pairFirstServer:null, selfReturnSide:null };
+  pairFirstServer:"", selfReturnSide:"" };
 
 function updatePairSettingsVisibility(){
   document.getElementById("pairSettings").style.display = (pendingSettings.mode==="doubles") ? "block" : "none";
@@ -423,15 +428,38 @@ function newMatchState(nameA, nameB){
 $("setupNextBtn").addEventListener("click", ()=> showScreen("matchSetup"));
 $("setupBackBtn").addEventListener("click", ()=> showScreen("setup"));
 
-$("startBtn").addEventListener("click", ()=>{
+function resetPairSettingsToUnset(){
+  // 組み合わせ(パートナー)が変わるたびに違う値になり得るので、
+  // ルール設定(ゲーム数など)とは違い、1試合ごとに「未設定」へ戻す。
+  pendingSettings.pairFirstServer = "";
+  pendingSettings.selfReturnSide = "";
+  ["pairFirstServer","selfReturnSide"].forEach(key=>{
+    const group = document.querySelector(`.mode-toggle[data-group="${key}"]`);
+    if(!group) return;
+    group.querySelectorAll(".mode-btn").forEach(b=>{
+      b.classList.toggle("active", b.dataset.value==="");
+    });
+  });
+  // 名前も対戦相手が変わるたびに違う可能性があるので、参加者設定なしで
+  // 開始した場合に前の試合の相手名が誤って引き継がれないよう空欄に戻す。
+  $("nameA").value = "";
+  $("nameB").value = "";
+}
+
+function startMatch(){
   const nameA = $("nameA").value.trim() || (pendingSettings.mode==="doubles" ? "自チーム" : "じぶん");
   const nameB = $("nameB").value.trim() || "あいて";
   state = newMatchState(nameA, nameB);
+  resetPairSettingsToUnset();
   render();
   showScreen("scoreScreen");
   persist();
   toast(rulesSummary(state.settings));
-});
+}
+
+$("startBtn").addEventListener("click", startMatch);
+$("quickStartBtn").addEventListener("click", startMatch);
+
 
 /* ====================== テニスの得点ロジック(設定反映) ====================== */
 function pushHistory(){
