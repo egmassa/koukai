@@ -62,6 +62,7 @@
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
   .serveinfo{font-size:13px; margin-bottom:3px; font-weight:700;}
+  .rules-strip{font-size:10px; color:var(--dim); margin-bottom:4px; font-weight:600; opacity:0.85;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
     display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .serveinfo.a{color:var(--teal);}
@@ -205,7 +206,7 @@
 
     <div class="grp-label">セット決着</div>
     <div class="mode-toggle" data-group="setFinishMode">
-      <button class="mode-btn" data-value="winByTwo">2差要</button>
+      <button class="mode-btn" data-value="winByTwo">タイブレーク</button>
       <button class="mode-btn active" data-value="firstTo">先取</button>
       <button class="mode-btn" data-value="fixed">総数固定</button>
     </div>
@@ -261,6 +262,7 @@
       <button id="cloudBtn" title="Google Driveに保存">&#9729;</button>
     </div>
 
+    <div class="rules-strip" id="rulesStrip"></div>
     <div class="serveinfo" id="serveInfo"></div>
     <div class="tiebreak-badge" id="tiebreakBadge" style="display:none;">タイブレーク</div>
 
@@ -762,6 +764,7 @@ $("backBtn").addEventListener("click", ()=> showScreen("scoreScreen"));
 function render(){
   if(!state) return;
   $("pairEditBtn").style.display = (state.mode==="doubles") ? "flex" : "none";
+  $("rulesStrip").textContent = rulesSummary(state.settings);
   const serverName = state.server==="a" ? state.nameA : state.nameB;
   const serveEl = $("serveInfo");
   serveEl.textContent = "🎾 " + serverName + " のサーブ";
@@ -788,7 +791,7 @@ function render(){
 }
 
 function rulesSummary(st){
-  const finishLabel = {winByTwo:"2差必要", firstTo:"先取のみ", fixed:"総ゲーム数固定"}[st.setFinishMode] || st.setFinishMode;
+  const finishLabel = {winByTwo:"タイブレーク", firstTo:"先取のみ", fixed:"総ゲーム数固定"}[st.setFinishMode] || st.setFinishMode;
   const deuceLabel = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"}[st.deuceMode] || st.deuceMode;
   return `${st.gamesPerSet}ゲーム制・${finishLabel}・${deuceLabel}`;
 }
