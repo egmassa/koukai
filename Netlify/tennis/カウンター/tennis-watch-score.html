@@ -320,6 +320,7 @@
     <input id="connTokenInput" placeholder="合言葉(自由なフレーズでOK)" maxlength="200">
     <button class="primary" id="connSaveBtn">保存</button>
     <button id="connBackBtn">戻る</button>
+    <div class="desc" id="connTokenDebug" style="word-break:break-all; margin-top:14px;"></div>
   </section>
 
   <section id="pairEditScreen" class="screen">
@@ -888,6 +889,9 @@ $("connSettingsBtn").addEventListener("click", ()=>{
   // 空欄のままにして、変更したい時だけ入力してもらう。
   $("connTokenInput").value = "";
   $("connTokenInput").placeholder = cfg.token ? "設定済み(変更する場合のみ入力)" : "合言葉(自由なフレーズでOK)";
+  // トラブルシューティング用: 実際に保存されているハッシュ値をそのまま表示する
+  // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
+  $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${cfg.token}` : "現在、合言葉は保存されていません";
   showScreen("connSettingsScreen");
 });
 $("connSaveBtn").addEventListener("click", async ()=>{
