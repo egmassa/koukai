@@ -216,6 +216,8 @@
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 // ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
+// ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
+// 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 function replayGame(pointsInOrder, server, deuceMode){
   let a = 0, b = 0;
   let deuceCount = 0;
@@ -429,7 +431,24 @@ function computePairPointTags(match){
   let selfTurn = (settings.pairFirstServer === "self");
   gameKeys.forEach(key=>{
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
-    if(pts[0] && pts[0].tiebreak) return; // タイブレークはサーブが1ゲーム中に何度も交代するため対象外
+    const isTiebreak = pts[0] && pts[0].tiebreak;
+
+    if(isTiebreak){
+      // タイブレークはサーブが1ゲーム中に何度も自チーム内で交代するため、ゲーム単位の
+      // 交互判定ではなく、watch側がその場で記録した正しい値(pairServer)を使う。
+      // (古い記録でpairServerが無い場合は、そのポイントの自分/パートナー判定を諦める)
+      pts.forEach(p=>{
+        if(p.server === "a"){
+          if(p.pairServer) tags[`${p.setNumber}-${p.gameNumber}-${p.pointInGame}`] = p.pairServer;
+        } else {
+          const idx = (p.pointInGame||1) - 1;
+          const courtSide = (idx%2===0) ? "deuce" : "ad";
+          tags[`${p.setNumber}-${p.gameNumber}-${p.pointInGame}`] = (courtSide===settings.selfReturnSide) ? "self" : "partner";
+        }
+      });
+      return;
+    }
+
     const server = pts[0].server;
     if(server === "a"){
       const who = selfTurn ? "self" : "partner";

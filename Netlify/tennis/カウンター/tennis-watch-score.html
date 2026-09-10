@@ -88,7 +88,8 @@
   .tap-btn:active{filter:brightness(0.85);}
   .tb-name{font-size:12px; font-weight:700; opacity:0.9; max-width:90%; overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap;}
-  .tb-row{display:flex; align-items:center; gap:22px; margin:2px 0;}
+  .tb-row{display:flex; align-items:center; gap:8px; margin:2px 0;}
+  .tb-stats-group{display:flex; align-items:center; gap:22px;}
   .tb-box{display:flex; flex-direction:column; align-items:center; justify-content:center;
     border-radius:12px; padding:2px 12px; min-width:34%;}
   .tb-box-label{font-size:8px; opacity:0.85; line-height:1.4; font-weight:700;}
@@ -96,6 +97,10 @@
   .tb-box-game{background:rgba(0,0,0,0.4);}
   .tb-box-game .tb-box-label, .tb-box-game .tb-game{color:#fff;}
   .tb-point{font-size:44px; font-weight:800; line-height:1;}
+  .tb-serve-col{display:flex; align-items:center; justify-content:center; min-width:22px;}
+  .tb-serve-icon{font-size:18px; line-height:1; display:inline-block; text-align:center;}
+  .tb-serve-icon.pair-badge{font-size:12px; font-weight:800; padding:2px 6px; border-radius:6px;
+    background:rgba(0,0,0,0.25); color:inherit;}
   .tb-game{font-size:38px; font-weight:800; line-height:1;}
   .tb-sub{font-size:10px; opacity:0.85; margin-top:1px;}
 
@@ -270,13 +275,16 @@
       <button class="tap-btn a" id="tapA">
         <span class="tb-name" id="labelA">じぶん</span>
         <span class="tb-row">
-          <span class="tb-box tb-box-point">
-            <span class="tb-box-label">ポイント</span>
-            <span class="tb-point" id="ptA">0</span>
-          </span>
-          <span class="tb-box tb-box-game">
-            <span class="tb-box-label">ゲーム</span>
-            <span class="tb-game" id="gA">0</span>
+          <span class="tb-serve-col"><span class="tb-serve-icon" id="serveIconA"></span></span>
+          <span class="tb-stats-group">
+            <span class="tb-box tb-box-point">
+              <span class="tb-box-label">ポイント</span>
+              <span class="tb-point" id="ptA">0</span>
+            </span>
+            <span class="tb-box tb-box-game">
+              <span class="tb-box-label">ゲーム</span>
+              <span class="tb-game" id="gA">0</span>
+            </span>
           </span>
         </span>
         <span class="tb-sub" id="subA">セット0</span>
@@ -284,13 +292,16 @@
       <button class="tap-btn b" id="tapB">
         <span class="tb-name" id="labelB">あいて</span>
         <span class="tb-row">
-          <span class="tb-box tb-box-point">
-            <span class="tb-box-label">ポイント</span>
-            <span class="tb-point" id="ptB">0</span>
-          </span>
-          <span class="tb-box tb-box-game">
-            <span class="tb-box-label">ゲーム</span>
-            <span class="tb-game" id="gB">0</span>
+          <span class="tb-serve-col"><span class="tb-serve-icon" id="serveIconB"></span></span>
+          <span class="tb-stats-group">
+            <span class="tb-box tb-box-point">
+              <span class="tb-box-label">ポイント</span>
+              <span class="tb-point" id="ptB">0</span>
+            </span>
+            <span class="tb-box tb-box-game">
+              <span class="tb-box-label">ゲーム</span>
+              <span class="tb-game" id="gB">0</span>
+            </span>
           </span>
         </span>
         <span class="tb-sub" id="subB">セット0</span>
@@ -455,6 +466,12 @@ function newMatchState(nameA, nameB){
     games: {a:0,b:0},
     sets: [],
     tiebreak: null, // 6-6等(N-N)になった時の本タイブレーク(7点先取・2点差)。{a,b}で進行中を表す
+    // 自チームが今サーブするなら自分/パートナーのどちらの番か('self'|'partner')。
+    // 通常ゲーム・タイブレーク内の複数回のサーブ番、両方で正しく交互になるよう
+    // 「自チームの新しいサーブ番が始まる瞬間」に必ず1回だけ進める(advanceTeamAServeTurn)。
+    // 最初のゲームが自チームのサーブで始まる場合は、ここで初期値を入れておく。
+    pairServeTurn: (pendingSettings.mode==="doubles" && pendingSettings.pairFirstServer && pendingSettings.firstServer==="a")
+      ? pendingSettings.pairFirstServer : null,
     deuceCount: 0, // 現在のゲーム内でデュースに到達した回数(1デュース判定用)
     server: pendingSettings.firstServer, // 'a' | 'b' 現在サーブ権を持つ側
     pointInGame: 0, // 現在のゲーム内で何本目のポイントか(スプレッドシートでの横並び復元用)
@@ -567,8 +584,24 @@ $("pairEditBackBtn").addEventListener("click", ()=>{
 
 /* ====================== テニスの得点ロジック(設定反映) ====================== */
 function pushHistory(){
-  state.history.push(JSON.stringify({points:state.points, games:state.games, sets:state.sets, deuceCount:state.deuceCount||0, server:state.server, pointInGame:state.pointInGame||0, tiebreak:state.tiebreak}));
+  state.history.push(JSON.stringify({points:state.points, games:state.games, sets:state.sets, deuceCount:state.deuceCount||0, server:state.server, pointInGame:state.pointInGame||0, tiebreak:state.tiebreak, pairServeTurn:state.pairServeTurn}));
   if(state.history.length>100) state.history.shift();
+}
+
+// 自チームの新しいサーブ番が始まる瞬間に呼ぶ(通常ゲームの開始時、タイブレーク開始時、
+// タイブレーク内でサーブが自チームに回ってきた時、のすべてで呼ぶ)。
+// 呼ばれるたびに1回だけ自分/パートナーを切り替える(履歴を遡って推測するのではなく、
+// その場でリアルタイムに追跡するので、タイブレーク中に何度も自チームの番が来ても正しく動く)。
+function advanceTeamAServeTurn(){
+  if(state.mode !== "doubles" || !state.settings.pairFirstServer){
+    state.pairServeTurn = null;
+    return;
+  }
+  if(state.pairServeTurn === null){
+    state.pairServeTurn = state.settings.pairFirstServer;
+  } else {
+    state.pairServeTurn = (state.pairServeTurn === "self") ? "partner" : "self";
+  }
 }
 
 function addPoint(side){
@@ -598,7 +631,8 @@ function addNormalPoint(side, setNumber){
     side, winnerName: (side==="a" ? state.nameA : state.nameB),
     server, serverName: (server==="a" ? state.nameA : state.nameB),
     scoreA: pointText(state.points.a, state.points.b),
-    scoreB: pointText(state.points.b, state.points.a)
+    scoreB: pointText(state.points.b, state.points.a),
+    pairServer: (server==="a") ? state.pairServeTurn : null
   });
   if(state.pointLog.length > 2000) state.pointLog.shift(); // 上限を設けて肥大化を防ぐ
 
@@ -621,13 +655,15 @@ function addTiebreakPoint(side, setNumber){
     side, winnerName: (side==="a" ? state.nameA : state.nameB),
     server, serverName: (server==="a" ? state.nameA : state.nameB),
     scoreA: String(state.tiebreak.a), scoreB: String(state.tiebreak.b),
-    tiebreak: true
+    tiebreak: true,
+    pairServer: (server==="a") ? state.pairServeTurn : null // このポイントを自チームが誰(自分/パートナー)がサーブしたかの記録
   });
   if(state.pointLog.length > 2000) state.pointLog.shift();
 
   const played = state.tiebreak.a + state.tiebreak.b;
   if(played % 2 === 1){
     state.tiebreak.server = (state.tiebreak.server==="a") ? "b" : "a";
+    if(state.tiebreak.server === "a") advanceTeamAServeTurn(); // タイブレーク内で自チームに新しいサーブ番が回ってきた
   }
   state.server = state.tiebreak.server;
 
@@ -691,6 +727,9 @@ function maybeFinishGame(){
     const N = state.settings.gamesPerSet;
     if(state.settings.setFinishMode==="winByTwo" && state.games.a===N && state.games.b===N){
       state.tiebreak = {a:0, b:0, server: state.server};
+      if(state.tiebreak.server === "a") advanceTeamAServeTurn();
+    } else if(state.server === "a"){
+      advanceTeamAServeTurn(); // 新しい通常ゲームが自チームのサーブで始まる
     }
   }
 }
@@ -742,6 +781,7 @@ $("undoBtn").addEventListener("click", ()=>{
   state.server = s.server || state.server;
   state.pointInGame = s.pointInGame||0;
   state.tiebreak = s.tiebreak || null;
+  state.pairServeTurn = (s.pairServeTurn !== undefined) ? s.pairServeTurn : state.pairServeTurn;
   state.pointLog.pop(); // このundoで取り消される1ポイント分のログを削除
   render();
   persist();
@@ -761,6 +801,14 @@ $("historyBtn").addEventListener("click", ()=>{
 });
 $("backBtn").addEventListener("click", ()=> showScreen("scoreScreen"));
 
+// 現在サーブ中なのが自チームの場合に、自分/パートナーどちらの番かを判定する
+// (computePairPointTagsと同じアルゴリズムを、ライブ表示用にその場で計算する)
+function getCurrentServerPairLabel(){
+  if(state.mode !== "doubles" || !state.settings.pairFirstServer) return null;
+  if(state.server !== "a") return null;
+  return state.pairServeTurn;
+}
+
 function render(){
   if(!state) return;
   $("pairEditBtn").style.display = (state.mode==="doubles") ? "flex" : "none";
@@ -772,6 +820,19 @@ function render(){
   serveEl.classList.toggle("b", state.server==="b");
   $("labelA").textContent = state.nameA;
   $("labelB").textContent = state.nameB;
+
+  // サーブ側のポイント数字の左に、サーブ中であることが一目でわかるアイコンを出す。
+  // ダブルスでペア設定が分かっている場合は、さらに自分/パートナーのどちらかも表示する。
+  const pairLabel = getCurrentServerPairLabel();
+  const iconA = $("serveIconA"), iconB = $("serveIconB");
+  iconA.className = "tb-serve-icon"; iconB.className = "tb-serve-icon";
+  iconA.textContent = ""; iconB.textContent = "";
+  if(state.server==="a"){
+    if(pairLabel){ iconA.textContent = pairLabel==="self" ? "自" : "パ"; iconA.classList.add("pair-badge"); }
+    else { iconA.textContent = "🎾"; }
+  } else if(state.server==="b"){
+    iconB.textContent = "🎾";
+  }
 
   $("ptA").textContent = state.tiebreak ? state.tiebreak.a : pointText(state.points.a, state.points.b);
   $("ptB").textContent = state.tiebreak ? state.tiebreak.b : pointText(state.points.b, state.points.a);
