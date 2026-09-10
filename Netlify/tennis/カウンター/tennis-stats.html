@@ -64,6 +64,10 @@
   .pct-val{position:relative; z-index:1;}
 
   .table-wrap{overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:12px;}
+  /* 試合一覧は件数が多いとページ全体が非常に長くなるため、ここだけ内部スクロールにする
+     (だいたい10件分の高さ。見出し行は上に固定して、スクロールしても見えるようにする) */
+  .match-table-wrap{max-height:420px; overflow-y:auto;}
+  .match-table-wrap thead th{position:sticky; top:0; background:var(--panel2); z-index:1;}
   .table-wrap table{min-width:640px;}
 
   #detailPanel{display:none; margin-top:16px; background:var(--panel); border:1px solid var(--line);
@@ -103,6 +107,9 @@
   /* コートサイド(デュース側/アド側)は、勝った側のセルに付くD/Aバッジだけで示す(縦の色線は廃止) */
   .sv-pair{display:inline-block; margin-left:3px; font-size:11px; padding:1px 5px; border-radius:5px;
     background:var(--panel2); font-weight:800; color:var(--text);}
+  .tb-row-badge{display:inline-block; font-size:10px; font-weight:800; padding:2px 6px; border-radius:6px;
+    background:var(--teal); color:#04231d; white-space:nowrap;}
+  .court-tag.pair-inline{background:var(--panel2); color:var(--text);}
   .pt-grid td.tally-a{color:var(--teal); font-weight:800;}
   .pt-grid td.tally-b{color:var(--orange); font-weight:800;}
   .pt-grid td.set-divider{background:var(--panel2); color:var(--text); font-weight:700;
@@ -191,7 +198,7 @@
     <section>
       <h2>試合一覧</h2>
       <div class="desc">日付順。行をタップすると詳細が見られます</div>
-      <div class="table-wrap"><table id="matchTable"></table></div>
+      <div class="table-wrap match-table-wrap"><table id="matchTable"></table></div>
       <div id="detailPanel"></div>
     </section>
 
@@ -906,19 +913,24 @@ function renderPointGrid(m){
     return (idx % 2 === 0) ? "deuce" : "ad";
   }
 
-  function cellFor(p, side, showCourt){
+  function cellFor(p, side, isTiebreakRow){
     if(p.side !== side) return `<td></td>`; // このポイントはこちら側が取っていないので空欄
-    if(!showCourt){
-      const wonByServer = (p.side === p.server);
-      const scoreLabel = side==="a" ? p.scoreA : p.scoreB;
-      return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}"><span class="w-letter">${scoreLabel}</span></td>`;
-    }
-    const courtSide = courtSideOf(p);
-    const courtLetter = courtSide==="deuce" ? "D" : "A";
-    const courtTag = `<span class="court-tag court-${courtSide}">${courtLetter}</span>`;
     const wonByServer = (p.side === p.server);
     const scoreLabel = side==="a" ? p.scoreA : p.scoreB;
-    return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${courtTag}<span class="w-letter">${scoreLabel}</span></td>`;
+    let tagHtml = "";
+    if(p.server === "b" && hasPairTags){
+      // リターン側: コートサイド(デュース/アド)をポイントごとに表示
+      const courtSide = courtSideOf(p);
+      const courtLetter = courtSide==="deuce" ? "D" : "A";
+      tagHtml = `<span class="court-tag court-${courtSide}">${courtLetter}</span>`;
+    } else if(p.server === "a" && isTiebreakRow && hasPairTags){
+      // タイブレーク中の自チームサーブは、1行の中で自分/パートナーが何度も入れ替わるため、
+      // Sv欄にまとめず、ポイントごとに個別表示する
+      const key = `${p.setNumber}-${p.gameNumber}-${p.pointInGame}`;
+      const tag = pairTags[key];
+      if(tag) tagHtml = `<span class="court-tag pair-inline">${tag==="self"?"自":"パ"}</span>`;
+    }
+    return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${tagHtml}<span class="w-letter">${scoreLabel}</span></td>`;
   }
 
   let tallyA = 0, tallyB = 0, lastSet = null;
@@ -926,6 +938,7 @@ function renderPointGrid(m){
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
     const [setNumber] = key.split("-").map(Number);
     const server = pts[0] ? pts[0].server : "";
+    const isTiebreak = !!(pts[0] && pts[0].tiebreak);
     const winnerLast = pts[pts.length-1] ? pts[pts.length-1].side : null;
 
     let divider = "";
@@ -938,25 +951,28 @@ function renderPointGrid(m){
     lastSet = setNumber;
     if(winnerLast==="a") tallyA++; else if(winnerLast==="b") tallyB++;
 
-    // 自チームがサーブのゲームは、誰がサーブしたか(自分/パートナー)がゲーム全体で一定なので
-    // 「Sv」欄に大きめの文字でまとめて表示する(小さい添え字より読みやすいため)
-    let svLabel = server==="a" ? "じ" : (server==="b" ? "あ" : "");
-    if(server==="a" && hasPairTags && pts[0]){
-      const tag = pairTags[`${pts[0].setNumber}-${pts[0].gameNumber}-${pts[0].pointInGame}`];
-      if(tag) svLabel += `<span class="sv-pair">${tag==="self"?"自":"パ"}</span>`;
+    let svLabel;
+    if(isTiebreak){
+      // タイブレークは1行の中でサーブが自チーム/相手・自分/パートナーと何度も入れ替わるので、
+      // Sv欄には単一の値ではなく「タイブレーク」であることだけを示す(内訳はポイントごとに表示)
+      svLabel = `<span class="tb-row-badge">タイブレーク</span>`;
+    } else {
+      // 自チームがサーブのゲームは、誰がサーブしたか(自分/パートナー)がゲーム全体で一定なので
+      // 「Sv」欄に大きめの文字でまとめて表示する(小さい添え字より読みやすいため)
+      svLabel = server==="a" ? "じ" : (server==="b" ? "あ" : "");
+      if(server==="a" && hasPairTags && pts[0]){
+        const tag = pairTags[`${pts[0].setNumber}-${pts[0].gameNumber}-${pts[0].pointInGame}`];
+        if(tag) svLabel += `<span class="sv-pair">${tag==="self"?"自":"パ"}</span>`;
+      }
     }
 
     const fillerA = `<td></td>`.repeat(maxPts - pts.length);
     const fillerB = `<td></td>`.repeat(maxPts - pts.length);
-    // D/A(コートサイド)は「自チームがリターンしている時、自分/パートナーどちらが守っているか」を
-    // 示すためのものなので、自チームがサーブのゲームでは意味を持たない(相手側のペア内訳は分からない
-    // ため、そちらに付けても紛らわしいだけ)。ペア設定が無い試合でも表示しない。
-    const showCourt = hasPairTags && server === "b";
-    const rowA = pts.map(p=>cellFor(p,"a",showCourt)).join("");
-    const rowB = pts.map(p=>cellFor(p,"b",showCourt)).join("");
+    const rowA = pts.map(p=>cellFor(p,"a",isTiebreak)).join("");
+    const rowB = pts.map(p=>cellFor(p,"b",isTiebreak)).join("");
 
     return divider +
-      `<tr><td rowspan="2" class="sv ${server}">${svLabel}</td>` +
+      `<tr><td rowspan="2" class="sv ${isTiebreak?"":server}">${svLabel}</td>` +
       `<td rowspan="2">${key.split("-")[1]}</td>` +
       `<td class="side-name a">${m.nameA}</td>${rowA}${fillerA}` +
       `<td rowspan="2" class="tally-a">${winnerLast==="a"?tallyA:""}</td>` +
@@ -1045,6 +1061,8 @@ function showMatchDetail(matchId){
     <button id="detailClose">閉じる</button>
   `;
   $("detailClose").addEventListener("click", ()=>{ panel.style.display="none"; });
+  // 試合一覧が長いと、上の方の試合を選んだ時に詳細が画面外になってしまうので、自動でスクロールする
+  panel.scrollIntoView({behavior:"smooth", block:"start"});
 }
 </script>
 </body>
