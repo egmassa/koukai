@@ -214,6 +214,8 @@
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 // ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
 // 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
+// ゲーム内のポイント勝者列を、そのゲームのルール(deuceMode)に沿って1点ずつ再生し、
+// 各ポイントが「ゲームポイント/ブレークポイントだったか」「コートのどちら側だったか」を判定する。
 function replayGame(pointsInOrder, server, deuceMode){
   let a = 0, b = 0;
   let deuceCount = 0;
@@ -278,6 +280,7 @@ function computeMatchStats(match){
 
   Object.keys(games).forEach(key=>{
     const pts = games[key].slice().sort((x,y)=>(x.pointInGame||0)-(y.pointInGame||0));
+    if(pts[0] && pts[0].tiebreak) return; // タイブレーク(7点先取・2点差)は通常ゲームと勝敗条件が違うため集計対象外
     const server = pts[0].server;
     const receiver = server==="a" ? "b" : "a";
     const { steps, reachedDeuce, winner } = replayGame(pts.map(p=>({side:p.side})), server, deuceMode);
@@ -368,6 +371,7 @@ function computePairStats(match){
 
   gameKeys.forEach(key=>{
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
+    if(pts[0] && pts[0].tiebreak) return; // タイブレークはサーブが1ゲーム中に何度も交代するため対象外
     const server = pts[0].server;
     const winner = pts[pts.length-1].side;
 
@@ -425,6 +429,7 @@ function computePairPointTags(match){
   let selfTurn = (settings.pairFirstServer === "self");
   gameKeys.forEach(key=>{
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
+    if(pts[0] && pts[0].tiebreak) return; // タイブレークはサーブが1ゲーム中に何度も交代するため対象外
     const server = pts[0].server;
     if(server === "a"){
       const who = selfTurn ? "self" : "partner";

@@ -62,6 +62,8 @@
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
   .serveinfo{font-size:13px; margin-bottom:3px; font-weight:700;}
+  .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
+    display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .serveinfo.a{color:var(--teal);}
   .serveinfo.b{color:var(--orange);}
   .match-row{cursor:pointer;}
@@ -260,6 +262,7 @@
     </div>
 
     <div class="serveinfo" id="serveInfo"></div>
+    <div class="tiebreak-badge" id="tiebreakBadge" style="display:none;">タイブレーク</div>
 
     <div class="tap-row">
       <button class="tap-btn a" id="tapA">
@@ -449,6 +452,7 @@ function newMatchState(nameA, nameB){
     points: {a:0,b:0},
     games: {a:0,b:0},
     sets: [],
+    tiebreak: null, // 6-6等(N-N)になった時の本タイブレーク(7点先取・2点差)。{a,b}で進行中を表す
     deuceCount: 0, // 現在のゲーム内でデュースに到達した回数(1デュース判定用)
     server: pendingSettings.firstServer, // 'a' | 'b' 現在サーブ権を持つ側
     pointInGame: 0, // 現在のゲーム内で何本目のポイントか(スプレッドシートでの横並び復元用)
@@ -561,14 +565,26 @@ $("pairEditBackBtn").addEventListener("click", ()=>{
 
 /* ====================== テニスの得点ロジック(設定反映) ====================== */
 function pushHistory(){
-  state.history.push(JSON.stringify({points:state.points, games:state.games, sets:state.sets, deuceCount:state.deuceCount||0, server:state.server, pointInGame:state.pointInGame||0}));
+  state.history.push(JSON.stringify({points:state.points, games:state.games, sets:state.sets, deuceCount:state.deuceCount||0, server:state.server, pointInGame:state.pointInGame||0, tiebreak:state.tiebreak}));
   if(state.history.length>100) state.history.shift();
 }
 
 function addPoint(side){
   pushHistory();
-  const server = state.server;
   const setNumber = state.sets.length + 1;
+
+  if(state.tiebreak){
+    addTiebreakPoint(side, setNumber);
+  } else {
+    addNormalPoint(side, setNumber);
+  }
+
+  render();
+  persist();
+}
+
+function addNormalPoint(side, setNumber){
+  const server = state.server;
   const gameNumber = state.games.a + state.games.b + 1;
 
   state.points[side]++;
@@ -586,9 +602,51 @@ function addPoint(side){
 
   maybeFinishGame();
   maybeFinishSet();
-  render();
-  persist();
 }
+
+// 本タイブレーク(7点先取・2点差)中のポイント処理。
+// サーブは1本目の後に交代し、以降は2本ごとに交代する(実際のテニスのルール通り)。
+function addTiebreakPoint(side, setNumber){
+  const server = state.tiebreak.server;
+  const gameNumber = state.games.a + state.games.b + 1; // タイブレークも「次のゲーム」として記録する
+
+  state.tiebreak[side]++;
+  state.pointInGame = (state.pointInGame||0) + 1;
+
+  state.pointLog.push({
+    ts: Date.now(),
+    setNumber, gameNumber, pointInGame: state.pointInGame,
+    side, winnerName: (side==="a" ? state.nameA : state.nameB),
+    server, serverName: (server==="a" ? state.nameA : state.nameB),
+    scoreA: String(state.tiebreak.a), scoreB: String(state.tiebreak.b),
+    tiebreak: true
+  });
+  if(state.pointLog.length > 2000) state.pointLog.shift();
+
+  const played = state.tiebreak.a + state.tiebreak.b;
+  if(played % 2 === 1){
+    state.tiebreak.server = (state.tiebreak.server==="a") ? "b" : "a";
+  }
+  state.server = state.tiebreak.server;
+
+  maybeFinishTiebreak();
+}
+
+function maybeFinishTiebreak(){
+  const {a,b} = state.tiebreak;
+  if((a>=7 || b>=7) && Math.abs(a-b)>=2){
+    const winner = a>b ? "a" : "b";
+    state.games[winner]++; // 例: 7-6としてセットに反映
+    state.sets.push({a: state.games.a, b: state.games.b});
+    state.games = {a:0, b:0};
+    state.points = {a:0, b:0};
+    state.deuceCount = 0;
+    state.pointInGame = 0;
+    state.tiebreak = null;
+    state.server = (state.server==="a") ? "b" : "a"; // 次のセットに向けてサーブ交代を継続
+  }
+}
+
 
 function maybeFinishGame(){
   const {a,b} = state.points;
@@ -626,6 +684,12 @@ function maybeFinishGame(){
     state.deuceCount = 0; // 次のゲームに向けてリセット
     state.pointInGame = 0; // 次のゲームに向けてリセット
     state.server = (state.server==="a") ? "b" : "a"; // ゲームごとにサーブを交代
+
+    // 2差必要モードでN-Nに到達したら、次は簡易ルールではなく本タイブレーク(7点先取・2点差)に入る
+    const N = state.settings.gamesPerSet;
+    if(state.settings.setFinishMode==="winByTwo" && state.games.a===N && state.games.b===N){
+      state.tiebreak = {a:0, b:0, server: state.server};
+    }
   }
 }
 
@@ -642,10 +706,10 @@ function maybeFinishSet(){
     // 総ゲーム数固定: 勝ち負けに関係なく必ずNゲーム消化してから多い方の勝ち(同数なら引き分け)
     win = (a+b) >= N;
   } else {
-    // 2差必要: N-Nからは1ゲームで決着する簡易タイブレーク扱い
-    const normalWin = (a>=N || b>=N) && Math.abs(a-b)>=2;
-    const tiebreakWin = (a===N+1 || b===N+1);
-    win = normalWin || tiebreakWin;
+    // 2差必要: 通常の2点差での決着のみ。N-Nになった場合はmaybeFinishGame側で
+    // 本タイブレーク(7点先取・2点差)に入るので、その決着はmaybeFinishTiebreakが
+    // 直接state.setsにpushする(ここでは扱わない)。
+    win = (a>=N || b>=N) && Math.abs(a-b)>=2;
   }
 
   if(win){
@@ -675,6 +739,7 @@ $("undoBtn").addEventListener("click", ()=>{
   state.points = s.points; state.games = s.games; state.sets = s.sets; state.deuceCount = s.deuceCount||0;
   state.server = s.server || state.server;
   state.pointInGame = s.pointInGame||0;
+  state.tiebreak = s.tiebreak || null;
   state.pointLog.pop(); // このundoで取り消される1ポイント分のログを削除
   render();
   persist();
@@ -705,8 +770,8 @@ function render(){
   $("labelA").textContent = state.nameA;
   $("labelB").textContent = state.nameB;
 
-  $("ptA").textContent = pointText(state.points.a, state.points.b);
-  $("ptB").textContent = pointText(state.points.b, state.points.a);
+  $("ptA").textContent = state.tiebreak ? state.tiebreak.a : pointText(state.points.a, state.points.b);
+  $("ptB").textContent = state.tiebreak ? state.tiebreak.b : pointText(state.points.b, state.points.a);
 
   $("gA").textContent = state.games.a;
   $("gB").textContent = state.games.b;
@@ -718,6 +783,7 @@ function render(){
 
   const setDetail = state.sets.map((s,i)=>`第${i+1}: ${s.a}-${s.b}${s.a===s.b?"(引分)":""}`).join("　");
   $("setInfo").textContent = setDetail;
+  $("tiebreakBadge").style.display = state.tiebreak ? "block" : "none";
 
 }
 
