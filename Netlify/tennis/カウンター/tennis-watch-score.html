@@ -20,7 +20,8 @@
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
   html,body{margin:0; padding:0; width:100%; height:100%; background:var(--bg); color:var(--text);
-    font-family:-apple-system,"Roboto","Segoe UI",system-ui,sans-serif; overflow:hidden;}
+    font-family:-apple-system,"Roboto","Segoe UI",system-ui,sans-serif; overflow:hidden;
+    touch-action:manipulation;} /* ダブルタップでのズームを無効化(user-scalable=noだけでは効かない場合があるため) */
   #app{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;}
   .screen{display:none; width:100%; height:100%; padding:var(--safe); flex-direction:column;
     align-items:center; justify-content:center; text-align:center;}
@@ -76,7 +77,7 @@
     background:var(--panel); color:var(--dim); font-size:13px; font-weight:600; white-space:nowrap;}
 
   .tap-row{width:100%; height:47%; flex:0 0 auto; display:flex; flex-direction:column; gap:6px; min-height:0;}
-  .tap-btn{flex:1; border:none; border-radius:16px; color:#04231d;
+  .tap-btn{flex:1; border:none; border-radius:16px; color:#04231d; touch-action:manipulation;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
     min-height:0; padding:2px 8px;}
   .tap-btn.a{background:var(--teal);}
