@@ -1102,11 +1102,10 @@ $("undoSyncBtn").addEventListener("click", ()=>{
 });
 $("resetSyncBtn").addEventListener("click", ()=>{
   if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
-  customConfirm("全データを送り直しますか？(重複はしませんが、データ量が多いと時間がかかります)", ()=>{
-    runQuickLockedAction($("resetSyncBtn"), ()=>{
-      resetAppsScriptCheckpoint();
-      toast("次回の同期で全データを送り直します");
-    });
+  customConfirm("全データを送り直しますか？(重複はしませんが、データ量が多いと時間がかかります)", async ()=>{
+    resetAppsScriptCheckpoint();
+    await syncWithDrive($("resetSyncBtn")); // ボタン名の通り、リセットしたその場で実際に送信まで行う
+    renderHistoryList();
   });
 });
 
