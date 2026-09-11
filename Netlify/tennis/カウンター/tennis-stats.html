@@ -39,6 +39,8 @@
   .filter-tilde{color:var(--dim); font-size:12px;}
   #filterResetBtn{padding:6px 12px; border-radius:8px; border:1px solid var(--line);
     background:transparent; color:var(--dim); font-size:12px; cursor:pointer;}
+  #pdfExportBtn{padding:6px 14px; border-radius:8px; border:1px solid var(--teal);
+    background:transparent; color:var(--teal); font-size:12px; font-weight:700; cursor:pointer;}
   .filter-count{font-size:11px; color:var(--dim); margin-left:auto;}
 
   .del-btn{background:transparent; border:1px solid var(--danger); color:var(--danger);
@@ -130,6 +132,22 @@
   .glossary{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:4px 16px;}
   .glossary dt{font-weight:700; font-size:13px; margin-top:12px;}
   .glossary dd{font-size:12px; color:var(--dim); margin:2px 0 0; line-height:1.6;}
+  .version-tag{font-size:9px; color:var(--dim); opacity:0.5; margin:24px 0 8px; text-align:center;}
+
+  @media print{
+    /* PDF出力(ブラウザの印刷機能)向け: 操作用のUIは隠し、紙映えする明るい配色に切り替える */
+    .toolbar, #pdfExportBtn, #filterResetBtn, #driveLoadBtn, .del-btn, #detailClose, .version-tag{display:none !important;}
+    body{background:#fff; color:#111;}
+    .stat-chip, .table-wrap, .grid-wrap, #detailPanel, .glossary, .empty{
+      background:#fff !important; border-color:#ccc !important;}
+    .stat-chip .lbl, th, .desc, .sub, dd{color:#555 !important;}
+    .pt-grid td.set-divider{background:#eee !important; color:#111 !important;}
+    section{page-break-inside:avoid;}
+    .match-table-wrap{max-height:none !important; overflow:visible !important;}
+    /* thead(table-header-group)はページをまたぐたびに自動で見出し行を繰り返す仕様のため、
+       試合一覧の途中に見出しが挟まって見えてしまっていた。1回だけ表示されるようにする */
+    #matchTable thead{display:table-row-group;}
+  }
 </style>
 </head>
 <body>
@@ -146,6 +164,7 @@
   </div>
 
   <div id="filterBar" class="filter-bar" style="display:none;">
+    <button id="pdfExportBtn">PDF出力</button>
     <div class="filter-group">
       <span class="filter-label">形式</span>
       <select id="filterMode">
@@ -206,6 +225,7 @@
       <h2>指標の説明</h2>
       <div class="glossary" id="glossary"></div>
     </section>
+    <div class="version-tag" id="versionTag"></div>
   </div>
 
   <div id="emptyState" class="empty">まだデータが読み込まれていません。上のボタンからDriveまたはファイルを読み込んでください。</div>
@@ -473,6 +493,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
+const APP_VERSION = "2026-09-11.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -678,6 +699,8 @@ $("filterResetBtn").addEventListener("click", ()=>{
   $("filterFrom").value = ""; $("filterTo").value = "";
   applyFilters();
 });
+$("pdfExportBtn").addEventListener("click", ()=> window.print());
+$("versionTag").textContent = `v${APP_VERSION}`;
 
 function deleteMatch(matchId){
   if(!confirm("この試合を削除しますか？(元に戻せません)")) return;
