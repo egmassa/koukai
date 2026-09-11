@@ -941,6 +941,20 @@ function undoAppsScriptCheckpoint(){
   try{
     const prev = JSON.parse(localStorage.getItem(APPS_SCRIPT_CHECKPOINT_PREV_KEY) || '{"ts":0}').ts || 0;
     localStorage.setItem(APPS_SCRIPT_CHECKPOINT_KEY, JSON.stringify({ts: prev}));
+
+    // チェックポイントを戻すのに合わせて、それ以降のポイントを持つ試合の
+    // 「同期済み」表示も解除する(表示と、次回実際に送信される対象がズレないように)
+    const db = loadDb();
+    (db.matches||[]).forEach(m=>{
+      const hasNewerPoint = (m.pointLog||[]).some(p => (p.ts||0) > prev);
+      if(hasNewerPoint) m.synced = false;
+    });
+    saveDb(db);
+    if(state){
+      const hasNewerPoint = (state.pointLog||[]).some(p => (p.ts||0) > prev);
+      if(hasNewerPoint) state.synced = false;
+    }
+
     return true;
   }catch(e){ return false; }
 }
@@ -949,31 +963,38 @@ function resetAppsScriptCheckpoint(){
   saveAppsScriptCheckpoint(0);
 }
 
+let isSyncing = false; // 同期中の連打を防ぐためのフラグ
+
 async function syncWithDrive(){
+  if(isSyncing){
+    toast("同期中です、少々お待ちください");
+    return;
+  }
+  isSyncing = true;
   const btn = $("cloudBtn");
   if(btn){ btn.classList.remove("ok","err"); btn.classList.add("busy"); }
 
-  if(!APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf("PASTE_YOUR")===0){
-    if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
-    toast("APPS_SCRIPT_URLが未設定です(ソースコードを確認してください)");
-    return;
-  }
-  const cfg = loadAppsScriptConfig();
-  if(!cfg.token){
-    if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
-    toast("合言葉が未設定です(履歴画面の「接続設定」から入力してください)");
-    return;
-  }
-
-  const checkpoint = loadAppsScriptCheckpoint();
-  const { ms, sr, pts, maxTs } = collectDiff(checkpoint);
-  if(pts.length===0){
-    if(btn){ btn.classList.remove("busy"); btn.classList.add("ok"); }
-    toast("新しいデータはありません(同期済み)");
-    return;
-  }
-
   try{
+    if(!APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf("PASTE_YOUR")===0){
+      if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
+      toast("APPS_SCRIPT_URLが未設定です(ソースコードを確認してください)");
+      return;
+    }
+    const cfg = loadAppsScriptConfig();
+    if(!cfg.token){
+      if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
+      toast("合言葉が未設定です(履歴画面の「接続設定」から入力してください)");
+      return;
+    }
+
+    const checkpoint = loadAppsScriptCheckpoint();
+    const { ms, sr, pts, maxTs } = collectDiff(checkpoint);
+    if(pts.length===0){
+      if(btn){ btn.classList.remove("busy"); btn.classList.add("ok"); }
+      toast("新しいデータはありません(同期済み)");
+      return;
+    }
+
     // Content-Typeをtext/plainにすることで、ブラウザのCORSプリフライトを回避している
     // (Apps ScriptのdoPost側ではJSON.parseで内容を読むので問題ない)
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -999,6 +1020,8 @@ async function syncWithDrive(){
     if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
     console.error("Drive同期エラー:", e);
     toast(String(e && e.message ? e.message : e).slice(0,60));
+  }finally{
+    isSyncing = false;
   }
 }
 $("cloudBtn").addEventListener("click", syncWithDrive);
