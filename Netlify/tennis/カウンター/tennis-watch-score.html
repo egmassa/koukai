@@ -926,6 +926,13 @@ async function sha256Hex(text){
   return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
+// トラブルシューティング用に一部だけ見せる(全部表示すると、そのままなりすましに使われてしまうため)。
+// 先頭4文字と末尾4文字だけ残し、間は***にする。
+function maskToken(token){
+  if(!token || token.length <= 10) return "****";
+  return token.slice(0,4) + "…" + token.slice(-4);
+}
+
 function loadAppsScriptCheckpoint(){
   try{ return JSON.parse(localStorage.getItem(APPS_SCRIPT_CHECKPOINT_KEY) || '{"ts":0}').ts || 0; }
   catch(e){ return 0; }
@@ -1027,10 +1034,12 @@ async function syncWithDrive(){
 $("cloudBtn").addEventListener("click", syncWithDrive);
 $("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive(); renderHistoryList(); });
 $("undoSyncBtn").addEventListener("click", ()=>{
+  if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
   undoAppsScriptCheckpoint();
   toast("直前の同期を取り消しました(次回はそこから再送信されます)");
 });
 $("resetSyncBtn").addEventListener("click", ()=>{
+  if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
   customConfirm("全データを送り直しますか？(重複はしませんが、データ量が多いと時間がかかります)", ()=>{
     resetAppsScriptCheckpoint();
     toast("次回の同期で全データを送り直します");
@@ -1045,7 +1054,7 @@ $("connSettingsBtn").addEventListener("click", ()=>{
   $("connTokenInput").placeholder = cfg.token ? "設定済み(変更する場合のみ入力)" : "合言葉(自由なフレーズでOK)";
   // トラブルシューティング用: 実際に保存されているハッシュ値をそのまま表示する
   // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
-  $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${cfg.token}` : "現在、合言葉は保存されていません";
+  $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${maskToken(cfg.token)}` : "現在、合言葉は保存されていません";
   showScreen("connSettingsScreen");
 });
 $("connSaveBtn").addEventListener("click", async ()=>{
