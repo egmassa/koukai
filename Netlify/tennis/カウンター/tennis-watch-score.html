@@ -115,9 +115,13 @@
   .hist-btns button{padding:9px 14px; border-radius:16px; border:1px solid var(--line);
     background:var(--panel); color:var(--text); font-size:13px; font-weight:600;}
 
-  /* 同期・全再送信・取り消しなど、処理中はどれも連打防止のため見た目で分かるようにする */
-  .sync-related.syncing{opacity:0.45; color:#e0d75a !important; border-color:#e0d75a !important;
+  /* 同期・全再送信・取り消し: 実際に処理中のボタンだけ目立つ色にし、
+     他は「今は押せない」だけが分かるよう控えめなグレーにする */
+  .sync-related.active-busy{color:#e0d75a !important; border-color:#e0d75a !important;
     pointer-events:none;}
+  .sync-related.blocked{opacity:0.4; pointer-events:none;}
+  .sync-related.flash-ok{color:var(--teal) !important; border-color:var(--teal) !important;}
+  .sync-related.flash-err{color:var(--danger) !important; border-color:var(--danger) !important;}
 
   #toast{position:fixed; bottom:6%; left:50%; transform:translateX(-50%); background:var(--panel);
     color:var(--text); font-size:10px; padding:5px 12px; border-radius:12px; border:1px solid var(--line);
@@ -157,6 +161,7 @@
   #connSettingsScreen{overflow-y:auto; padding-top:16%;}
   #connSettingsScreen h2{font-size:16px; color:var(--dim); margin:0 0 8px; font-weight:700;}
   #connSettingsScreen .desc{font-size:11px; color:var(--dim); margin-bottom:14px; line-height:1.6;}
+  .version-tag{font-size:9px; color:var(--dim); opacity:0.5; margin-top:20px;}
   #connSettingsScreen input{width:100%; max-width:220px; margin-bottom:10px; padding:10px 12px;
     border-radius:16px; border:1.5px solid var(--line); background:var(--panel); color:var(--text);
     font-size:12px; text-align:center;}
@@ -268,7 +273,7 @@
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
       <button id="pairEditBtn" title="ペア設定">&#128101;</button>
-      <button id="cloudBtn" title="Google Driveに保存">&#9729;</button>
+      <button id="cloudBtn" class="sync-related" title="Google Driveに保存">&#9729;</button>
     </div>
 
     <div class="rules-strip" id="rulesStrip"></div>
@@ -342,6 +347,7 @@
     <button class="primary" id="connSaveBtn">保存</button>
     <button id="connBackBtn">戻る</button>
     <div class="desc" id="connTokenDebug" style="word-break:break-all; margin-top:14px;"></div>
+    <div class="version-tag" id="versionTag"></div>
   </section>
 
   <section id="pairEditScreen" class="screen">
@@ -909,6 +915,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
+const APP_VERSION = "2026-09-11.1"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -976,31 +983,47 @@ function resetAppsScriptCheckpoint(){
 
 let isSyncing = false; // 同期中の連打を防ぐためのフラグ
 
-// 同期・全再送信・取り消しなど、処理中は関連ボタンをまとめて見た目でも「押せない」状態にする
-// (トーストのメッセージだけでなく、色や押せなさでも連打を防ぐため)
-function setSyncButtonsBusy(busy){
-  document.querySelectorAll(".sync-related").forEach(b=> b.classList.toggle("syncing", busy));
+// 同期・全再送信・取り消し: 実際に処理中の1つだけ目立つ色にし、他はグレーで「今は押せない」を示す
+function setSyncButtonsBusy(busy, activeBtn){
+  document.querySelectorAll(".sync-related").forEach(b=>{
+    if(busy){
+      b.classList.toggle("active-busy", b===activeBtn);
+      b.classList.toggle("blocked", b!==activeBtn);
+    } else {
+      b.classList.remove("active-busy", "blocked");
+    }
+  });
 }
 
-async function syncWithDrive(){
+// 取り消し・全再送信など、一瞬で終わる操作向けに「反応した」ことが分かる色を一瞬だけ点灯させる
+function flashSyncButton(btn, ok){
+  if(!btn) return;
+  btn.classList.add(ok ? "flash-ok" : "flash-err");
+  setTimeout(()=> btn.classList.remove("flash-ok","flash-err"), 900);
+}
+
+async function syncWithDrive(triggerBtn){
   if(isSyncing){
     toast("同期中です、少々お待ちください");
     return;
   }
   isSyncing = true;
-  setSyncButtonsBusy(true);
+  const activeBtn = triggerBtn || $("cloudBtn");
+  setSyncButtonsBusy(true, activeBtn);
   const btn = $("cloudBtn");
   if(btn){ btn.classList.remove("ok","err"); btn.classList.add("busy"); }
 
   try{
     if(!APPS_SCRIPT_URL || APPS_SCRIPT_URL.indexOf("PASTE_YOUR")===0){
       if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
+      flashSyncButton(activeBtn, false);
       toast("APPS_SCRIPT_URLが未設定です(ソースコードを確認してください)");
       return;
     }
     const cfg = loadAppsScriptConfig();
     if(!cfg.token){
       if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
+      flashSyncButton(activeBtn, false);
       toast("合言葉が未設定です(履歴画面の「接続設定」から入力してください)");
       return;
     }
@@ -1009,6 +1032,7 @@ async function syncWithDrive(){
     const { ms, sr, pts, maxTs } = collectDiff(checkpoint);
     if(pts.length===0){
       if(btn){ btn.classList.remove("busy"); btn.classList.add("ok"); }
+      flashSyncButton(activeBtn, true);
       toast("新しいデータはありません(同期済み)");
       return;
     }
@@ -1021,7 +1045,17 @@ async function syncWithDrive(){
       body: JSON.stringify({ token: cfg.token, ms, sr, pts })
     });
     if(!res.ok) throw new Error(`送信エラー ${res.status}`);
-    const data = await res.json();
+    const rawText = await res.text();
+    let data;
+    try{
+      data = JSON.parse(rawText);
+    }catch(parseErr){
+      // Apps Script側がデプロイ設定のミスなどでHTML(ログイン画面やエラー画面)を返すと、
+      // JSON.parseがここで失敗し、分かりにくい"Unexpected token"のようなエラーになるため、
+      // 原因を特定しやすいメッセージに変換しておく
+      console.error("Apps Scriptからの応答がJSONではありません:", rawText.slice(0,200));
+      throw new Error("Apps Scriptの応答が不正です(デプロイ設定を確認してください)");
+    }
     if(!data.ok) throw new Error(data.error || "不明なエラー");
 
     saveAppsScriptCheckpoint(maxTs);
@@ -1033,9 +1067,11 @@ async function syncWithDrive(){
     if(state && sentIds.has(state.matchId)) state.synced = true;
 
     if(btn){ btn.classList.remove("busy"); btn.classList.add("ok"); }
+    flashSyncButton(activeBtn, true);
     toast(`Google Driveと同期しました(${data.matchCount}試合)`);
   }catch(e){
     if(btn){ btn.classList.remove("busy"); btn.classList.add("err"); }
+    flashSyncButton(activeBtn, false);
     console.error("Drive同期エラー:", e);
     toast(String(e && e.message ? e.message : e).slice(0,60));
   }finally{
@@ -1043,17 +1079,19 @@ async function syncWithDrive(){
     setSyncButtonsBusy(false);
   }
 }
-$("cloudBtn").addEventListener("click", syncWithDrive);
-$("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive(); renderHistoryList(); });
+$("cloudBtn").addEventListener("click", ()=> syncWithDrive($("cloudBtn")));
+$("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive($("syncBtn")); renderHistoryList(); });
 $("undoSyncBtn").addEventListener("click", ()=>{
   if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
   undoAppsScriptCheckpoint();
+  flashSyncButton($("undoSyncBtn"), true);
   toast("直前の同期を取り消しました(次回はそこから再送信されます)");
 });
 $("resetSyncBtn").addEventListener("click", ()=>{
   if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
   customConfirm("全データを送り直しますか？(重複はしませんが、データ量が多いと時間がかかります)", ()=>{
     resetAppsScriptCheckpoint();
+    flashSyncButton($("resetSyncBtn"), true);
     toast("次回の同期で全データを送り直します");
   });
 });
@@ -1067,6 +1105,7 @@ $("connSettingsBtn").addEventListener("click", ()=>{
   // トラブルシューティング用: 実際に保存されているハッシュ値をそのまま表示する
   // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
   $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${maskToken(cfg.token)}` : "現在、合言葉は保存されていません";
+  $("versionTag").textContent = `v${APP_VERSION}`;
   showScreen("connSettingsScreen");
 });
 $("connSaveBtn").addEventListener("click", async ()=>{
