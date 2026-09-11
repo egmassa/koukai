@@ -55,7 +55,7 @@
     display:flex; align-items:center; justify-content:center; gap:5px; flex-shrink:0;}
   #cloudBtn{width:24px; height:24px; border-radius:50%; border:1px solid var(--line);
     background:var(--panel); color:var(--dim); font-size:11px; flex-shrink:0;}
-  #cloudBtn.busy{color:#e0d75a; border-color:#e0d75a;}
+  #cloudBtn.busy{color:#e0d75a; border-color:#e0d75a; pointer-events:none;}
   #cloudBtn.ok{color:var(--teal); border-color:var(--teal);}
   #cloudBtn.err{color:var(--danger); border-color:var(--danger);}
 
@@ -114,6 +114,10 @@
   .hist-btns{display:flex; gap:8px; margin-top:10px;}
   .hist-btns button{padding:9px 14px; border-radius:16px; border:1px solid var(--line);
     background:var(--panel); color:var(--text); font-size:13px; font-weight:600;}
+
+  /* 同期・全再送信・取り消しなど、処理中はどれも連打防止のため見た目で分かるようにする */
+  .sync-related.syncing{opacity:0.45; color:#e0d75a !important; border-color:#e0d75a !important;
+    pointer-events:none;}
 
   #toast{position:fixed; bottom:6%; left:50%; transform:translateX(-50%); background:var(--panel);
     color:var(--text); font-size:10px; padding:5px 12px; border-radius:12px; border:1px solid var(--line);
@@ -319,12 +323,12 @@
     <h2>試合の履歴</h2>
     <div id="historyList"></div>
     <div class="hist-btns">
-      <button id="syncBtn">Driveと同期</button>
+      <button id="syncBtn" class="sync-related">Driveと同期</button>
       <button id="backBtn">戻る</button>
     </div>
     <div class="hist-btns hist-btns-sub">
-      <button id="undoSyncBtn">↩ 同期を取り消す</button>
-      <button id="resetSyncBtn">全データを再送信</button>
+      <button id="undoSyncBtn" class="sync-related">↩ 同期を取り消す</button>
+      <button id="resetSyncBtn" class="sync-related">全データを再送信</button>
     </div>
     <div class="hist-btns hist-btns-sub">
       <button id="connSettingsBtn">⚙ 接続設定</button>
@@ -972,12 +976,19 @@ function resetAppsScriptCheckpoint(){
 
 let isSyncing = false; // 同期中の連打を防ぐためのフラグ
 
+// 同期・全再送信・取り消しなど、処理中は関連ボタンをまとめて見た目でも「押せない」状態にする
+// (トーストのメッセージだけでなく、色や押せなさでも連打を防ぐため)
+function setSyncButtonsBusy(busy){
+  document.querySelectorAll(".sync-related").forEach(b=> b.classList.toggle("syncing", busy));
+}
+
 async function syncWithDrive(){
   if(isSyncing){
     toast("同期中です、少々お待ちください");
     return;
   }
   isSyncing = true;
+  setSyncButtonsBusy(true);
   const btn = $("cloudBtn");
   if(btn){ btn.classList.remove("ok","err"); btn.classList.add("busy"); }
 
@@ -1029,6 +1040,7 @@ async function syncWithDrive(){
     toast(String(e && e.message ? e.message : e).slice(0,60));
   }finally{
     isSyncing = false;
+    setSyncButtonsBusy(false);
   }
 }
 $("cloudBtn").addEventListener("click", syncWithDrive);
