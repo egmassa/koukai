@@ -1098,6 +1098,7 @@ $("undoSyncBtn").addEventListener("click", ()=>{
   runQuickLockedAction($("undoSyncBtn"), ()=>{
     undoAppsScriptCheckpoint();
     toast("直前の同期を取り消しました(次回はそこから再送信されます)");
+    renderHistoryList();
   });
 });
 $("resetSyncBtn").addEventListener("click", ()=>{
