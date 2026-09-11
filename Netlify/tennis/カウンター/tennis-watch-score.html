@@ -983,15 +983,12 @@ function resetAppsScriptCheckpoint(){
 
 let isSyncing = false; // 同期中の連打を防ぐためのフラグ
 
-// 同期・全再送信・取り消し: 実際に処理中の1つだけ目立つ色にし、他はグレーで「今は押せない」を示す
+// 同期・全再送信・取り消し: 実際に処理中のボタン以外を「今は押せない」グレーにする。
+// トリガー本人の色(進行中の黄色、成功の緑フラッシュなど)は呼び出し側でそれぞれ制御する。
 function setSyncButtonsBusy(busy, activeBtn){
   document.querySelectorAll(".sync-related").forEach(b=>{
-    if(busy){
-      b.classList.toggle("active-busy", b===activeBtn);
-      b.classList.toggle("blocked", b!==activeBtn);
-    } else {
-      b.classList.remove("active-busy", "blocked");
-    }
+    if(b===activeBtn) return;
+    b.classList.toggle("blocked", busy);
   });
 }
 
@@ -1010,6 +1007,7 @@ async function syncWithDrive(triggerBtn){
   isSyncing = true;
   const activeBtn = triggerBtn || $("cloudBtn");
   setSyncButtonsBusy(true, activeBtn);
+  activeBtn.classList.add("active-busy");
   const btn = $("cloudBtn");
   if(btn){ btn.classList.remove("ok","err"); btn.classList.add("busy"); }
 
@@ -1076,23 +1074,39 @@ async function syncWithDrive(triggerBtn){
     toast(String(e && e.message ? e.message : e).slice(0,60));
   }finally{
     isSyncing = false;
+    activeBtn.classList.remove("active-busy");
     setSyncButtonsBusy(false);
   }
 }
 $("cloudBtn").addEventListener("click", ()=> syncWithDrive($("cloudBtn")));
 $("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive($("syncBtn")); renderHistoryList(); });
-$("undoSyncBtn").addEventListener("click", ()=>{
+// 取り消し・全再送信は一瞬で終わる処理だが、それでも他のボタン(同期含む)を
+// 一時的にロックし、同じ仕組みで色が変わるようにする(操作の一貫性のため)
+function runQuickLockedAction(triggerBtn, action){
   if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
-  undoAppsScriptCheckpoint();
-  flashSyncButton($("undoSyncBtn"), true);
-  toast("直前の同期を取り消しました(次回はそこから再送信されます)");
+  isSyncing = true;
+  setSyncButtonsBusy(true, triggerBtn);
+  action();
+  flashSyncButton(triggerBtn, true);
+  setTimeout(()=>{
+    isSyncing = false;
+    setSyncButtonsBusy(false);
+  }, 900);
+}
+
+$("undoSyncBtn").addEventListener("click", ()=>{
+  runQuickLockedAction($("undoSyncBtn"), ()=>{
+    undoAppsScriptCheckpoint();
+    toast("直前の同期を取り消しました(次回はそこから再送信されます)");
+  });
 });
 $("resetSyncBtn").addEventListener("click", ()=>{
   if(isSyncing){ toast("同期中です、完了してからお試しください"); return; }
   customConfirm("全データを送り直しますか？(重複はしませんが、データ量が多いと時間がかかります)", ()=>{
-    resetAppsScriptCheckpoint();
-    flashSyncButton($("resetSyncBtn"), true);
-    toast("次回の同期で全データを送り直します");
+    runQuickLockedAction($("resetSyncBtn"), ()=>{
+      resetAppsScriptCheckpoint();
+      toast("次回の同期で全データを送り直します");
+    });
   });
 });
 
