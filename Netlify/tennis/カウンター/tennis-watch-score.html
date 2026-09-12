@@ -41,6 +41,9 @@
   .mode-btn{flex:0 1 auto; padding:14px 20px; border-radius:20px; border:1.5px solid var(--line);
     background:transparent; color:var(--dim); font-size:20px; font-weight:700; white-space:nowrap;}
   .mode-btn.active{background:var(--line); color:var(--text);}
+  .cycle-btn{width:100%; max-width:260px; padding:16px 20px; border-radius:22px;
+    border:2px solid var(--teal); background:rgba(21,156,134,0.16); color:var(--text);
+    font-size:21px; font-weight:800;}
   #setup input, #matchSetup input{width:100%; max-width:220px; margin-top:12px; padding:13px 14px; border-radius:18px;
     border:1.5px solid var(--line); background:var(--panel); color:var(--text); font-size:21px; text-align:center;}
   #setup input::placeholder, #matchSetup input::placeholder{color:var(--dim);}
@@ -243,21 +246,13 @@
     <h1>参加者設定</h1>
 
     <div id="pairSettings">
-      <div class="pair-note">この2つは分析用の任意項目です。「未設定」のままで開始してもOK(自分/パートナー別の分析は行われないだけです)。前回選んだ内容をやめたい時は「未設定」を押せばリセットできます。</div>
+      <div class="pair-note">この2つは分析用の任意項目です。タップするたびに切り替わります。「未設定」のままで開始してもOK(自分/パートナー別の分析は行われないだけです)。</div>
 
       <div class="grp-label">自チームの最初のサーブは</div>
-      <div class="mode-toggle" data-group="pairFirstServer">
-        <button class="mode-btn active" data-value="">未設定</button>
-        <button class="mode-btn" data-value="self">じぶん</button>
-        <button class="mode-btn" data-value="partner">パートナー</button>
-      </div>
+      <button class="cycle-btn" id="pairFirstServerBtn" data-group="pairFirstServer"></button>
 
       <div class="grp-label">じぶんのリターン側</div>
-      <div class="mode-toggle" data-group="selfReturnSide">
-        <button class="mode-btn active" data-value="">未設定</button>
-        <button class="mode-btn" data-value="deuce">デュース側</button>
-        <button class="mode-btn" data-value="ad">アド側</button>
-      </div>
+      <button class="cycle-btn" id="selfReturnSideBtn" data-group="selfReturnSide"></button>
     </div>
 
     <input id="nameA" placeholder="じぶん" maxlength="10">
@@ -348,21 +343,13 @@
 
   <section id="pairEditScreen" class="screen">
     <h2>ペア設定</h2>
-    <div class="desc">試合中いつでも変更できます(得点計算には影響せず、後の分析にだけ使う情報です)。</div>
+    <div class="desc">試合中いつでも変更できます(得点計算には影響せず、後の分析にだけ使う情報です)。タップするたびに切り替わります。</div>
 
     <div class="grp-label">自チームの最初のサーブは</div>
-    <div class="mode-toggle" data-group="editPairFirstServer">
-      <button class="mode-btn" data-value="">未設定</button>
-      <button class="mode-btn" data-value="self">じぶん</button>
-      <button class="mode-btn" data-value="partner">パートナー</button>
-    </div>
+    <button class="cycle-btn" id="editPairFirstServerBtn" data-group="editPairFirstServer"></button>
 
     <div class="grp-label">じぶんのリターン側</div>
-    <div class="mode-toggle" data-group="editSelfReturnSide">
-      <button class="mode-btn" data-value="">未設定</button>
-      <button class="mode-btn" data-value="deuce">デュース側</button>
-      <button class="mode-btn" data-value="ad">アド側</button>
-    </div>
+    <button class="cycle-btn" id="editSelfReturnSideBtn" data-group="editSelfReturnSide"></button>
 
     <button class="primary" id="pairEditSaveBtn">保存</button>
     <button id="pairEditBackBtn">戻る</button>
@@ -397,7 +384,7 @@ const LOCAL_DB_KEY = "tennis-watch-matches"; // ローカル永続DB(Drive未接
 
 /* ====================== セットアップ入力の一時保持 ====================== */
 let pendingSettings = { mode:"doubles", gamesPerSet:4, setFinishMode:"firstTo", deuceMode:"noAd", firstServer:"a",
-  pairFirstServer:"", selfReturnSide:"" };
+  pairFirstServer:"partner", selfReturnSide:"deuce" };
 
 function updatePairSettingsVisibility(){
   document.getElementById("pairSettings").style.display = (pendingSettings.mode==="doubles") ? "block" : "none";
@@ -417,6 +404,39 @@ document.querySelectorAll(".mode-toggle").forEach(group=>{
     });
   });
 });
+
+// ペア設定(自チームの最初のサーブ・自分のリターン側)は、watchの小さい画面では
+// 3つの小さいボタンより、1つの大きいボタンをタップして循環させる方が押しやすいため、
+// こちらは専用の仕組みにしている。
+const PAIR_SERVER_CYCLE = ["partner", "self", ""];
+const PAIR_SERVER_LABELS = { partner:"パートナー", self:"じぶん", "":"未設定" };
+const RETURN_SIDE_CYCLE = ["deuce", "ad", ""];
+const RETURN_SIDE_LABELS = { deuce:"デュース側", ad:"アド側", "":"未設定" };
+
+function refreshCycleBtn(btnId, key, labels, settingsObj){
+  const btn = document.getElementById(btnId);
+  if(!btn) return;
+  const v = settingsObj[key] || "";
+  btn.textContent = (labels[v] !== undefined) ? labels[v] : labels[""];
+  btn.classList.toggle("unset", v==="");
+}
+
+function wireCycleButton(btnId, key, cycle, labels, settingsObj){
+  const btn = document.getElementById(btnId);
+  if(!btn) return;
+  btn.addEventListener("click", ()=>{
+    const cur = settingsObj[key] || "";
+    const idx = cycle.indexOf(cur);
+    settingsObj[key] = cycle[(idx+1) % cycle.length];
+    refreshCycleBtn(btnId, key, labels, settingsObj);
+  });
+  refreshCycleBtn(btnId, key, labels, settingsObj);
+}
+
+wireCycleButton("pairFirstServerBtn", "pairFirstServer", PAIR_SERVER_CYCLE, PAIR_SERVER_LABELS, pendingSettings);
+wireCycleButton("selfReturnSideBtn", "selfReturnSide", RETURN_SIDE_CYCLE, RETURN_SIDE_LABELS, pendingSettings);
+wireCycleButton("editPairFirstServerBtn", "editPairFirstServer", PAIR_SERVER_CYCLE, PAIR_SERVER_LABELS, pendingSettings);
+wireCycleButton("editSelfReturnSideBtn", "editSelfReturnSide", RETURN_SIDE_CYCLE, RETURN_SIDE_LABELS, pendingSettings);
 
 /* ====================== 状態 ====================== */
 let state = null; // 開始後にセットされる
@@ -494,16 +514,11 @@ $("setupBackBtn").addEventListener("click", ()=> showScreen("setup"));
 
 function resetPairSettingsToUnset(){
   // 組み合わせ(パートナー)が変わるたびに違う値になり得るので、
-  // ルール設定(ゲーム数など)とは違い、1試合ごとに「未設定」へ戻す。
-  pendingSettings.pairFirstServer = "";
-  pendingSettings.selfReturnSide = "";
-  ["pairFirstServer","selfReturnSide"].forEach(key=>{
-    const group = document.querySelector(`.mode-toggle[data-group="${key}"]`);
-    if(!group) return;
-    group.querySelectorAll(".mode-btn").forEach(b=>{
-      b.classList.toggle("active", b.dataset.value==="");
-    });
-  });
+  // ルール設定(ゲーム数など)とは違い、1試合ごとにデフォルト値へ戻す。
+  pendingSettings.pairFirstServer = "partner";
+  pendingSettings.selfReturnSide = "deuce";
+  refreshCycleBtn("pairFirstServerBtn", "pairFirstServer", PAIR_SERVER_LABELS, pendingSettings);
+  refreshCycleBtn("selfReturnSideBtn", "selfReturnSide", RETURN_SIDE_LABELS, pendingSettings);
   // 名前も対戦相手が変わるたびに違う可能性があるので、参加者設定なしで
   // 開始した場合に前の試合の相手名が誤って引き継がれないよう空欄に戻す。
   $("nameA").value = "";
@@ -532,16 +547,10 @@ let pairEditTargetMatchId = null;
 
 function openPairEditFor(matchId, settingsObj){
   pairEditTargetMatchId = matchId; // null = ライブの試合
-  ["editPairFirstServer","editSelfReturnSide"].forEach((key, i)=>{
-    const settingsKey = i===0 ? "pairFirstServer" : "selfReturnSide";
-    const current = (settingsObj && settingsObj[settingsKey]) || "";
-    pendingSettings[key] = current;
-    const group = document.querySelector(`.mode-toggle[data-group="${key}"]`);
-    if(!group) return;
-    group.querySelectorAll(".mode-btn").forEach(b=>{
-      b.classList.toggle("active", b.dataset.value===current);
-    });
-  });
+  pendingSettings.editPairFirstServer = (settingsObj && settingsObj.pairFirstServer) || "";
+  pendingSettings.editSelfReturnSide = (settingsObj && settingsObj.selfReturnSide) || "";
+  refreshCycleBtn("editPairFirstServerBtn", "editPairFirstServer", PAIR_SERVER_LABELS, pendingSettings);
+  refreshCycleBtn("editSelfReturnSideBtn", "editSelfReturnSide", RETURN_SIDE_LABELS, pendingSettings);
   showScreen("pairEditScreen");
 }
 
@@ -906,7 +915,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.1"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.2"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
