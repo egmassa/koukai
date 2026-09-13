@@ -89,20 +89,20 @@
   .tap-btn:active{filter:brightness(0.85);}
   .tb-name{font-size:12px; font-weight:700; opacity:0.9; max-width:90%; overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap;}
-  .tb-row{display:flex; align-items:center; gap:8px; margin:2px 0;}
-  .tb-stats-group{display:flex; align-items:center; gap:22px;}
+  .tb-row{display:flex; align-items:center; gap:8px; margin:2px 0; width:100%;}
+  .tb-stats-group{display:flex; align-items:center; gap:14px; flex:1; min-width:0;}
   .tb-box{display:flex; flex-direction:column; align-items:center; justify-content:center;
-    border-radius:12px; padding:2px 12px; min-width:34%;}
-  .tb-box-label{font-size:8px; opacity:0.85; line-height:1.4; font-weight:700;}
+    border-radius:12px; padding:4px 6px; flex:1; min-width:0;}
+  .tb-box-label{font-size:9px; opacity:0.85; line-height:1.4; font-weight:700;}
   .tb-box-point{background:rgba(255,255,255,0.32);}
   .tb-box-game{background:rgba(0,0,0,0.4);}
   .tb-box-game .tb-box-label, .tb-box-game .tb-game{color:#fff;}
-  .tb-point{font-size:44px; font-weight:800; line-height:1;}
+  .tb-point{font-size:52px; font-weight:800; line-height:1;}
   .tb-serve-col{display:flex; align-items:center; justify-content:center; min-width:30px;}
   .tb-serve-icon{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;}
   .tb-serve-emoji{font-size:26px; line-height:1;}
   .tb-serve-tag{font-size:13px; font-weight:800; line-height:1; min-height:13px; color:inherit;}
-  .tb-game{font-size:38px; font-weight:800; line-height:1;}
+  .tb-game{font-size:44px; font-weight:800; line-height:1;}
   .tb-sub{font-size:10px; opacity:0.85; margin-top:1px;}
 
   /* history screen */
@@ -967,7 +967,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.3"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.4"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
