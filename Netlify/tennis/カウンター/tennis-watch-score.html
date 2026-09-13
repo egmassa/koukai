@@ -56,11 +56,7 @@
   #undoBtn{height:34px; padding:0 16px; border-radius:20px; border:2px solid #3a6fd0;
     background:rgba(58,111,208,0.15); color:#7fb0ff; font-size:14px; font-weight:700;
     display:flex; align-items:center; justify-content:center; gap:5px; flex-shrink:0;}
-  #cloudBtn{width:24px; height:24px; border-radius:50%; border:1px solid var(--line);
-    background:var(--panel); color:var(--dim); font-size:11px; flex-shrink:0;}
-  #cloudBtn.busy{color:#e0d75a; border-color:#e0d75a; pointer-events:none;}
-  #cloudBtn.ok{color:var(--teal); border-color:var(--teal);}
-  #cloudBtn.err{color:var(--danger); border-color:var(--danger);}
+  .clock{font-size:13px; color:var(--dim); font-weight:600;}
 
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
@@ -266,7 +262,7 @@
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
       <button id="pairEditBtn" title="ペア設定">&#128101;</button>
-      <button id="cloudBtn" class="sync-related" title="Google Driveに保存">&#9729;</button>
+      <span class="clock" id="clockDisplay"></span>
     </div>
 
     <div class="rules-strip" id="rulesStrip"></div>
@@ -832,6 +828,49 @@ function pointText(mine, other){
 $("tapA").addEventListener("click", ()=>addPoint("a"));
 $("tapB").addEventListener("click", ()=>addPoint("b"));
 
+// タップボタンを長押しすると、その場でサーブ側を直接設定できるようにする
+// (通常のタップ=得点、長押し=サーブ設定、と誤操作なく区別する)
+function setServerManually(side){
+  if(!state) return;
+  state.server = side;
+  if(state.tiebreak) state.tiebreak.server = side; // タイブレーク中はそちらのサーバーも合わせる
+  render();
+  persist();
+  toast((side==="a" ? state.nameA : state.nameB) + "のサーブに設定しました");
+}
+
+function attachLongPress(btn, side){
+  const LONG_PRESS_MS = 600;
+  let timer = null;
+  let longPressed = false;
+
+  const start = ()=>{
+    longPressed = false;
+    timer = setTimeout(()=>{
+      longPressed = true;
+      if(navigator.vibrate) navigator.vibrate(30); // 端末が対応していれば振動で長押し成立を知らせる
+      setServerManually(side);
+    }, LONG_PRESS_MS);
+  };
+  const cancelTimer = ()=>{ clearTimeout(timer); };
+
+  btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointerup", cancelTimer);
+  btn.addEventListener("pointerleave", cancelTimer);
+  btn.addEventListener("pointercancel", cancelTimer);
+  // 長押しが成立した場合、それに続く通常のclick(得点)は無効化する。
+  // キャプチャフェーズで先に横取りして、addPoint側のclickリスナーまで届かないようにする。
+  btn.addEventListener("click", (e)=>{
+    if(longPressed){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      longPressed = false;
+    }
+  }, true);
+}
+attachLongPress($("tapA"), "a");
+attachLongPress($("tapB"), "b");
+
 $("undoBtn").addEventListener("click", ()=>{
   if(!state) return;
   const snap = state.history.pop();
@@ -967,7 +1006,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.4"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.5"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1057,7 +1096,7 @@ async function syncWithDrive(triggerBtn){
     return;
   }
   isSyncing = true;
-  const activeBtn = triggerBtn || $("cloudBtn");
+  const activeBtn = triggerBtn || $("syncBtn");
   setSyncButtonsBusy(true, activeBtn);
   activeBtn.classList.add("active-busy");
   const btn = $("cloudBtn");
@@ -1130,7 +1169,6 @@ async function syncWithDrive(triggerBtn){
     setSyncButtonsBusy(false);
   }
 }
-$("cloudBtn").addEventListener("click", ()=> syncWithDrive($("cloudBtn")));
 $("syncBtn").addEventListener("click", async ()=>{ await syncWithDrive($("syncBtn")); renderHistoryList(); });
 // 取り消し・全再送信は一瞬で終わる処理だが、それでも他のボタン(同期含む)を
 // 一時的にロックし、同じ仕組みで色が変わるようにする(操作の一貫性のため)
@@ -1366,6 +1404,17 @@ async function importConfigFromUrlIfPresent(){
 /* ====================== 起動 ====================== */
 importConfigFromUrlIfPresent();
 resumeIfPossible();
+
+function updateClock(){
+  const el = $("clockDisplay");
+  if(!el) return;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mm = String(now.getMinutes()).padStart(2,"0");
+  el.textContent = `${hh}:${mm}`;
+}
+updateClock();
+setInterval(updateClock, 10000); // 10秒ごとに更新(時計表示なので厳密なリアルタイム性は不要)
 </script>
 </body>
 </html>
