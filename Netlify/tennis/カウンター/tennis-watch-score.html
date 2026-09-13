@@ -65,6 +65,7 @@
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
   .rules-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
+  .return-side-strip{font-size:12px; color:var(--dim); margin-bottom:4px; font-weight:700;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
     display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .match-row{cursor:pointer;}
@@ -98,9 +99,9 @@
   .tb-box-game .tb-box-label, .tb-box-game .tb-game{color:#fff;}
   .tb-point{font-size:44px; font-weight:800; line-height:1;}
   .tb-serve-col{display:flex; align-items:center; justify-content:center; min-width:30px;}
-  .tb-serve-icon{font-size:28px; line-height:1; display:inline-block; text-align:center;}
-  .tb-serve-icon.pair-badge{font-size:16px; font-weight:800; padding:3px 8px; border-radius:8px;
-    background:rgba(0,0,0,0.25); color:inherit;}
+  .tb-serve-icon{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;}
+  .tb-serve-emoji{font-size:26px; line-height:1;}
+  .tb-serve-tag{font-size:13px; font-weight:800; line-height:1; min-height:13px; color:inherit;}
   .tb-game{font-size:38px; font-weight:800; line-height:1;}
   .tb-sub{font-size:10px; opacity:0.85; margin-top:1px;}
 
@@ -269,6 +270,7 @@
     </div>
 
     <div class="rules-strip" id="rulesStrip"></div>
+    <div class="return-side-strip" id="returnSideStrip"></div>
     <div class="tiebreak-badge" id="tiebreakBadge" style="display:none;">タイブレーク</div>
 
     <div class="tap-row">
@@ -558,6 +560,33 @@ $("pairEditBtn").addEventListener("click", ()=>{
   if(!state) return;
   openPairEditFor(null, state.settings);
 });
+// pairFirstServer(自チームの最初のサーブが自分/パートナーどちらか)を後から変更した時、
+// 既に記録済みのポイントの自分/パートナー割り当て(pairServer)も遡って正しく直す。
+// (自分のリターン側は各ポイントのコートサイドから毎回その場で判定する仕組みなので、
+// こちらは何もしなくても常に最新の設定が反映される。遡って直す必要があるのはサーブ側だけ。)
+function recomputePairServeAssignmentsForMatch(m, pairFirstServer){
+  if(!pairFirstServer){
+    (m.pointLog||[]).forEach(p=>{ p.pairServer = null; });
+    return { anyABlockSeen:false, prevServer:null, selfTurn:null };
+  }
+  let selfTurn = (pairFirstServer === "self");
+  let prevServer = null;
+  let anyABlockSeen = false;
+  (m.pointLog||[]).forEach(p=>{
+    if(p.server === "a"){
+      if(prevServer !== "a"){
+        if(anyABlockSeen) selfTurn = !selfTurn;
+        anyABlockSeen = true;
+      }
+      p.pairServer = selfTurn ? "self" : "partner";
+    } else {
+      p.pairServer = null;
+    }
+    prevServer = p.server;
+  });
+  return { anyABlockSeen, prevServer, selfTurn };
+}
+
 $("pairEditSaveBtn").addEventListener("click", ()=>{
   const newPfs = pendingSettings.editPairFirstServer || "";
   const newSrs = pendingSettings.editSelfReturnSide || "";
@@ -566,8 +595,23 @@ $("pairEditSaveBtn").addEventListener("click", ()=>{
     if(!state) return;
     state.settings.pairFirstServer = newPfs;
     state.settings.selfReturnSide = newSrs;
+    const r = recomputePairServeAssignmentsForMatch(state, newPfs);
+    // 現在保持しておくべき値は「直近の自チームブロックの値」。
+    // ただし、直前のゲームが終わった直後で「今は自チームのサーブに切り替わっているが
+    // まだ1ポイントも記録していない」場合は、その切り替わり自体が記録(pointLog)には
+    // 現れないため、ここでもう1回反転させておく必要がある。
+    if(!newPfs){
+      state.pairServeTurn = null;
+    } else if(state.server === "a" && r.prevServer !== "a"){
+      state.pairServeTurn = r.anyABlockSeen ? (r.selfTurn ? "partner" : "self") : newPfs;
+    } else if(!r.anyABlockSeen){
+      state.pairServeTurn = null; // まだ自チームの番が一度も来ていない
+    } else {
+      state.pairServeTurn = r.selfTurn ? "self" : "partner";
+    }
     persist();
     toast("ペア設定を保存しました");
+    render(); // 画面に戻った時に変更がすぐ反映されるようにする
     showScreen("scoreScreen");
   } else {
     // 履歴上の(終わった)試合を編集
@@ -577,6 +621,7 @@ $("pairEditSaveBtn").addEventListener("click", ()=>{
       m.settings = m.settings || {};
       m.settings.pairFirstServer = newPfs;
       m.settings.selfReturnSide = newSrs;
+      recomputePairServeAssignmentsForMatch(m, newPfs);
       m.updatedAt = new Date().toISOString();
       saveDb(db);
     }
@@ -828,20 +873,27 @@ function render(){
   if(!state) return;
   $("pairEditBtn").style.display = (state.mode==="doubles") ? "flex" : "none";
   $("rulesStrip").textContent = rulesSummary(state.settings);
+  const returnSideEl = $("returnSideStrip");
+  if(state.mode==="doubles" && state.settings.selfReturnSide){
+    const sideLabel = state.settings.selfReturnSide==="deuce" ? "デュース側" : "アド側";
+    returnSideEl.textContent = `自分のリターン: ${sideLabel}`;
+  } else {
+    returnSideEl.textContent = "";
+  }
   $("labelA").textContent = state.nameA;
   $("labelB").textContent = state.nameB;
 
-  // サーブ側のポイント数字の左に、サーブ中であることが一目でわかるアイコンを出す。
-  // ダブルスでペア設定が分かっている場合は、さらに自分/パートナーのどちらかも表示する。
+  // サーブ側のポイント数字の左に、サーブ中であることが一目でわかるアイコンを常に出す。
+  // 自チームのサーブの場合は、アイコンに加えて自分/パートナーの文字も小さく添える
+  // (相手チームの場合はアイコンのみ・文字欄は空白のままにして、表現の形を両側で揃える)。
   const pairLabel = getCurrentServerPairLabel();
   const iconA = $("serveIconA"), iconB = $("serveIconB");
-  iconA.className = "tb-serve-icon"; iconB.className = "tb-serve-icon";
-  iconA.textContent = ""; iconB.textContent = "";
+  iconA.innerHTML = ""; iconB.innerHTML = "";
   if(state.server==="a"){
-    if(pairLabel){ iconA.textContent = pairLabel==="self" ? "自" : "パ"; iconA.classList.add("pair-badge"); }
-    else { iconA.textContent = "🎾"; }
+    const tag = pairLabel ? (pairLabel==="self" ? "自" : "パ") : "";
+    iconA.innerHTML = `<span class="tb-serve-emoji">🎾</span><span class="tb-serve-tag">${tag}</span>`;
   } else if(state.server==="b"){
-    iconB.textContent = "🎾";
+    iconB.innerHTML = `<span class="tb-serve-emoji">🎾</span><span class="tb-serve-tag"></span>`;
   }
 
   $("ptA").textContent = state.tiebreak ? state.tiebreak.a : pointText(state.points.a, state.points.b);
@@ -915,7 +967,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.2"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.3"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
