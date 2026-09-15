@@ -560,15 +560,20 @@ $("pairEditBtn").addEventListener("click", ()=>{
 // 既に記録済みのポイントの自分/パートナー割り当て(pairServer)も遡って正しく直す。
 // (自分のリターン側は各ポイントのコートサイドから毎回その場で判定する仕組みなので、
 // こちらは何もしなくても常に最新の設定が反映される。遡って直す必要があるのはサーブ側だけ。)
-function recomputePairServeAssignmentsForMatch(m, pairFirstServer){
+function recomputePairServeAssignmentsForMatch(m, pairFirstServer, setNumberFilter){
+  // setNumberFilterを指定すると、そのセットのポイントだけを対象にする
+  // (既に終わったセットのデータには一切触れない)。指定しなければ試合全体が対象。
+  const relevantPoints = setNumberFilter
+    ? (m.pointLog||[]).filter(p=>p.setNumber===setNumberFilter)
+    : (m.pointLog||[]);
   if(!pairFirstServer){
-    (m.pointLog||[]).forEach(p=>{ p.pairServer = null; });
+    relevantPoints.forEach(p=>{ p.pairServer = null; });
     return { anyABlockSeen:false, prevServer:null, selfTurn:null };
   }
   let selfTurn = (pairFirstServer === "self");
   let prevServer = null;
   let anyABlockSeen = false;
-  (m.pointLog||[]).forEach(p=>{
+  relevantPoints.forEach(p=>{
     if(p.server === "a"){
       if(prevServer !== "a"){
         if(anyABlockSeen) selfTurn = !selfTurn;
@@ -591,7 +596,8 @@ $("pairEditSaveBtn").addEventListener("click", ()=>{
     if(!state) return;
     state.settings.pairFirstServer = newPfs;
     state.settings.selfReturnSide = newSrs;
-    const r = recomputePairServeAssignmentsForMatch(state, newPfs);
+    const curSetNumber = state.sets.length + 1;
+    const r = recomputePairServeAssignmentsForMatch(state, newPfs, curSetNumber);
     // 現在保持しておくべき値は「直近の自チームブロックの値」。
     // ただし、直前のゲームが終わった直後で「今は自チームのサーブに切り替わっているが
     // まだ1ポイントも記録していない」場合は、その切り替わり自体が記録(pointLog)には
@@ -832,6 +838,49 @@ $("tapB").addEventListener("click", ()=>addPoint("b"));
 // (通常のタップ=得点、長押し=サーブ設定、と誤操作なく区別する)
 function setServerManually(side){
   if(!state) return;
+
+  if(!state.tiebreak){
+    // 同じセット内の過去のゲームまで遡って、正しく交互になるよう直す。
+    // (タイブレークは別ルールでサーブが交代するので対象外)
+    const curSetNumber = state.sets.length + 1;
+    const curGameNumber = state.games.a + state.games.b + 1;
+
+    const gamesInSet = {};
+    state.pointLog.forEach(p=>{
+      if(p.setNumber !== curSetNumber || p.tiebreak) return;
+      (gamesInSet[p.gameNumber] = gamesInSet[p.gameNumber] || []).push(p);
+    });
+
+    let expectedServer = side;
+    for(let g = curGameNumber; g >= 1; g--){
+      const pts = gamesInSet[g];
+      if(pts){
+        pts.forEach(p=>{
+          p.server = expectedServer;
+          p.serverName = expectedServer==="a" ? state.nameA : state.nameB;
+        });
+      }
+      expectedServer = (expectedServer === "a") ? "b" : "a"; // 1つ前のゲームは逆側のはず
+    }
+
+    // サーブ側を書き換えたことで、自分/パートナーの割り当て(pairServer)も
+    // 古いままだと矛盾するため、同じセットの範囲で合わせて再計算する。
+    if(state.mode==="doubles" && state.settings.pairFirstServer){
+      const r = recomputePairServeAssignmentsForMatch(state, state.settings.pairFirstServer, curSetNumber);
+      if(side === "a" && r.prevServer !== "a"){
+        state.pairServeTurn = r.anyABlockSeen ? (r.selfTurn ? "partner" : "self") : state.settings.pairFirstServer;
+      } else if(!r.anyABlockSeen){
+        state.pairServeTurn = null;
+      } else {
+        state.pairServeTurn = r.selfTurn ? "self" : "partner";
+      }
+    }
+  }
+
+  applyServerChange(side);
+}
+
+function applyServerChange(side){
   state.server = side;
   if(state.tiebreak) state.tiebreak.server = side; // タイブレーク中はそちらのサーバーも合わせる
   render();
@@ -1006,7 +1055,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.5"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.7"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
