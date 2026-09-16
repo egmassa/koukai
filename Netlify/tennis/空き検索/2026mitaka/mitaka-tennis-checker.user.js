@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      4.3.0
+// @version      4.4.2
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -153,17 +153,17 @@
         box-shadow: 0 4px 24px rgba(0,0,0,0.4); padding: 14px; display: none;
         font-family: sans-serif; font-size: 13px;
       }
-      #mtc-panel h2 { margin: 0 0 8px; font-size: 15px; }
-      #mtc-panel .mtc-close {
+      #mtc-panel h2, #mtc-settings h2 { margin: 0 0 8px; font-size: 15px; }
+      #mtc-panel .mtc-close, #mtc-settings .mtc-close {
         position: absolute; top: 8px; right: 10px; cursor: pointer;
         font-size: 20px; background: none; border: none;
       }
-      #mtc-panel .mtc-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-      #mtc-panel button.mtc-btn {
+      #mtc-panel .mtc-toolbar, #mtc-settings .mtc-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+      #mtc-panel button.mtc-btn, #mtc-settings button.mtc-btn {
         background: #2e7d32; color: #fff; border: none; border-radius: 6px;
         padding: 5px 10px; cursor: pointer; font-size: 12px;
       }
-      #mtc-panel button.mtc-btn.secondary { background: #666; }
+      #mtc-panel button.mtc-btn.secondary, #mtc-settings button.mtc-btn.secondary { background: #666; }
       #mtc-panel .mtc-tabs-label { font-size: 11px; color: #888; margin-bottom: 2px; }
       #mtc-panel .mtc-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
       #mtc-panel .mtc-tab {
@@ -190,6 +190,14 @@
       #mtc-panel .mtc-timefilter select {
         padding: 3px 4px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px;
       }
+      #mtc-panel .mtc-preset-row {
+        display: flex; justify-content: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;
+      }
+      #mtc-panel .mtc-preset-btn {
+        background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7;
+        border-radius: 999px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+      }
+      #mtc-panel .mtc-preset-btn:active { background: #c8e6c9; }
       #mtc-panel .mtc-legend { font-size: 11px; color: #555; text-align: center; margin-bottom: 8px; }
       #mtc-panel .mtc-filter-summary {
         text-align: center; font-size: 11px; color: #333; background: #f5f5f5;
@@ -1120,8 +1128,19 @@
         <select id="mtc-end-time">${timeOptions}</select>
         <button class="mtc-btn secondary" id="mtc-time-reset" type="button">指定なし</button>
       </div>
+      <div class="mtc-preset-row" id="mtc-time-presets">
+        <button class="mtc-preset-btn" type="button" data-start="06:00" data-end="12:00">午前</button>
+        <button class="mtc-preset-btn" type="button" data-start="12:00" data-end="17:00">午後</button>
+        <button class="mtc-preset-btn" type="button" data-start="17:00" data-end="19:00">夕方</button>
+        <button class="mtc-preset-btn" type="button" data-start="19:00" data-end="24:00">ナイター(19時〜)</button>
+      </div>
       <div class="mtc-weekday-filter" id="mtc-weekday-filter">
         ${DOW.map((d, i) => `<label><input type="checkbox" data-dow="${i}" checked>${d}</label>`).join('')}
+      </div>
+      <div class="mtc-preset-row" id="mtc-dow-presets">
+        <button class="mtc-preset-btn" type="button" data-dow-preset="weekday">平日</button>
+        <button class="mtc-preset-btn" type="button" data-dow-preset="weekend">週末</button>
+        <button class="mtc-preset-btn" type="button" data-dow-preset="all">全曜日</button>
       </div>
       <div id="mtc-body"><div class="mtc-loading">読み込み中...</div></div>
     `;
@@ -1174,6 +1193,30 @@
           cb.checked = true;
           return;
         }
+        renderCalendarView(panel);
+      });
+    });
+
+    panel.querySelectorAll('#mtc-time-presets .mtc-preset-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        panel.querySelector('#mtc-start-time').value = btn.dataset.start;
+        panel.querySelector('#mtc-end-time').value = btn.dataset.end;
+        applyTimeFilter();
+      });
+    });
+
+    panel.querySelectorAll('#mtc-dow-presets .mtc-preset-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const preset = btn.dataset.dowPreset;
+        let dows;
+        if (preset === 'weekday') dows = [1, 2, 3, 4, 5];
+        else if (preset === 'weekend') dows = [0, 6];
+        else dows = [0, 1, 2, 3, 4, 5, 6];
+
+        state.selectedDow = new Set(dows);
+        panel.querySelectorAll('#mtc-weekday-filter input[type="checkbox"]').forEach((cb) => {
+          cb.checked = dows.includes(Number(cb.dataset.dow));
+        });
         renderCalendarView(panel);
       });
     });
