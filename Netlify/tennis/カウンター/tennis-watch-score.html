@@ -61,7 +61,8 @@
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
   .rules-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
-  .return-side-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
+  .return-side-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;
+    display:inline-block; padding:2px 10px;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
     display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .match-row{cursor:pointer;}
@@ -98,6 +99,7 @@
   .tb-serve-icon{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;}
   .tb-serve-emoji{font-size:26px; line-height:1;}
   .tb-serve-tag{font-size:13px; font-weight:800; line-height:1; min-height:13px; color:inherit;}
+  .longpress-hint{border:1.5px dotted currentColor; border-radius:6px; padding:1px 5px; opacity:0.95;}
   .tb-game{font-size:44px; font-weight:800; line-height:1;}
   .tb-sub{font-size:10px; opacity:0.85; margin-top:1px;}
 
@@ -175,8 +177,6 @@
     background:var(--teal); color:#04231d; font-weight:700; font-size:14px;}
   #pairEditScreen #pairEditBackBtn{margin-top:8px; padding:6px 14px; border-radius:14px;
     border:1px solid var(--line); background:transparent; color:var(--dim); font-size:11px;}
-  #pairEditBtn{width:30px; height:30px; border-radius:50%; border:1px solid var(--line);
-    background:var(--panel); color:var(--dim); font-size:13px; flex-shrink:0;}
 
   /* スマホ向けの見やすい試合詳細(ゲーム×ポイントのグリッド) */
   .grid-wrap{width:100%; overflow-x:auto;}
@@ -262,7 +262,6 @@
     <div class="clock" id="clockDisplay"></div>
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
-      <button id="pairEditBtn" title="ペア設定">&#128101;</button>
     </div>
 
     <div class="rules-strip" id="rulesStrip"></div>
@@ -552,10 +551,6 @@ function openPairEditFor(matchId, settingsObj){
   showScreen("pairEditScreen");
 }
 
-$("pairEditBtn").addEventListener("click", ()=>{
-  if(!state) return;
-  openPairEditFor(null, state.settings);
-});
 // pairFirstServer(自チームの最初のサーブが自分/パートナーどちらか)を後から変更した時、
 // 既に記録済みのポイントの自分/パートナー割り当て(pairServer)も遡って正しく直す。
 // (自分のリターン側は各ポイントのコートサイドから毎回その場で判定する仕組みなので、
@@ -591,47 +586,21 @@ function recomputePairServeAssignmentsForMatch(m, pairFirstServer, setNumberFilt
 $("pairEditSaveBtn").addEventListener("click", ()=>{
   const newPfs = pendingSettings.editPairFirstServer || "";
   const newSrs = pendingSettings.editSelfReturnSide || "";
-  if(pairEditTargetMatchId === null){
-    // ライブの試合を編集
-    if(!state) return;
-    state.settings.pairFirstServer = newPfs;
-    state.settings.selfReturnSide = newSrs;
-    const curSetNumber = state.sets.length + 1;
-    const r = recomputePairServeAssignmentsForMatch(state, newPfs, curSetNumber);
-    // 現在保持しておくべき値は「直近の自チームブロックの値」。
-    // ただし、直前のゲームが終わった直後で「今は自チームのサーブに切り替わっているが
-    // まだ1ポイントも記録していない」場合は、その切り替わり自体が記録(pointLog)には
-    // 現れないため、ここでもう1回反転させておく必要がある。
-    if(!newPfs){
-      state.pairServeTurn = null;
-    } else if(state.server === "a" && r.prevServer !== "a"){
-      state.pairServeTurn = r.anyABlockSeen ? (r.selfTurn ? "partner" : "self") : newPfs;
-    } else if(!r.anyABlockSeen){
-      state.pairServeTurn = null; // まだ自チームの番が一度も来ていない
-    } else {
-      state.pairServeTurn = r.selfTurn ? "self" : "partner";
-    }
-    persist();
-    toast("ペア設定を保存しました");
-    render(); // 画面に戻った時に変更がすぐ反映されるようにする
-    showScreen("scoreScreen");
-  } else {
-    // 履歴上の(終わった)試合を編集
-    const db = loadDb();
-    const m = (db.matches||[]).find(x=>x.matchId===pairEditTargetMatchId);
-    if(m){
-      m.settings = m.settings || {};
-      m.settings.pairFirstServer = newPfs;
-      m.settings.selfReturnSide = newSrs;
-      recomputePairServeAssignmentsForMatch(m, newPfs);
-      m.updatedAt = new Date().toISOString();
-      saveDb(db);
-    }
-    toast("ペア設定を保存しました");
-    historyDetailId = pairEditTargetMatchId;
-    showScreen("historyScreen");
-    renderHistoryList();
+  // 履歴上の(終わった)試合を編集
+  const db = loadDb();
+  const m = (db.matches||[]).find(x=>x.matchId===pairEditTargetMatchId);
+  if(m){
+    m.settings = m.settings || {};
+    m.settings.pairFirstServer = newPfs;
+    m.settings.selfReturnSide = newSrs;
+    recomputePairServeAssignmentsForMatch(m, newPfs);
+    m.updatedAt = new Date().toISOString();
+    saveDb(db);
   }
+  toast("設定を保存しました");
+  historyDetailId = pairEditTargetMatchId;
+  showScreen("historyScreen");
+  renderHistoryList();
 });
 $("pairEditBackBtn").addEventListener("click", ()=>{
   if(pairEditTargetMatchId === null){
@@ -835,6 +804,55 @@ function pointText(mine, other){
 $("tapA").addEventListener("click", ()=>addPoint("a"));
 $("tapB").addEventListener("click", ()=>addPoint("b"));
 
+// 自チームがサーブ中で自分/パートナーのバッジが出ている時に長押しすると、
+// その場で自分↔パートナー↔未設定を切り替える(同じセット内は遡って正しく直す)。
+function cyclePairFirstServer(){
+  if(!state) return;
+
+  state.serverCorrectionBackup = {
+    pointLog: JSON.parse(JSON.stringify(state.pointLog)),
+    server: state.server,
+    tiebreakServer: state.tiebreak ? state.tiebreak.server : null,
+    pairServeTurn: state.pairServeTurn
+  };
+
+  const cur = state.settings.pairFirstServer || "";
+  const idx = PAIR_SERVER_CYCLE.indexOf(cur);
+  const next = PAIR_SERVER_CYCLE[(idx+1) % PAIR_SERVER_CYCLE.length];
+  state.settings.pairFirstServer = next;
+
+  const curSetNumber = state.sets.length + 1;
+  const r = recomputePairServeAssignmentsForMatch(state, next, curSetNumber);
+  if(!next){
+    state.pairServeTurn = null;
+  } else if(state.server === "a" && r.prevServer !== "a"){
+    state.pairServeTurn = r.anyABlockSeen ? (r.selfTurn ? "partner" : "self") : next;
+  } else if(!r.anyABlockSeen){
+    state.pairServeTurn = null;
+  } else {
+    state.pairServeTurn = r.selfTurn ? "self" : "partner";
+  }
+
+  render();
+  persist();
+  toast(`自チームの最初のサーブ: ${PAIR_SERVER_LABELS[next]}`);
+}
+
+// 「自分のリターン: ○○側」の表示を長押しすると、デュース側↔アド側↔未設定を切り替える。
+// こちらはポイントごとのコートサイドから毎回その場で判定する仕組みなので、
+// 過去のポイントを書き換える必要はなく、設定を変えるだけでよい。
+function cycleSelfReturnSide(){
+  if(!state || state.mode !== "doubles") return;
+  const cur = state.settings.selfReturnSide || "";
+  const idx = RETURN_SIDE_CYCLE.indexOf(cur);
+  const next = RETURN_SIDE_CYCLE[(idx+1) % RETURN_SIDE_CYCLE.length];
+  state.settings.selfReturnSide = next;
+  render();
+  persist();
+  const label = next==="deuce" ? "デュース側" : next==="ad" ? "アド側" : "未設定";
+  toast(`自分のリターン: ${label}`);
+}
+
 // タップボタンを長押しすると、その場でサーブ側を直接設定できるようにする
 // (通常のタップ=得点、長押し=サーブ設定、と誤操作なく区別する)
 function setServerManually(side){
@@ -909,7 +927,14 @@ function attachLongPress(btn, side){
     timer = setTimeout(()=>{
       longPressed = true;
       if(navigator.vibrate) navigator.vibrate(30); // 端末が対応していれば振動で長押し成立を知らせる
-      setServerManually(side);
+      // 自チームがサーブ中で、自分/パートナーのバッジが出ている方を長押しした場合は、
+      // 「サーブを切り替える」のではなく「自分/パートナーの順番を切り替える」動作にする
+      // (すでに自チームがサーブ中なので、サーブ切り替えという操作自体が意味を持たないため)。
+      if(side === "a" && state && state.mode === "doubles" && state.server === "a"){
+        cyclePairFirstServer();
+      } else {
+        setServerManually(side);
+      }
     }, LONG_PRESS_MS);
   };
   const cancelTimer = ()=>{ clearTimeout(timer); };
@@ -930,6 +955,21 @@ function attachLongPress(btn, side){
 }
 attachLongPress($("tapA"), "a");
 attachLongPress($("tapB"), "b");
+
+// 「自分のリターン」表示の長押し(スコア用のタップとは違い、クリック抑制は不要)
+(function(){
+  const el = $("returnSideStrip");
+  let timer = null;
+  el.addEventListener("pointerdown", ()=>{
+    timer = setTimeout(()=>{
+      if(navigator.vibrate) navigator.vibrate(30);
+      cycleSelfReturnSide();
+    }, 600);
+  });
+  el.addEventListener("pointerup", ()=> clearTimeout(timer));
+  el.addEventListener("pointerleave", ()=> clearTimeout(timer));
+  el.addEventListener("pointercancel", ()=> clearTimeout(timer));
+})();
 
 $("undoBtn").addEventListener("click", ()=>{
   if(!state) return;
@@ -982,14 +1022,16 @@ function getCurrentServerPairLabel(){
 
 function render(){
   if(!state) return;
-  $("pairEditBtn").style.display = (state.mode==="doubles") ? "flex" : "none";
   $("rulesStrip").textContent = rulesSummary(state.settings);
   const returnSideEl = $("returnSideStrip");
-  if(state.mode==="doubles" && state.settings.selfReturnSide){
-    const sideLabel = state.settings.selfReturnSide==="deuce" ? "デュース側" : "アド側";
+  if(state.mode==="doubles"){
+    const v = state.settings.selfReturnSide;
+    const sideLabel = v==="deuce" ? "デュース側" : v==="ad" ? "アド側" : "未設定";
     returnSideEl.textContent = `自分のリターン: ${sideLabel}`;
+    returnSideEl.classList.add("longpress-hint");
   } else {
     returnSideEl.textContent = "";
+    returnSideEl.classList.remove("longpress-hint");
   }
   $("labelA").textContent = state.nameA;
   $("labelB").textContent = state.nameB;
@@ -1002,7 +1044,8 @@ function render(){
   iconA.innerHTML = ""; iconB.innerHTML = "";
   if(state.server==="a"){
     const tag = pairLabel ? (pairLabel==="self" ? "自" : "パ") : "";
-    iconA.innerHTML = `<span class="tb-serve-emoji">🎾</span><span class="tb-serve-tag">${tag}</span>`;
+    const tagClass = pairLabel ? "tb-serve-tag longpress-hint" : "tb-serve-tag";
+    iconA.innerHTML = `<span class="tb-serve-emoji">🎾</span><span class="${tagClass}">${tag}</span>`;
   } else if(state.server==="b"){
     iconB.innerHTML = `<span class="tb-serve-emoji">🎾</span><span class="tb-serve-tag"></span>`;
   }
@@ -1078,7 +1121,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.9"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.11"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1322,7 +1365,7 @@ function renderMatchDetail(m){
     const winnerName = p.side==="a" ? m.nameA : m.nameB;
     return `<div class="pt-row"><span class="pt-set">S${p.setNumber}-G${p.gameNumber}</span>${serverName}サーブ→<b>${winnerName}</b>(${p.scoreA}-${p.scoreB})</div>`;
   }).join("");
-  const pairEditBtnHtml = m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 ペア設定を編集</button>` : "";
+  const pairEditBtnHtml = m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 記録したサーブ順を間違えていたら</button>` : "";
   list.innerHTML =
     `<div class="detail-head">${m.nameA} vs ${m.nameB}</div>` +
     (rows || '<div class="d">記録されたポイントはありません</div>') +
@@ -1448,7 +1491,7 @@ function renderMatchDetailGrid(m){
       `</tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="d">記録されたポイントはありません</div>') +
     `<button id="detailBackBtn" class="detail-back">一覧に戻る</button>` +
-    (m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 ペア設定を編集</button>` : "") +
+    (m.mode==="doubles" ? `<button id="detailPairEditBtn" class="detail-back">👥 記録したサーブ順を間違えていたら</button>` : "") +
     `<button id="detailDeleteBtn" class="detail-delete">この試合を削除</button>`;
   const backBtn = document.getElementById("detailBackBtn");
   if(backBtn) backBtn.addEventListener("click", ()=>{ historyDetailId=null; renderHistoryList(); });
