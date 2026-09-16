@@ -56,12 +56,12 @@
   #undoBtn{height:34px; padding:0 16px; border-radius:20px; border:2px solid #3a6fd0;
     background:rgba(58,111,208,0.15); color:#7fb0ff; font-size:14px; font-weight:700;
     display:flex; align-items:center; justify-content:center; gap:5px; flex-shrink:0;}
-  .clock{font-size:13px; color:var(--dim); font-weight:600;}
+  .clock{font-size:20px; color:var(--text); font-weight:800; text-align:center; margin-bottom:4px;}
 
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
   .rules-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
-  .return-side-strip{font-size:12px; color:var(--dim); margin-bottom:4px; font-weight:700;}
+  .return-side-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
     display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .match-row{cursor:pointer;}
@@ -259,10 +259,10 @@
   </section>
 
   <section id="scoreScreen" class="screen">
+    <div class="clock" id="clockDisplay"></div>
     <div class="topbar">
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
       <button id="pairEditBtn" title="ペア設定">&#128101;</button>
-      <span class="clock" id="clockDisplay"></span>
     </div>
 
     <div class="rules-strip" id="rulesStrip"></div>
@@ -668,6 +668,7 @@ function advanceTeamAServeTurn(){
 
 function addPoint(side){
   pushHistory();
+  state.serverCorrectionBackup = null; // 新しいポイントが入ったら、直前のサーブ修正の取り消しは対象外にする
   const setNumber = state.sets.length + 1;
 
   if(state.tiebreak){
@@ -839,6 +840,16 @@ $("tapB").addEventListener("click", ()=>addPoint("b"));
 function setServerManually(side){
   if(!state) return;
 
+  // 過去に遡って書き換える操作なので、直後に「戻す」で取り消せるよう
+  // 書き換え前の状態をまるごと保存しておく(通常のundo履歴はポイント単位で
+  // pointLogの中身までは保存していないため、これとは別に用意する)。
+  state.serverCorrectionBackup = {
+    pointLog: JSON.parse(JSON.stringify(state.pointLog)),
+    server: state.server,
+    tiebreakServer: state.tiebreak ? state.tiebreak.server : null,
+    pairServeTurn: state.pairServeTurn
+  };
+
   if(!state.tiebreak){
     // 同じセット内の過去のゲームまで遡って、正しく交互になるよう直す。
     // (タイブレークは別ルールでサーブが交代するので対象外)
@@ -922,6 +933,18 @@ attachLongPress($("tapB"), "b");
 
 $("undoBtn").addEventListener("click", ()=>{
   if(!state) return;
+  if(state.serverCorrectionBackup){
+    const b = state.serverCorrectionBackup;
+    state.pointLog = b.pointLog;
+    state.server = b.server;
+    if(state.tiebreak) state.tiebreak.server = b.tiebreakServer;
+    state.pairServeTurn = b.pairServeTurn;
+    state.serverCorrectionBackup = null;
+    render();
+    persist();
+    toast("サーブ設定の変更を取り消しました");
+    return;
+  }
   const snap = state.history.pop();
   if(!snap) return;
   const s = JSON.parse(snap);
@@ -1055,7 +1078,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.7"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.9"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
