@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      4.4.2
-// @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有）
+// @version      5.0.0
+// @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
 // @grant        GM_addStyle
@@ -82,6 +82,103 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     });
+  }
+
+  // 施設を切り替えるとき、サーバー側が前回の施設に固定されてしまう問題への対策。
+  // 手動で /reservation を開き直すとリセットされることが確認できたので、
+  // 同じことを裏側（画面には出さず）でfetchして再現する。
+  // 「前回どの施設を選んだか」はタブごとの記憶ではなく、localStorage（同じサイトの
+  // 全タブで共有される）に持たせる。新しく開いたタブでもこのツールが動くため、
+  // タブ限定の変数だと「自分は初めてだ」と誤認してリセットをスキップしてしまうため。
+  const LAST_JUMPED_FACILITY_KEY = 'mtc_last_jumped_facility_id';
+  function getLastJumpedFacilityId() {
+    try {
+      const v = localStorage.getItem(LAST_JUMPED_FACILITY_KEY);
+      return v === null ? null : Number(v);
+    } catch (e) {
+      return null;
+    }
+  }
+  function setLastJumpedFacilityId(id) {
+    try {
+      localStorage.setItem(LAST_JUMPED_FACILITY_KEY, String(id));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  async function resetSiteSessionIfSwitchingFacility(facilityId) {
+    const last = getLastJumpedFacilityId();
+    if (last === null || last === facilityId) {
+      setLastJumpedFacilityId(facilityId);
+      return null; // トークンは変わっていないので、呼び出し側は元のトークンを使う
+    }
+    try {
+      const res = await fetch('https://yoyaku-mitaka.jp/reservation', { credentials: 'same-origin' });
+      const html = await res.text();
+      const m = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+      const freshToken = m ? m[1] : null;
+      setLastJumpedFacilityId(facilityId);
+      return freshToken;
+    } catch (e) {
+      console.error('[mitaka-tennis-checker] /reservation reload failed', e);
+    }
+    setLastJumpedFacilityId(facilityId);
+  }
+
+  // 選択した日付を、サイト本体の「日付選択→予約へ進む」と同じAPIに直接渡し、
+  // 時間帯選択画面（予約の一歩手前）へ新しいタブで飛ばす。
+  // ※facilityDetail()のgoBookingTime()と同じエンドポイント・パラメータ形式を利用。
+  async function jumpToBooking(ti, dateStr) {
+    const t = TARGETS[ti];
+    if (!t) return;
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    if (!csrfMeta) {
+      alert('この操作は三鷹市の予約サイト（yoyaku-mitaka.jp）を開いた状態でのみ行えます。');
+      return;
+    }
+    try {
+      const freshToken = await resetSiteSessionIfSwitchingFacility(t.facilityId);
+      const csrfToken = freshToken || csrfMeta.content;
+
+      // サイト本体のgoBookingTime()と同じく、APIを叩く前にsessionStorageへ
+      // 選択内容を書き込んでおく（遷移先の画面がこれを見て中身を組み立てている可能性があるため）
+      const elId = `room-${t.roomId}`;
+      const dateKey = `${t.roomId}_${dateStr}`;
+      try {
+        sessionStorage.removeItem('bookingTimeSelection');
+        sessionStorage.setItem('user_calendar_selections', JSON.stringify({ [elId]: [dateKey] }));
+      } catch (e) {
+        console.error('[mitaka-tennis-checker] sessionStorage write failed', e);
+      }
+
+      const response = await fetch('https://yoyaku-mitaka.jp/reservation/select-dates', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-CSRF-TOKEN': csrfToken,
+        },
+        body: JSON.stringify({
+          facility_ids: [t.facilityId],
+          selected_data: [{ room_id: t.roomId, dates: [dateStr] }],
+        }),
+      });
+      const data = await response.json();
+      if (data && data.success && data.redirect_url) {
+        // 毎回同じURL（/reservation/booking-time）なので、ブラウザキャッシュで
+        // 前回別施設の中身が出てしまわないよう、キャッシュ避けのパラメータを付ける
+        const sep = data.redirect_url.includes('?') ? '&' : '?';
+        const bustedUrl = `${data.redirect_url}${sep}_ts=${Date.now()}`;
+        window.open(bustedUrl, '_blank');
+      } else {
+        alert((data && data.message) || '時間帯選択画面への遷移に失敗しました（すでに埋まった可能性があります）。');
+      }
+    } catch (e) {
+      console.error('[mitaka-tennis-checker] jumpToBooking failed', e);
+      alert('時間帯選択画面への遷移でエラーが発生しました。');
+    }
   }
 
   let lastData = {};       // lastData[ti][dateStr] = { status, tooltip }
@@ -568,7 +665,7 @@
       const dowColor = dow === 0 ? '#c62828' : dow === 6 ? '#1565c0' : '#333';
       html += `<div class="mtc-detail-date"><span style="color:${dowColor};">${month}/${day}(${DOW[dow]})</span></div><div class="mtc-chips">`;
       info.chips.forEach((c) => {
-        html += `<span class="mtc-chip" style="border-left:3px solid ${c.color};"><b>${c.label}</b> ${c.timeText}（${c.nText}）</span>`;
+        html += `<span class="mtc-chip mtc-chip-jump" data-ti="${c.ti}" data-date="${dateStr}" style="border-left:3px solid ${c.color};cursor:pointer;" title="予約の時間帯選択画面へ進む"><b>${c.label}</b> ${c.timeText}（${c.nText}）</span>`;
       });
       html += '</div>';
     }
@@ -578,15 +675,45 @@
   }
 
   // ============================================================
-  // 状態
+  // 状態（時間帯・曜日・選択施設は再読み込みしても引き継がれるよう保存する）
   // ============================================================
+  const FILTER_STATE_KEY = 'mtc_filter_state_v1';
+
+  function loadFilterState() {
+    const saved = gmGet(FILTER_STATE_KEY, null);
+    if (!saved || typeof saved !== 'object') return null;
+    try {
+      return {
+        startMin: typeof saved.startMin === 'number' ? saved.startMin : 0,
+        endMin: typeof saved.endMin === 'number' ? saved.endMin : 24 * 60,
+        selectedDow:
+          Array.isArray(saved.selectedDow) && saved.selectedDow.length > 0
+            ? new Set(saved.selectedDow)
+            : new Set([0, 1, 2, 3, 4, 5, 6]),
+        selectedTi: Array.isArray(saved.selectedTi) ? new Set(saved.selectedTi) : new Set(),
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveFilterState() {
+    gmSet(FILTER_STATE_KEY, {
+      startMin: state.startMin,
+      endMin: state.endMin,
+      selectedDow: Array.from(state.selectedDow),
+      selectedTi: Array.from(state.selectedTi),
+    });
+  }
+
+  const savedFilterState = loadFilterState();
   let state = {
-    selectedTi: new Set(),
+    selectedTi: savedFilterState ? savedFilterState.selectedTi : new Set(),
     year: new Date().getFullYear(),
     month: new Date().getMonth() + 1,
-    startMin: 0,
-    endMin: 24 * 60,
-    selectedDow: new Set([0, 1, 2, 3, 4, 5, 6]),
+    startMin: savedFilterState ? savedFilterState.startMin : 0,
+    endMin: savedFilterState ? savedFilterState.endMin : 24 * 60,
+    selectedDow: savedFilterState ? savedFilterState.selectedDow : new Set([0, 1, 2, 3, 4, 5, 6]),
   };
 
   const PROBE_MONTHS = 6;
@@ -727,10 +854,12 @@
       buildFilterSummaryHtml(indices) +
       calendarsHtml +
       `</div>` +
-      `<h3 style="font-size:13px;margin-top:8px;">空きあり日の詳細</h3>` +
+      `<h3 style="font-size:13px;margin-top:8px;">空きあり日の詳細　<span style="font-weight:normal;font-size:11px;color:#888;">（タップで時間帯選択画面へ）</span></h3>` +
       buildMonthDetailMulti(indices, state.year, state.month, state.startMin, state.endMin, state.selectedDow);
 
     bindCellTapPopover(panel);
+    bindDetailChipJump(panel);
+    saveFilterState();
   }
 
   function renderTabs(panel) {
@@ -793,6 +922,22 @@
     return daypopEl;
   }
 
+  // 「空きあり日の詳細」のチップをタップしたら、時間帯選択画面へ飛ばす
+  function bindDetailChipJump(panel) {
+    const body = panel.querySelector('#mtc-body');
+    body.querySelectorAll('.mtc-chip-jump').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const ti = Number(chip.dataset.ti);
+        const dateStr = chip.dataset.date;
+        chip.style.opacity = '0.5';
+        jumpToBooking(ti, dateStr).finally(() => {
+          chip.style.opacity = '1';
+        });
+      });
+    });
+  }
+
   function bindCellTapPopover(panel) {
     const body = panel.querySelector('#mtc-body');
     body.querySelectorAll('.mtc-calendar td[data-date]').forEach((td) => {
@@ -811,7 +956,10 @@
           const slotMap = openSlotsInRange(ti, cell, state.startMin, state.endMin);
           if (slotMap.size === 0) return;
           any = true;
-          inner += `<div style="font-weight:bold;color:${facilityColor(ti)};margin-top:4px;">${TARGETS[ti] ? TARGETS[ti].name : ''}</div>`;
+          inner += `<div style="font-weight:bold;color:${facilityColor(ti)};margin-top:4px;display:flex;align-items:center;justify-content:space-between;gap:6px;">` +
+            `<span>${TARGETS[ti] ? TARGETS[ti].name : ''}</span>` +
+            `<button type="button" class="mtc-daypop-jump" data-ti="${ti}" data-date="${dateStr}" style="background:#2e7d32;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">予約画面へ</button>` +
+            `</div>`;
           inner += '<div class="mtc-chips" style="margin-bottom:2px;">';
           Array.from(slotMap.entries())
             .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -843,6 +991,19 @@
 
         pop.querySelector('#mtc-daypop-close').addEventListener('click', () => {
           pop.style.display = 'none';
+        });
+        pop.querySelectorAll('.mtc-daypop-jump').forEach((btn) => {
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const jti = Number(btn.dataset.ti);
+            const jdate = btn.dataset.date;
+            btn.disabled = true;
+            btn.textContent = '…';
+            jumpToBooking(jti, jdate).finally(() => {
+              btn.disabled = false;
+              btn.textContent = '予約画面へ';
+            });
+          });
         });
       });
     });
@@ -1135,7 +1296,7 @@
         <button class="mtc-preset-btn" type="button" data-start="19:00" data-end="24:00">ナイター(19時〜)</button>
       </div>
       <div class="mtc-weekday-filter" id="mtc-weekday-filter">
-        ${DOW.map((d, i) => `<label><input type="checkbox" data-dow="${i}" checked>${d}</label>`).join('')}
+        ${DOW.map((d, i) => `<label><input type="checkbox" data-dow="${i}" ${state.selectedDow.has(i) ? 'checked' : ''}>${d}</label>`).join('')}
       </div>
       <div class="mtc-preset-row" id="mtc-dow-presets">
         <button class="mtc-preset-btn" type="button" data-dow-preset="weekday">平日</button>
@@ -1146,8 +1307,8 @@
     `;
     document.body.appendChild(panel);
 
-    panel.querySelector('#mtc-start-time').value = '00:00';
-    panel.querySelector('#mtc-end-time').value = '24:00';
+    panel.querySelector('#mtc-start-time').value = minToTime(state.startMin);
+    panel.querySelector('#mtc-end-time').value = minToTime(state.endMin);
 
     panel.querySelector('#mtc-close-btn').addEventListener('click', () => {
       panel.style.display = 'none';
@@ -1410,9 +1571,9 @@
       /* 判定に失敗しても致命的ではないので無視 */
     }
 
-    // 初期選択施設（有効な最初の1件）
+    // 初期選択施設（保存されていればそれを使う。無ければ有効な最初の1件）
     const initial = enabledIndices();
-    if (initial.length > 0) state.selectedTi.add(initial[0]);
+    if (state.selectedTi.size === 0 && initial.length > 0) state.selectedTi.add(initial[0]);
 
     fab.addEventListener('click', async () => {
       const willOpen = panel.style.display !== 'block';
