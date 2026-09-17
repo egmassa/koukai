@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.0.1
+// @version      5.0.2
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -214,7 +214,7 @@
         bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));
         z-index: 2147483647;
         width: 56px; height: 56px; border-radius: 50%;
-        background: #2e7d32; color: #fff; font-size: 24px;
+        background: #1565c0; color: #fff; font-size: 24px;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 2px 8px rgba(0,0,0,0.3); cursor: pointer; border: none;
       }
@@ -1522,7 +1522,7 @@
       'right:max(20px, env(safe-area-inset-right, 0px));' +
       'bottom:max(28px, calc(env(safe-area-inset-bottom, 0px) + 20px));' +
       'z-index:2147483647;' +
-      'width:56px;height:56px;border-radius:50%;background:#2e7d32;color:#fff;' +
+      'width:56px;height:56px;border-radius:50%;background:#1565c0;color:#fff;' +
       'font-size:24px;display:flex;align-items:center;justify-content:center;' +
       'box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:pointer;border:none;' +
       '-webkit-tap-highlight-color:transparent;touch-action:manipulation;';
