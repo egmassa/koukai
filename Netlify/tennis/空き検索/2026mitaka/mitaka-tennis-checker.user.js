@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.0.0
+// @version      5.0.1
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -84,46 +84,21 @@
     });
   }
 
-  // 施設を切り替えるとき、サーバー側が前回の施設に固定されてしまう問題への対策。
+  // 施設を切り替えると、サーバー側が前回の施設に固定されてしまう問題への対策。
   // 手動で /reservation を開き直すとリセットされることが確認できたので、
-  // 同じことを裏側（画面には出さず）でfetchして再現する。
-  // 「前回どの施設を選んだか」はタブごとの記憶ではなく、localStorage（同じサイトの
-  // 全タブで共有される）に持たせる。新しく開いたタブでもこのツールが動くため、
-  // タブ限定の変数だと「自分は初めてだ」と誤認してリセットをスキップしてしまうため。
-  const LAST_JUMPED_FACILITY_KEY = 'mtc_last_jumped_facility_id';
-  function getLastJumpedFacilityId() {
-    try {
-      const v = localStorage.getItem(LAST_JUMPED_FACILITY_KEY);
-      return v === null ? null : Number(v);
-    } catch (e) {
-      return null;
-    }
-  }
-  function setLastJumpedFacilityId(id) {
-    try {
-      localStorage.setItem(LAST_JUMPED_FACILITY_KEY, String(id));
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  async function resetSiteSessionIfSwitchingFacility(facilityId) {
-    const last = getLastJumpedFacilityId();
-    if (last === null || last === facilityId) {
-      setLastJumpedFacilityId(facilityId);
-      return null; // トークンは変わっていないので、呼び出し側は元のトークンを使う
-    }
+  // 同じことを裏側（画面には出さず）で毎回fetchして再現する。
+  // 「前回と同じ施設のときだけ省略する」といった条件分岐は、記憶がズレたときに
+  // 古いCSRFトークンを使ってしまう不具合の元になるため、常に取り直す単純な方式にしている。
+  async function refreshCsrfTokenViaReservationReload() {
     try {
       const res = await fetch('https://yoyaku-mitaka.jp/reservation', { credentials: 'same-origin' });
       const html = await res.text();
       const m = html.match(/<meta name="csrf-token" content="([^"]+)"/);
-      const freshToken = m ? m[1] : null;
-      setLastJumpedFacilityId(facilityId);
-      return freshToken;
+      return m ? m[1] : null;
     } catch (e) {
       console.error('[mitaka-tennis-checker] /reservation reload failed', e);
+      return null;
     }
-    setLastJumpedFacilityId(facilityId);
   }
 
   // 選択した日付を、サイト本体の「日付選択→予約へ進む」と同じAPIに直接渡し、
@@ -138,7 +113,7 @@
       return;
     }
     try {
-      const freshToken = await resetSiteSessionIfSwitchingFacility(t.facilityId);
+      const freshToken = await refreshCsrfTokenViaReservationReload();
       const csrfToken = freshToken || csrfMeta.content;
 
       // サイト本体のgoBookingTime()と同じく、APIを叩く前にsessionStorageへ
