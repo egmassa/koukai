@@ -425,6 +425,14 @@ wireCycleButton("editSelfReturnSideBtn", "editSelfReturnSide", RETURN_SIDE_CYCLE
 let state = null; // 開始後にセットされる
 const $ = id => document.getElementById(id);
 
+// 画面消灯防止まわりの変数は、showScreen()など早い段階で呼ばれる関数から
+// 参照されるため、TDZ(let/constの巻き上げ問題)を避けるここで先に宣言しておく。
+let wakeLock = null;
+let lastActivityTime = Date.now();
+const WAKE_LOCK_TIMEOUT_KEY = "tennis-watch-wakelock-timeout-min";
+const WAKE_LOCK_TIMEOUT_OPTIONS = [3, 5, 10, 15, 30]; // 分
+
+
 function showScreen(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $(id).classList.add("active");
@@ -1115,7 +1123,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.15"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.16"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1310,17 +1318,21 @@ $("resetSyncBtn").addEventListener("click", ()=>{
 });
 
 $("connSettingsBtn").addEventListener("click", ()=>{
-  const cfg = loadAppsScriptConfig();
-  // 合言葉は保存時にハッシュ化されるため、元の文章は復元できない(そういう設計)。
-  // 空欄のままにして、変更したい時だけ入力してもらう。
-  $("connTokenInput").value = "";
-  $("connTokenInput").placeholder = cfg.token ? "設定済み(変更する場合のみ入力)" : "合言葉(自由なフレーズでOK)";
-  // トラブルシューティング用: 実際に保存されているハッシュ値をそのまま表示する
-  // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
-  $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${maskToken(cfg.token)}` : "現在、合言葉は保存されていません";
-  $("versionTag").textContent = `v${APP_VERSION}`;
-  refreshWakeLockTimeoutBtn();
-  showScreen("connSettingsScreen");
+  try{
+    const cfg = loadAppsScriptConfig();
+    // 合言葉は保存時にハッシュ化されるため、元の文章は復元できない(そういう設計)。
+    // 空欄のままにして、変更したい時だけ入力してもらう。
+    $("connTokenInput").value = "";
+    $("connTokenInput").placeholder = cfg.token ? "設定済み(変更する場合のみ入力)" : "合言葉(自由なフレーズでOK)";
+    // トラブルシューティング用: 実際に保存されているハッシュ値をそのまま表示する
+    // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
+    $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${maskToken(cfg.token)}` : "現在、合言葉は保存されていません";
+    $("versionTag").textContent = `v${APP_VERSION}`;
+    refreshWakeLockTimeoutBtn();
+  }catch(e){
+    console.error("接続設定画面の表示準備でエラー:", e);
+  }
+  showScreen("connSettingsScreen"); // 上のどこかで失敗しても、画面遷移自体は必ず行う
 });
 $("connSaveBtn").addEventListener("click", async ()=>{
   const phrase = $("connTokenInput").value.trim();
@@ -1521,8 +1533,7 @@ resumeIfPossible();
 // (ブラウザ側の仕様で、非表示になると自動的にロックが解除されるため)。
 // ただし「つけっぱなしを忘れる」対策として、スコア画面以外にいる時と、
 // 一定時間ポイント操作が無かった時は自動で解除する。
-let wakeLock = null;
-let lastActivityTime = Date.now();
+// (wakeLock / lastActivityTime 変数自体はTDZを避けるためファイル冒頭で宣言済み)
 
 async function requestWakeLock(){
   if(!("wakeLock" in navigator)) return;
@@ -1546,14 +1557,22 @@ document.addEventListener("visibilitychange", ()=>{
 
 // 放置対策: 一定時間、得点操作(タップ)が無ければ自動的に画面消灯防止を解除する。
 // この時間は接続設定画面から変更でき、端末に保存される。
-const WAKE_LOCK_TIMEOUT_KEY = "tennis-watch-wakelock-timeout-min";
-const WAKE_LOCK_TIMEOUT_OPTIONS = [3, 5, 10, 15, 30]; // 分
+// (WAKE_LOCK_TIMEOUT_KEY / OPTIONS もファイル冒頭で宣言済み)
 function loadWakeLockTimeoutMinutes(){
-  const v = Number(localStorage.getItem(WAKE_LOCK_TIMEOUT_KEY));
-  return WAKE_LOCK_TIMEOUT_OPTIONS.includes(v) ? v : 5; // 未設定・不正値なら5分をデフォルトに
+  try{
+    const v = Number(localStorage.getItem(WAKE_LOCK_TIMEOUT_KEY));
+    return WAKE_LOCK_TIMEOUT_OPTIONS.includes(v) ? v : 5; // 未設定・不正値なら5分をデフォルトに
+  }catch(e){
+    console.error("画面消灯防止の設定読み込みに失敗:", e);
+    return 5;
+  }
 }
 function saveWakeLockTimeoutMinutes(v){
-  localStorage.setItem(WAKE_LOCK_TIMEOUT_KEY, String(v));
+  try{
+    localStorage.setItem(WAKE_LOCK_TIMEOUT_KEY, String(v));
+  }catch(e){
+    console.error("画面消灯防止の設定保存に失敗:", e);
+  }
 }
 setInterval(()=>{
   const timeoutMs = loadWakeLockTimeoutMinutes() * 60 * 1000;
