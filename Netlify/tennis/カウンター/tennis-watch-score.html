@@ -1100,7 +1100,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.12"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.13"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1498,6 +1498,24 @@ async function importConfigFromUrlIfPresent(){
 /* ====================== 起動 ====================== */
 importConfigFromUrlIfPresent();
 resumeIfPossible();
+
+// 画面消灯防止(対応しているブラウザのみ有効)。
+// スコア画面を見ている間は、腕を下ろす動作などで消灯しにくくする。
+// タブが一旦非表示(消灯・画面遷移)になった後、再度表示された時にも取り直す必要がある
+// (ブラウザ側の仕様で、非表示になると自動的にロックが解除されるため)。
+let wakeLock = null;
+async function requestWakeLock(){
+  if(!("wakeLock" in navigator)) return;
+  try{
+    wakeLock = await navigator.wakeLock.request("screen");
+  }catch(e){
+    console.error("画面消灯防止に失敗:", e);
+  }
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible") requestWakeLock();
+});
+requestWakeLock();
 
 function updateClock(){
   const el = $("clockDisplay");
