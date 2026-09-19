@@ -324,6 +324,11 @@
     <button class="primary" id="connSaveBtn">保存</button>
     <button id="connBackBtn">戻る</button>
     <div class="desc" id="connTokenDebug" style="word-break:break-all; margin-top:14px;"></div>
+
+    <div class="grp-label" style="margin-top:24px;">画面消灯防止の解除時間</div>
+    <div class="desc">スコア画面で操作が無い場合、この時間が経つと自動的に画面消灯防止を解除します(タップするたびに切り替わります)。</div>
+    <button class="cycle-btn" id="wakeLockTimeoutBtn"></button>
+
     <div class="version-tag" id="versionTag"></div>
   </section>
 
@@ -423,6 +428,14 @@ const $ = id => document.getElementById(id);
 function showScreen(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $(id).classList.add("active");
+  // 画面消灯防止は、実際にスコアを入力する画面にいる間だけ有効にする
+  // (履歴やルール設定画面を見ている間まで、つけっぱなしにする必要はないため)
+  if(id === "scoreScreen"){
+    lastActivityTime = Date.now();
+    requestWakeLock();
+  } else {
+    releaseWakeLock();
+  }
 }
 function toast(msg){
   const t = $("toast");
@@ -617,6 +630,8 @@ function advanceTeamAServeTurn(){
 function addPoint(side){
   pushHistory();
   state.serverCorrectionBackup = null; // 新しいポイントが入ったら、直前のサーブ修正の取り消しは対象外にする
+  lastActivityTime = Date.now();
+  if(!wakeLock) requestWakeLock(); // 放置解除後にプレー再開したら、改めて画面消灯防止をかけ直す
   const setNumber = state.sets.length + 1;
 
   if(state.tiebreak){
@@ -1100,7 +1115,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.13"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.15"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1304,6 +1319,7 @@ $("connSettingsBtn").addEventListener("click", ()=>{
   // (Apps Script側のSCRIPT_TOKENと文字単位で見比べられるように)
   $("connTokenDebug").textContent = cfg.token ? `現在保存されている値: ${maskToken(cfg.token)}` : "現在、合言葉は保存されていません";
   $("versionTag").textContent = `v${APP_VERSION}`;
+  refreshWakeLockTimeoutBtn();
   showScreen("connSettingsScreen");
 });
 $("connSaveBtn").addEventListener("click", async ()=>{
@@ -1503,7 +1519,11 @@ resumeIfPossible();
 // スコア画面を見ている間は、腕を下ろす動作などで消灯しにくくする。
 // タブが一旦非表示(消灯・画面遷移)になった後、再度表示された時にも取り直す必要がある
 // (ブラウザ側の仕様で、非表示になると自動的にロックが解除されるため)。
+// ただし「つけっぱなしを忘れる」対策として、スコア画面以外にいる時と、
+// 一定時間ポイント操作が無かった時は自動で解除する。
 let wakeLock = null;
+let lastActivityTime = Date.now();
+
 async function requestWakeLock(){
   if(!("wakeLock" in navigator)) return;
   try{
@@ -1512,10 +1532,51 @@ async function requestWakeLock(){
     console.error("画面消灯防止に失敗:", e);
   }
 }
+function releaseWakeLock(){
+  if(wakeLock){
+    wakeLock.release().catch(()=>{});
+    wakeLock = null;
+  }
+}
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState === "visible") requestWakeLock();
+  if(document.visibilityState === "visible" && $("scoreScreen").classList.contains("active")){
+    requestWakeLock();
+  }
 });
-requestWakeLock();
+
+// 放置対策: 一定時間、得点操作(タップ)が無ければ自動的に画面消灯防止を解除する。
+// この時間は接続設定画面から変更でき、端末に保存される。
+const WAKE_LOCK_TIMEOUT_KEY = "tennis-watch-wakelock-timeout-min";
+const WAKE_LOCK_TIMEOUT_OPTIONS = [3, 5, 10, 15, 30]; // 分
+function loadWakeLockTimeoutMinutes(){
+  const v = Number(localStorage.getItem(WAKE_LOCK_TIMEOUT_KEY));
+  return WAKE_LOCK_TIMEOUT_OPTIONS.includes(v) ? v : 5; // 未設定・不正値なら5分をデフォルトに
+}
+function saveWakeLockTimeoutMinutes(v){
+  localStorage.setItem(WAKE_LOCK_TIMEOUT_KEY, String(v));
+}
+setInterval(()=>{
+  const timeoutMs = loadWakeLockTimeoutMinutes() * 60 * 1000;
+  if(wakeLock && Date.now() - lastActivityTime > timeoutMs){
+    releaseWakeLock();
+    toast("しばらく操作が無かったため、画面消灯防止を解除しました");
+  }
+}, 60*1000); // 1分おきにチェック
+
+function refreshWakeLockTimeoutBtn(){
+  const btn = $("wakeLockTimeoutBtn");
+  if(!btn) return;
+  btn.textContent = `${loadWakeLockTimeoutMinutes()}分`;
+}
+$("wakeLockTimeoutBtn").addEventListener("click", ()=>{
+  const cur = loadWakeLockTimeoutMinutes();
+  const idx = WAKE_LOCK_TIMEOUT_OPTIONS.indexOf(cur);
+  const next = WAKE_LOCK_TIMEOUT_OPTIONS[(idx+1) % WAKE_LOCK_TIMEOUT_OPTIONS.length];
+  saveWakeLockTimeoutMinutes(next);
+  refreshWakeLockTimeoutBtn();
+});
+refreshWakeLockTimeoutBtn();
+
 
 function updateClock(){
   const el = $("clockDisplay");
