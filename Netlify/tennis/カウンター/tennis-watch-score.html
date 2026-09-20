@@ -59,7 +59,12 @@
 
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
-  .rules-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;}
+  .rules-chips{display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-bottom:6px;}
+  .rule-chip{font-size:14px; font-weight:800; padding:3px 9px; border-radius:8px;}
+  .chip-games{background:rgba(90,160,220,0.22); color:#a9d3f5;}
+  .chip-finish{background:rgba(220,180,90,0.22); color:#f0d99a;}
+  .chip-deuce{background:rgba(180,120,220,0.22); color:#dcb3f5;}
+  .rule-chip.longpress-hint{border:1.5px dotted currentColor;}
   .return-side-strip{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:800;
     display:inline-block; padding:2px 10px;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
@@ -216,9 +221,9 @@
 
     <div class="grp-label">セット決着</div>
     <div class="mode-toggle" data-group="setFinishMode">
-      <button class="mode-btn" data-value="winByTwo">タイブレーク</button>
+      <button class="mode-btn" data-value="winByTwo">タイブレあり</button>
       <button class="mode-btn active" data-value="firstTo">先取</button>
-      <button class="mode-btn" data-value="fixed">総数固定</button>
+      <button class="mode-btn" data-value="fixed">消化</button>
     </div>
 
     <div class="grp-label">デュース方式</div>
@@ -253,7 +258,11 @@
       <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
     </div>
 
-    <div class="rules-strip" id="rulesStrip"></div>
+    <div class="rules-chips" id="rulesChips">
+      <span class="rule-chip chip-games" id="chipGames"></span>
+      <span class="rule-chip chip-finish" id="chipFinish"></span>
+      <span class="rule-chip chip-deuce" id="chipDeuce"></span>
+    </div>
     <div class="return-side-strip" id="returnSideStrip"></div>
     <div class="tiebreak-badge" id="tiebreakBadge" style="display:none;">タイブレーク</div>
 
@@ -958,20 +967,48 @@ function attachLongPress(btn, side){
 attachLongPress($("tapA"), "a");
 attachLongPress($("tapB"), "b");
 
-// 「自分のリターン」表示の長押し(スコア用のタップとは違い、クリック抑制は不要)
-(function(){
-  const el = $("returnSideStrip");
+// スコア用のタップとは違いクリック抑制が不要な要素向けの、シンプルな長押しヘルパー
+function attachSimpleLongPress(el, callback){
   let timer = null;
   el.addEventListener("pointerdown", ()=>{
     timer = setTimeout(()=>{
       if(navigator.vibrate) navigator.vibrate(30);
-      cycleSelfReturnSide();
+      callback();
     }, 600);
   });
   el.addEventListener("pointerup", ()=> clearTimeout(timer));
   el.addEventListener("pointerleave", ()=> clearTimeout(timer));
   el.addEventListener("pointercancel", ()=> clearTimeout(timer));
-})();
+}
+attachSimpleLongPress($("returnSideStrip"), cycleSelfReturnSide);
+
+function cycleGamesPerSet(){
+  if(!isMatchAtZero()){ toast("最初のポイントを打つ前しか変更できません"); return; }
+  const idx = GAMES_PER_SET_CYCLE.indexOf(state.settings.gamesPerSet);
+  state.settings.gamesPerSet = GAMES_PER_SET_CYCLE[(idx+1) % GAMES_PER_SET_CYCLE.length];
+  render();
+  persist();
+  toast(`1セットのゲーム数: ${state.settings.gamesPerSet}`);
+}
+function cycleSetFinishMode(){
+  if(!isMatchAtZero()){ toast("最初のポイントを打つ前しか変更できません"); return; }
+  const idx = SET_FINISH_MODE_CYCLE.indexOf(state.settings.setFinishMode);
+  state.settings.setFinishMode = SET_FINISH_MODE_CYCLE[(idx+1) % SET_FINISH_MODE_CYCLE.length];
+  render();
+  persist();
+  toast(`セット決着: ${FINISH_LABELS[state.settings.setFinishMode]}`);
+}
+function cycleDeuceMode(){
+  if(!isMatchAtZero()){ toast("最初のポイントを打つ前しか変更できません"); return; }
+  const idx = DEUCE_MODE_CYCLE.indexOf(state.settings.deuceMode);
+  state.settings.deuceMode = DEUCE_MODE_CYCLE[(idx+1) % DEUCE_MODE_CYCLE.length];
+  render();
+  persist();
+  toast(`デュース方式: ${DEUCE_LABELS[state.settings.deuceMode]}`);
+}
+attachSimpleLongPress($("chipGames"), cycleGamesPerSet);
+attachSimpleLongPress($("chipFinish"), cycleSetFinishMode);
+attachSimpleLongPress($("chipDeuce"), cycleDeuceMode);
 
 $("undoBtn").addEventListener("click", ()=>{
   if(!state) return;
@@ -1022,9 +1059,28 @@ function getCurrentServerPairLabel(){
   return state.pairServeTurn;
 }
 
+function isMatchAtZero(){
+  // ルール設定(ゲーム数・決着方式・デュース方式)は、1点でも入った後に変えると
+  // それまでの得点・勝敗の意味が壊れてしまうため、「現在のセットの」0-0の間だけ変更可能にする。
+  // (sets.lengthは見ないので、第2セット以降が0-0で始まった時も同じように変更できる)
+  return state.points.a===0 && state.points.b===0 &&
+         state.games.a===0 && state.games.b===0 &&
+         !state.tiebreak;
+}
+const FINISH_LABELS = {winByTwo:"タイブレあり", firstTo:"先取", fixed:"消化"};
+const DEUCE_LABELS = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"};
+const GAMES_PER_SET_CYCLE = [4, 6, 8];
+const SET_FINISH_MODE_CYCLE = ["winByTwo", "firstTo", "fixed"];
+const DEUCE_MODE_CYCLE = ["ad", "noAd", "oneDeuce"];
+
 function render(){
   if(!state) return;
-  $("rulesStrip").textContent = rulesSummary(state.settings);
+  const editableRules = isMatchAtZero();
+  const chipGames = $("chipGames"), chipFinish = $("chipFinish"), chipDeuce = $("chipDeuce");
+  chipGames.textContent = `${state.settings.gamesPerSet}ゲーム`;
+  chipFinish.textContent = FINISH_LABELS[state.settings.setFinishMode] || state.settings.setFinishMode;
+  chipDeuce.textContent = DEUCE_LABELS[state.settings.deuceMode] || state.settings.deuceMode;
+  [chipGames, chipFinish, chipDeuce].forEach(el => el.classList.toggle("longpress-hint", editableRules));
   const returnSideEl = $("returnSideStrip");
   if(state.mode==="doubles"){
     const v = state.settings.selfReturnSide;
@@ -1070,9 +1126,9 @@ function render(){
 }
 
 function rulesSummary(st){
-  const finishLabel = {winByTwo:"タイブレーク", firstTo:"先取のみ", fixed:"総ゲーム数固定"}[st.setFinishMode] || st.setFinishMode;
+  const finishLabel = {winByTwo:"タイブレあり", firstTo:"先取", fixed:"消化"}[st.setFinishMode] || st.setFinishMode;
   const deuceLabel = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"}[st.deuceMode] || st.deuceMode;
-  return `${st.gamesPerSet}ゲーム制・${finishLabel}・${deuceLabel}`;
+  return `${st.gamesPerSet}ゲーム・${finishLabel}・${deuceLabel}`;
 }
 
 /* ====================== ローカル永続DB(Drive未接続でも履歴を保持・閲覧) ====================== */
@@ -1123,7 +1179,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.16"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.18"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
