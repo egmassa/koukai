@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,31 +16,38 @@
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background-color: #f3f4f6;
         }
+
         .pulse-mic {
             animation: pulse-red 1.5s infinite;
         }
+
         @keyframes pulse-red {
             0% {
                 box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
             }
+
             70% {
                 box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
             }
+
             100% {
                 box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
             }
         }
+
         /* Custom Scrollbar for matrix tables */
         .table-container::-webkit-scrollbar {
             height: 6px;
             width: 6px;
         }
+
         .table-container::-webkit-scrollbar-thumb {
             background: #cbd5e1;
             border-radius: 4px;
         }
     </style>
 </head>
+
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
     <!-- Navigation / Header -->
@@ -54,14 +62,16 @@
                     <p class="text-xs text-emerald-200">Android/iOS 音声ナビ対応</p>
                 </div>
             </div>
-            <button id="btn-help" class="text-xs bg-emerald-800 hover:bg-emerald-600 text-emerald-100 px-3 py-1.5 rounded-full border border-emerald-500 transition">
+            <button id="btn-help"
+                class="text-xs bg-emerald-800 hover:bg-emerald-600 text-emerald-100 px-3 py-1.5 rounded-full border border-emerald-500 transition">
                 <i class="fa-solid fa-circle-question mr-1"></i> 使い方
             </button>
         </div>
     </header>
 
     <!-- Android HTTPS Notice Banner (Hidden by default, shown if non-secure context) -->
-    <div id="https-warning" class="hidden bg-amber-500 text-white px-4 py-2 text-xs text-center font-medium shadow-inner">
+    <div id="https-warning"
+        class="hidden bg-amber-500 text-white px-4 py-2 text-xs text-center font-medium shadow-inner">
         <i class="fa-solid fa-triangle-exclamation mr-1"></i>
         Android Chromeで音声認識を使うには、安全な接続（HTTPS / localhost）が必要です。現在地: <span id="current-protocol"></span>
     </div>
@@ -72,29 +82,37 @@
         <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-6 transition-all">
             <div class="flex flex-col md:flex-row items-center justify-between gap-4">
                 <div class="flex items-center gap-4 w-full md:w-auto">
-                    <button id="btn-toggle-voice" class="relative group flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition-all active:scale-95 w-full md:w-auto">
+                    <button id="btn-toggle-voice"
+                        class="relative group flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition-all active:scale-95 w-full md:w-auto">
                         <i id="mic-icon" class="fa-solid fa-microphone text-lg"></i>
                         <span id="mic-btn-text">音声操作を開始する</span>
                     </button>
-                    <button id="btn-speak-current" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3.5 rounded-xl border border-slate-300 transition shrink-0" title="現在の試合をアナウンス">
+                    <button id="btn-speak-current"
+                        class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3.5 rounded-xl border border-slate-300 transition shrink-0"
+                        title="現在の試合をアナウンス">
                         <i class="fa-solid fa-volume-high text-lg"></i>
                     </button>
                 </div>
 
                 <!-- Live Speech Status Display -->
-                <div class="w-full md:flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-3 min-h-[52px]">
+                <div
+                    class="w-full md:flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-3 min-h-[52px]">
                     <div id="status-indicator" class="w-3 h-3 rounded-full bg-slate-400 shrink-0"></div>
                     <div class="flex-1 min-w-0">
                         <div id="voice-status-text" class="text-xs font-semibold text-slate-500">音声認識：停止中</div>
-                        <div id="voice-transcript" class="text-sm font-bold text-slate-800 truncate">「次の試合」「決定」「リセット」などと発話してください</div>
+                        <div id="voice-transcript" class="text-sm font-bold text-slate-800 truncate">
+                            「次の試合」「決定」「リセット」などと発話してください</div>
                     </div>
                 </div>
             </div>
 
             <!-- Speech Troubleshooting Helper for Android -->
-            <div id="android-speech-help" class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
-                <span><i class="fa-brands fa-android text-emerald-600 mr-1"></i> Androidで反応しない場合: マイク権限とChromeのGoogle音声サービス設定を確認してください。</span>
-                <button id="btn-test-mic" class="text-emerald-700 font-semibold hover:underline flex items-center gap-1">
+            <div id="android-speech-help"
+                class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+                <span><i class="fa-brands fa-android text-emerald-600 mr-1"></i> Androidで反応しない場合:
+                    マイク権限とChromeのGoogle音声サービス設定を確認してください。</span>
+                <button id="btn-test-mic"
+                    class="text-emerald-700 font-semibold hover:underline flex items-center gap-1">
                     <i class="fa-solid fa-vial"></i> マイク動作テスト
                 </button>
             </div>
@@ -108,47 +126,56 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-slate-600 mb-1">参加メンバー (カンマ区切り)</label>
-                    <textarea id="player-names" rows="2" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">1番, 2番, 3番, 4番, 5番, 6番</textarea>
+                    <textarea id="player-names" rows="2"
+                        class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">1番, 2番, 3番, 4番, 5番, 6番</textarea>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-600 mb-1">コート数</label>
-                    <select id="court-count" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                    <select id="court-count"
+                        class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
                         <option value="1">1コート</option>
                         <option value="2">2コート</option>
                     </select>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-600 mb-1">試合生成モード (6人の場合)</label>
-                    <select id="match-mode" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                    <select id="match-mode"
+                        class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
                         <option value="9">9試合 (対戦被りゼロ最適化 - おすすめ)</option>
                         <option value="10">10試合 (数学的に対戦被り1箇所発生)</option>
                     </select>
                 </div>
             </div>
             <div class="mt-4 flex gap-3">
-                <button id="btn-generate" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-5 py-2.5 rounded-xl shadow transition active:scale-95">
+                <button id="btn-generate"
+                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-5 py-2.5 rounded-xl shadow transition active:scale-95">
                     <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> 乱数表を作成
                 </button>
-                <button id="btn-reset-scores" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-sm px-4 py-2.5 rounded-xl transition">
+                <button id="btn-reset-scores"
+                    class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-sm px-4 py-2.5 rounded-xl transition">
                     スコアリセット
                 </button>
             </div>
         </section>
 
         <!-- Active Match Display -->
-        <section class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
+        <section
+            class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
             <div class="flex items-center justify-between mb-4 border-b border-slate-700 pb-3">
                 <div class="flex items-center gap-2">
-                    <span id="match-number-badge" class="bg-emerald-500 text-white font-black text-xs px-2.5 py-1 rounded-md">
+                    <span id="match-number-badge"
+                        class="bg-emerald-500 text-white font-black text-xs px-2.5 py-1 rounded-md">
                         GAME 1 / 9
                     </span>
                     <span class="text-xs text-slate-400">進行中</span>
                 </div>
                 <div class="flex gap-2">
-                    <button id="btn-prev-match" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                    <button id="btn-prev-match"
+                        class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition">
                         <i class="fa-solid fa-chevron-left mr-1"></i> 前の試合
                     </button>
-                    <button id="btn-next-match" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                    <button id="btn-next-match"
+                        class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-xs font-bold transition">
                         次の試合 <i class="fa-solid fa-chevron-right ml-1"></i>
                     </button>
                 </div>
@@ -253,11 +280,26 @@
                     updateVoiceStatus('active', '音声を聞き取り中...', '「次の試合」「前の試合」「アナウンス」など話してください');
                 };
 
+                // 音声認識（Speech Recognition）のイベントハンドラ
                 recognition.onresult = (event) => {
+                    // ★ 読み上げ中（スマホ自らの発声中）は音声を無視してループを断ち切る
+                    if (isSpeakingNow) return;
+
                     const lastResultIndex = event.results.length - 1;
-                    const text = event.results[lastResultIndex][0].transcript.trim();
-                    document.getElementById('voice-transcript').innerText = `「${text}」`;
-                    handleVoiceCommand(text);
+                    const command = event.results[lastResultIndex][0].transcript.trim();
+
+                    // コマンド判定
+                    if (command.includes('次') || command.includes('つぎ') || command.includes('ネクスト')) {
+                        nextMatch(); // 試合を進めてアナウンスを実行
+                    } else if (command.includes('前') || command.includes('まえ') || command.includes('バック')) {
+                        prevMatch();
+                    } else if (command.includes('何試合') || command.includes('なんしあい') || command.includes('いま')) {
+                        speakCurrentMatch();
+                    } else if (command.includes('もう一度') || command.includes('もういちど')) {
+                        speakCurrentMatch();
+                    } else if (command.includes('ストップ') || command.includes('停止')) {
+                        synth.cancel();
+                    }
                 };
 
                 recognition.onerror = (event) => {
@@ -336,7 +378,7 @@
             if (recognition) {
                 try {
                     recognition.stop();
-                } catch (e) {}
+                } catch (e) { }
             }
             updateVoiceUI(false);
             updateVoiceStatus('stopped', '音声認識：停止中', 'ボタンを押すと音声コマンドが使えます');
@@ -404,17 +446,51 @@
             synth.speak(utterance);
         }
 
+        // 読み上げ処理（Web Speech API Synthesis）
         function speakCurrentMatch() {
-            if (!schedule || schedule.length === 0) return;
-            const match = schedule[currentMatchIndex];
-            if (!match) return;
+            if (!schedule[currentMatchIndex]) return;
 
-            let text = `第${currentMatchIndex + 1}試合。`;
-            match.courts.forEach((court, idx) => {
-                text += `コート${idx + 1}。${court.teamA[0]}、${court.teamA[1]}ペア 対 ${court.teamB[0]}、${court.teamB[1]}ペア。`;
+            const match = schedule[currentMatchIndex];
+            let speechText = `だい ${numToHiragana[match.round] || match.round} しあい。`;
+
+            match.courts.forEach(c => {
+                speechText += `コート ${numToHiragana[c.courtNo] || c.courtNo}。${c.teamA.join('と')}ペア、対、${c.teamB.join('と')}ペア。`;
             });
-            text += `お休みは、${match.resting.join('、')}です。`;
-            speak(text);
+
+            if (match.resting.length > 0) {
+                speechText += `お休みは、${match.resting.join('、')}です。`;
+            }
+
+            // ★ 読み上げ開始前にマイク認識フラグを一時ロック（誤検知防止）
+            isSpeakingNow = true;
+            if (recognition) {
+                try { recognition.stop(); } catch (e) { }
+            }
+
+            synth.cancel(); // 割り込みキャンセル
+            const utterance = new SpeechSynthesisUtterance(formatTextForSpeech(speechText));
+
+            // 音声設定の適用
+            const voiceIndex = document.getElementById('voice-select').value;
+            if (voiceIndex !== "" && voicesList[voiceIndex]) utterance.voice = voicesList[voiceIndex];
+            utterance.rate = parseFloat(document.getElementById('voice-rate').value) || 1.0;
+            utterance.pitch = parseFloat(document.getElementById('voice-pitch').value) || 1.0;
+
+            // ★ 読み上げが終了した後にマイク認識を再開する
+            utterance.onend = () => {
+                isSpeakingNow = false;
+                if (isListening) {
+                    setTimeout(() => {
+                        try { recognition.start(); } catch (e) { }
+                    }, 300); // 残響・スピーカーの音を完全に拾わなくするための安全マージン
+                }
+            };
+
+            utterance.onerror = () => {
+                isSpeakingNow = false;
+            };
+
+            synth.speak(utterance);
         }
 
         function generateSchedule() {
@@ -612,7 +688,7 @@
             document.getElementById('btn-toggle-voice').addEventListener('click', toggleVoiceControl);
             document.getElementById('btn-speak-current').addEventListener('click', speakCurrentMatch);
             document.getElementById('btn-generate').addEventListener('click', generateSchedule);
-            
+
             document.getElementById('btn-prev-match').addEventListener('click', prevMatch);
             document.getElementById('btn-next-match').addEventListener('click', nextMatch);
             document.getElementById('btn-reset-scores').addEventListener('click', resetScores);
@@ -655,4 +731,5 @@
         }
     </script>
 </body>
+
 </html>
