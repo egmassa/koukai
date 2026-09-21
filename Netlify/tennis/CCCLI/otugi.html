@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テニス乱数表 & 音声ナビ v1.2.0</title>
+    <title>テニス乱数表 & 音声ナビ v1.2.1</title>
     <style>
         :root {
             --primary: #15803d;
@@ -26,10 +26,16 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
+        html,
         body {
+            height: 100%;
             background-color: var(--bg);
             color: var(--text-dark);
-            padding-bottom: 80px;
+            overflow-x: hidden;
+        }
+
+        body {
+            padding-bottom: 24px;
         }
 
         header {
@@ -206,6 +212,7 @@
             font-size: 0.8rem;
         }
 
+        /* モーダル関連のスクロール調整 */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -229,10 +236,11 @@
             border-radius: 12px;
             width: 100%;
             max-width: 750px;
-            max-height: 90vh;
+            max-height: 85vh;
             overflow-y: auto;
             padding: 20px;
             position: relative;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
         }
 
         .modal-close {
@@ -270,6 +278,7 @@
         .table-container {
             overflow-x: auto;
             margin-bottom: 24px;
+            -webkit-overflow-scrolling: touch;
         }
 
         table.stats-table {
@@ -337,7 +346,7 @@
         <button class="btn-icon" onclick="openModal('stats-modal')">📊 状況表</button>
         <div class="header-title">
             <span class="header-title-text">🎾 乱数表</span>
-            <span class="version-tag">v1.2.0</span>
+            <span class="version-tag">v1.2.1</span>
         </div>
         <button class="btn-icon" onclick="openModal('settings-modal')">⚙️ 設定</button>
     </header>
@@ -509,8 +518,15 @@
             generateSchedule();
         });
 
-        function openModal(id) { document.getElementById(id).classList.add('open'); }
-        function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+        function openModal(id) {
+            document.getElementById(id).classList.add('open');
+            document.body.style.overflow = 'hidden'; // モーダル表示時に背面スクロールを固定
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('open');
+            document.body.style.overflow = ''; // スクロール固定を解除
+        }
 
         function loadVoices() {
             voicesList = synth.getVoices().filter(v => v.lang.includes('ja') || v.lang.includes('JP'));
