@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テニス乱数表 & 音声ナビ v1.1.0</title>
+    <title>テニス乱数表 & 音声ナビ v1.2.0</title>
     <style>
         :root {
             --primary: #15803d;
@@ -35,7 +35,7 @@
         header {
             background-color: var(--primary);
             color: white;
-            padding: 14px 16px;
+            padding: 10px 12px;
             position: sticky;
             top: 0;
             z-index: 100;
@@ -43,39 +43,52 @@
             justify-content: space-between;
             align-items: center;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            gap: 4px;
         }
 
         .header-title {
             font-weight: bold;
             display: flex;
-            align-items: baseline;
-            gap: 6px;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            flex-wrap: nowrap;
+            white-space: nowrap;
+        }
+
+        .header-title-text {
+            font-size: 1rem;
         }
 
         .version-tag {
-            font-size: 0.7rem;
-            font-weight: normal;
-            background: rgba(255, 255, 255, 0.25);
-            padding: 1px 6px;
+            font-size: 0.65rem;
+            font-weight: bold;
+            background: #f59e0b;
+            color: #ffffff;
+            padding: 2px 6px;
             border-radius: 10px;
             letter-spacing: 0.5px;
+            display: inline-block;
+            flex-shrink: 0;
         }
 
         .btn-icon {
             background: rgba(255, 255, 255, 0.2);
             border: none;
             color: white;
-            padding: 6px 12px;
+            padding: 6px 8px;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             font-weight: bold;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .container {
             max-width: 700px;
             margin: 0 auto;
-            padding: 16px;
+            padding: 12px;
         }
 
         .card {
@@ -323,8 +336,8 @@
     <header>
         <button class="btn-icon" onclick="openModal('stats-modal')">📊 状況表</button>
         <div class="header-title">
-            <span>🎾 テニス乱数表</span>
-            <span class="version-tag">v1.1.0</span>
+            <span class="header-title-text">🎾 乱数表</span>
+            <span class="version-tag">v1.2.0</span>
         </div>
         <button class="btn-icon" onclick="openModal('settings-modal')">⚙️ 設定</button>
     </header>
@@ -356,7 +369,7 @@
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
-                <button class="btn btn-outline" onclick="prevMatch()">◀ 前へ</button>
+                <button class="btn btn-outline" onclick="speakPreviousMatchOnly()">◀ 前を聞く</button>
                 <button class="btn btn-outline" onclick="speakCurrentMatch()">📢 試合を聴く</button>
                 <button class="btn" onclick="nextMatch()">次へ ▶</button>
             </div>
@@ -864,10 +877,10 @@
             synth.speak(utterance);
         }
 
-        function speakCurrentMatch() {
-            if (!schedule[currentMatchIndex]) return;
+        function speakMatchByIndex(idx) {
+            if (!schedule[idx]) return;
 
-            const match = schedule[currentMatchIndex];
+            const match = schedule[idx];
             let speechText = `第${match.round}試合。`;
 
             match.courts.forEach(c => {
@@ -881,6 +894,18 @@
             speakText(speechText);
         }
 
+        function speakCurrentMatch() {
+            speakMatchByIndex(currentMatchIndex);
+        }
+
+        function speakPreviousMatchOnly() {
+            if (currentMatchIndex > 0) {
+                speakMatchByIndex(currentMatchIndex - 1);
+            } else {
+                speakText("これが最初の試合です。前の試合はありません。");
+            }
+        }
+
         function nextMatch() {
             if (currentMatchIndex < schedule.length - 1) {
                 currentMatchIndex++;
@@ -889,17 +914,6 @@
                 speakCurrentMatch();
             } else {
                 speakText("すべての試合が終了しました。お疲れ様でした。");
-            }
-        }
-
-        function prevMatch() {
-            if (currentMatchIndex > 0) {
-                currentMatchIndex--;
-                renderSchedule();
-                updateMatchBadge();
-                speakCurrentMatch();
-            } else {
-                speakText("最初の試合です。");
             }
         }
 
@@ -945,7 +959,7 @@
                 if (command.includes('次') || command.includes('つぎ') || command.includes('ネクスト')) {
                     nextMatch();
                 } else if (command.includes('前') || command.includes('まえ') || command.includes('バック')) {
-                    prevMatch();
+                    speakPreviousMatchOnly();
                 } else if (command.includes('何試合') || command.includes('なんしあい') || command.includes('いま')) {
                     speakCurrentMatch();
                 } else if (command.includes('もう一度') || command.includes('もういちど')) {
