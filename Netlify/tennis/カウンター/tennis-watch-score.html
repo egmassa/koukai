@@ -51,17 +51,14 @@
 
   /* score screen */
   #scoreScreen{padding:9% 11% 9%; justify-content:space-between;}
-  .topbar{width:100%; display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:3px;}
-  #undoBtn{height:34px; padding:0 16px; border-radius:20px; border:2px solid #3a6fd0;
-    background:rgba(58,111,208,0.15); color:#7fb0ff; font-size:14px; font-weight:700;
-    display:flex; align-items:center; justify-content:center; gap:5px; flex-shrink:0;}
+  .clock{font-size:20px; color:var(--text); font-weight:800; text-align:center; margin-bottom:4px;}
   .clock{font-size:20px; color:var(--text); font-weight:800; text-align:center; margin-bottom:4px;}
 
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
-  .rules-chips{display:flex; gap:6px; margin-bottom:8px;
+  .rules-chips{display:flex; gap:6px; margin-bottom:16px;
     width:100%; max-width:250px;}
-  .rule-chip{font-size:11px; font-weight:800; padding:5px 4px; border-radius:3px;
+  .rule-chip{font-size:13px; font-weight:800; padding:10px 4px; border-radius:5px;
     flex:1; min-width:0; box-sizing:border-box; text-align:center;}
   .chip-games{background:rgba(90,160,220,0.22); color:#a9d3f5;}
   .chip-finish{background:rgba(220,180,90,0.22); color:#f0d99a;}
@@ -142,13 +139,14 @@
   }
   .modal-overlay.show{display:flex;}
   .modal-box{
-    width:78%; max-width:220px; background:var(--panel); border:1px solid var(--line);
-    border-radius:16px; padding:14px 12px; text-align:center;
+    width:88%; max-width:280px; background:var(--panel); border:1px solid var(--line);
+    border-radius:18px; padding:20px 16px; text-align:center;
   }
-  .modal-text{font-size:11px; color:var(--text); margin-bottom:10px; line-height:1.4;}
-  .modal-btns{display:flex; gap:6px;}
-  .modal-btns button{flex:1; padding:7px 4px; border-radius:12px; border:1px solid var(--line);
-    background:transparent; color:var(--text); font-size:11px; font-weight:600;}
+  .modal-text{font-size:15px; color:var(--text); margin-bottom:16px; line-height:1.5;}
+  .confirm-highlight{font-size:26px; font-weight:800; color:var(--danger);}
+  .modal-btns{display:flex; gap:8px;}
+  .modal-btns button{flex:1; padding:11px 4px; border-radius:14px; border:1px solid var(--line);
+    background:transparent; color:var(--text); font-size:14px; font-weight:600;}
   #confirmYes{background:var(--teal); color:#04231d; border:none;}
 
   /* ============ スマホ/PC(丸画面ではない大きい画面)向けの上書き ============ */
@@ -259,9 +257,6 @@
 
   <section id="scoreScreen" class="screen">
     <div class="clock" id="clockDisplay"></div>
-    <div class="topbar">
-      <button id="undoBtn" title="ひとつ戻す">&#8617; 戻す</button>
-    </div>
 
     <div class="rules-chips" id="rulesChips">
       <span class="rule-chip chip-games" id="chipGames"></span>
@@ -472,9 +467,12 @@ function toast(msg){
 
 // window.confirm() はWear OSのWebView等で未実装/エラーになることがあるため、
 // アプリ内蔵の確認モーダルで代用する。
+function escapeHtml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
 function customConfirm(message, onYes){
   const modal = $("confirmModal");
-  $("confirmText").textContent = message;
+  $("confirmText").innerHTML = message.replace(/\n/g, "<br>");
   modal.classList.add("show");
 
   const yesBtn = $("confirmYes");
@@ -939,11 +937,14 @@ function applyServerChange(side){
 
 function attachLongPress(btn, side){
   const LONG_PRESS_MS = 600;
+  const MOVE_CANCEL_PX = 15; // これ以上動いたら長押しではなくスワイプ/ドラッグとみなす
   let timer = null;
   let longPressed = false;
+  let startX = 0, startY = 0;
 
-  const start = ()=>{
+  const start = (e)=>{
     longPressed = false;
+    startX = e.clientX; startY = e.clientY;
     timer = setTimeout(()=>{
       longPressed = true;
       if(navigator.vibrate) navigator.vibrate(30); // 端末が対応していれば振動で長押し成立を知らせる
@@ -958,8 +959,14 @@ function attachLongPress(btn, side){
     }, LONG_PRESS_MS);
   };
   const cancelTimer = ()=>{ clearTimeout(timer); };
+  const onMove = (e)=>{
+    if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX){
+      cancelTimer();
+    }
+  };
 
   btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointermove", onMove);
   btn.addEventListener("pointerup", cancelTimer);
   btn.addEventListener("pointerleave", cancelTimer);
   btn.addEventListener("pointercancel", cancelTimer);
@@ -978,12 +985,18 @@ attachLongPress($("tapB"), "b");
 
 // スコア用のタップとは違いクリック抑制が不要な要素向けの、シンプルな長押しヘルパー
 function attachSimpleLongPress(el, callback){
+  const MOVE_CANCEL_PX = 15;
   let timer = null;
-  el.addEventListener("pointerdown", ()=>{
+  let startX = 0, startY = 0;
+  el.addEventListener("pointerdown", (e)=>{
+    startX = e.clientX; startY = e.clientY;
     timer = setTimeout(()=>{
       if(navigator.vibrate) navigator.vibrate(30);
       callback();
     }, 600);
+  });
+  el.addEventListener("pointermove", (e)=>{
+    if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX) clearTimeout(timer);
   });
   el.addEventListener("pointerup", ()=> clearTimeout(timer));
   el.addEventListener("pointerleave", ()=> clearTimeout(timer));
@@ -993,13 +1006,20 @@ function attachSimpleLongPress(el, callback){
 // 親(得点タップ・サーブ順長押し)にイベントが伝わらないよう、ここで止める。
 function attachNestedLongPress(el, callback){
   const LONG_PRESS_MS = 600;
+  const MOVE_CANCEL_PX = 15;
   let timer = null;
+  let startX = 0, startY = 0;
   el.addEventListener("pointerdown", (e)=>{
     e.stopPropagation();
+    startX = e.clientX; startY = e.clientY;
     timer = setTimeout(()=>{
       if(navigator.vibrate) navigator.vibrate(30);
       callback();
     }, LONG_PRESS_MS);
+  });
+  el.addEventListener("pointermove", (e)=>{
+    e.stopPropagation();
+    if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX) clearTimeout(timer);
   });
   const cancelTimer = (e)=>{ e.stopPropagation(); clearTimeout(timer); };
   el.addEventListener("pointerup", cancelTimer);
@@ -1037,7 +1057,7 @@ attachSimpleLongPress($("chipGames"), cycleGamesPerSet);
 attachSimpleLongPress($("chipFinish"), cycleSetFinishMode);
 attachSimpleLongPress($("chipDeuce"), cycleDeuceMode);
 
-$("undoBtn").addEventListener("click", ()=>{
+function performUndo(){
   if(!state) return;
   if(state.serverCorrectionBackup){
     const b = state.serverCorrectionBackup;
@@ -1062,7 +1082,7 @@ $("undoBtn").addEventListener("click", ()=>{
   state.pointLog.pop(); // このundoで取り消される1ポイント分のログを削除
   render();
   persist();
-});
+}
 
 $("finishMatchBtn").addEventListener("click", ()=>{
   customConfirm("この試合を終了して新しい試合を始めますか？\n(記録は履歴に残ります)", ()=>{
@@ -1208,7 +1228,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.24"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.26"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1408,7 +1428,7 @@ $("deleteEmptyBtn").addEventListener("click", ()=>{
     toast("空の試合はありません");
     return;
   }
-  customConfirm(`記録が1ポイントも無い試合が${count}件あります。まとめて削除しますか？\n(この端末からのみ削除されます。すでにDriveへ同期済みのデータは残ります)`, ()=>{
+  customConfirm(`記録が1ポイントも無い試合が<span class="confirm-highlight">${count}件</span>あります。まとめて削除しますか？\n(この端末からのみ削除されます。すでにDriveへ同期済みのデータは残ります)`, ()=>{
     const deleted = deleteEmptyMatches();
     renderHistoryList();
     toast(`${deleted}件削除しました`);
@@ -1464,7 +1484,7 @@ function wireDeleteButton(matchId, matchLabel){
   const btn = document.getElementById("detailDeleteBtn");
   if(!btn) return;
   btn.addEventListener("click", ()=>{
-    customConfirm(`「${matchLabel}」を削除しますか？\n(この端末からのみ削除されます。すでにDriveへ同期済みのデータは残ります)`, ()=>{
+    customConfirm(`「${escapeHtml(matchLabel)}」を削除しますか？\n(この端末からのみ削除されます。すでにDriveへ同期済みのデータは残ります)`, ()=>{
       deleteMatch(matchId);
       historyDetailId = null;
       renderHistoryList();
@@ -1634,6 +1654,30 @@ async function importConfigFromUrlIfPresent(){
 /* ====================== 起動 ====================== */
 importConfigFromUrlIfPresent();
 resumeIfPossible();
+
+// 「戻す」ボタンを無くした代わりに、スコア画面での右から左へのスワイプで取り消す。
+// 左から右のスワイプは画面を閉じる操作として使われがちなので、あえて反応させない。
+(function(){
+  const SWIPE_MIN_PX = 70;
+  const SWIPE_MAX_VERTICAL_PX = 60; // 横方向の意図を明確にするため、縦方向のブレはこの範囲までに制限
+  let startX = 0, startY = 0, tracking = false;
+  const scoreScreen = $("scoreScreen");
+
+  scoreScreen.addEventListener("pointerdown", (e)=>{
+    tracking = true;
+    startX = e.clientX; startY = e.clientY;
+  });
+  scoreScreen.addEventListener("pointerup", (e)=>{
+    if(!tracking) return;
+    tracking = false;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if(dx < -SWIPE_MIN_PX && Math.abs(dy) < SWIPE_MAX_VERTICAL_PX){
+      performUndo();
+    }
+  });
+  scoreScreen.addEventListener("pointercancel", ()=>{ tracking = false; });
+})();
 
 // 画面消灯防止(対応しているブラウザのみ有効)。
 // スコア画面を見ている間は、腕を下ろす動作などで消灯しにくくする。
