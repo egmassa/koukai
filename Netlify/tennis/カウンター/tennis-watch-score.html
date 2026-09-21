@@ -327,6 +327,9 @@
       <button id="resetSyncBtn" class="sync-related">全データを再送信</button>
     </div>
     <div class="hist-btns hist-btns-sub">
+      <button id="deleteEmptyBtn">🗑 空の試合を一括削除</button>
+    </div>
+    <div class="hist-btns hist-btns-sub">
       <button id="connSettingsBtn">⚙ 接続設定</button>
     </div>
     <button id="backBtn">戻る</button>
@@ -1205,7 +1208,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.23"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.24"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1399,6 +1402,18 @@ $("resetSyncBtn").addEventListener("click", ()=>{
   });
 });
 
+$("deleteEmptyBtn").addEventListener("click", ()=>{
+  const count = countEmptyMatches();
+  if(count===0){
+    toast("空の試合はありません");
+    return;
+  }
+  customConfirm(`記録が1ポイントも無い試合が${count}件あります。まとめて削除しますか？\n(この端末からのみ削除されます。すでにDriveへ同期済みのデータは残ります)`, ()=>{
+    const deleted = deleteEmptyMatches();
+    renderHistoryList();
+    toast(`${deleted}件削除しました`);
+  });
+});
 $("connSettingsBtn").addEventListener("click", ()=>{
   try{
     const cfg = loadAppsScriptConfig();
@@ -1433,6 +1448,17 @@ function deleteMatch(matchId){
   const db = loadDb();
   db.matches = (db.matches||[]).filter(m=>m.matchId!==matchId);
   saveDb(db);
+}
+function countEmptyMatches(){
+  const db = loadDb();
+  return (db.matches||[]).filter(m=>(m.pointLog||[]).length===0).length;
+}
+function deleteEmptyMatches(){
+  const db = loadDb();
+  const before = (db.matches||[]).length;
+  db.matches = (db.matches||[]).filter(m=>(m.pointLog||[]).length>0);
+  saveDb(db);
+  return before - db.matches.length;
 }
 function wireDeleteButton(matchId, matchLabel){
   const btn = document.getElementById("detailDeleteBtn");
