@@ -50,7 +50,7 @@
     background:var(--teal); color:#04231d; font-weight:700; font-size:19px;}
 
   /* score screen */
-  #scoreScreen{padding:9% 11% 9%; justify-content:space-between;}
+  #scoreScreen{padding:9% 11% 9%; justify-content:space-between; touch-action:pan-y;}
   .clock{font-size:20px; color:var(--text); font-weight:800; text-align:center; margin-bottom:4px;}
   .clock{font-size:20px; color:var(--text); font-weight:800; text-align:center; margin-bottom:4px;}
 
@@ -1228,7 +1228,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.26"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.27"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1666,6 +1666,16 @@ resumeIfPossible();
   scoreScreen.addEventListener("pointerdown", (e)=>{
     tracking = true;
     startX = e.clientX; startY = e.clientY;
+  });
+  scoreScreen.addEventListener("pointermove", (e)=>{
+    if(!tracking) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    // 横方向にある程度動いた時点で、ブラウザ標準の「戻る/進む」ジェスチャーなどに
+    // 横取りされないよう、こちらで処理することを明示しておく。
+    if(Math.abs(dx) > 15 && Math.abs(dx) > Math.abs(dy)){
+      e.preventDefault();
+    }
   });
   scoreScreen.addEventListener("pointerup", (e)=>{
     if(!tracking) return;
