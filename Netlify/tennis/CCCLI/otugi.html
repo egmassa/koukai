@@ -451,45 +451,49 @@
             if (!schedule[currentMatchIndex]) return;
 
             const match = schedule[currentMatchIndex];
-            let speechText = `だい ${numToHiragana[match.round] || match.round} しあい。`;
+            let speechText = `第${match.round}試合。`;
 
             match.courts.forEach(c => {
-                speechText += `コート ${numToHiragana[c.courtNo] || c.courtNo}。${c.teamA.join('と')}ペア、対、${c.teamB.join('と')}ペア。`;
+                speechText += `コート${c.courtNo}、${c.teamA.join('と')}ペア、対、${c.teamB.join('と')}ペア。`;
             });
 
-            if (match.resting.length > 0) {
+            if (match.resting && match.resting.length > 0) {
                 speechText += `お休みは、${match.resting.join('、')}です。`;
             }
 
-            // ★ 読み上げ開始前にマイク認識フラグを一時ロック（誤検知防止）
-            isSpeakingNow = true;
-            if (recognition) {
-                try { recognition.stop(); } catch (e) { }
-            }
+            // テキストのフォーマット変換（「第1試合」→「だい いち しあい」等）
+            const formattedText = formatTextForSpeech(speechText);
 
-            synth.cancel(); // 割り込みキャンセル
-            const utterance = new SpeechSynthesisUtterance(formatTextForSpeech(speechText));
+            // 既存の発声を一旦クリア
+            synth.cancel();
 
-            // 音声設定の適用
+            const utterance = new SpeechSynthesisUtterance(formattedText);
+
+            // 声・速度・高さの設定
             const voiceIndex = document.getElementById('voice-select').value;
-            if (voiceIndex !== "" && voicesList[voiceIndex]) utterance.voice = voicesList[voiceIndex];
+            if (voiceIndex !== "" && voicesList[voiceIndex]) {
+                utterance.voice = voicesList[voiceIndex];
+            }
             utterance.rate = parseFloat(document.getElementById('voice-rate').value) || 1.0;
             utterance.pitch = parseFloat(document.getElementById('voice-pitch').value) || 1.0;
 
-            // ★ 読み上げが終了した後にマイク認識を再開する
-            utterance.onend = () => {
-                isSpeakingNow = false;
-                if (isListening) {
-                    setTimeout(() => {
-                        try { recognition.start(); } catch (e) { }
-                    }, 300); // 残響・スピーカーの音を完全に拾わなくするための安全マージン
-                }
-            };
+            // 音声認識が起動している場合のみ、自らの声を拾わないよう一時制御
+            if (isListening && recognition) {
+                isSpeakingNow = true;
+                try { recognition.stop(); } catch (e) { }
 
-            utterance.onerror = () => {
-                isSpeakingNow = false;
-            };
+                utterance.onend = () => {
+                    isSpeakingNow = false;
+                    if (isListening) {
+                        setTimeout(() => {
+                            try { recognition.start(); } catch (e) { }
+                        }, 400); // 読み上げ終了後にマイク再開
+                    }
+                };
+                utterance.onerror = () => { isSpeakingNow = false; };
+            }
 
+            // 再生実行
             synth.speak(utterance);
         }
 
@@ -712,7 +716,12 @@
             if (currentMatchIndex < schedule.length - 1) {
                 currentMatchIndex++;
                 renderSchedule();
-                renderAllTables();
+                updateMatchBadge();
+
+                // 手動操作時も確実に読み上げを実行
+                speakCurrentMatch();
+            } else {
+                speakText("すべての試合が終了しました。お疲れ様でした。");
             }
         }
 
@@ -720,9 +729,15 @@
             if (currentMatchIndex > 0) {
                 currentMatchIndex--;
                 renderSchedule();
-                renderAllTables();
+                updateMatchBadge();
+
+                // 手動操作時も確実に読み上げを実行
+                speakCurrentMatch();
+            } else {
+                speakText("最初の試合です。");
             }
         }
+
 
         function resetScores() {
             currentMatchIndex = 0;
