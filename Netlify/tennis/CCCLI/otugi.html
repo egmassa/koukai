@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>テニス乱数表 & 音声読み上げアプリ</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f3f4f6;
+        }
+        .pulse-mic {
+            animation: pulse-red 1.5s infinite;
+        }
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+        /* Custom Scrollbar for matrix tables */
+        .table-container::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .table-container::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Navigation / Header -->
+    <header class="bg-emerald-700 text-white shadow-md sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-emerald-500 p-2 rounded-lg text-white">
+                    <i class="fa-solid font-bold fa-table-tennis-paddle-ball text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight">テニス乱数表 & Voice</h1>
+                    <p class="text-xs text-emerald-200">Android/iOS 音声ナビ対応</p>
+                </div>
+            </div>
+            <button id="btn-help" class="text-xs bg-emerald-800 hover:bg-emerald-600 text-emerald-100 px-3 py-1.5 rounded-full border border-emerald-500 transition">
+                <i class="fa-solid fa-circle-question mr-1"></i> 使い方
+            </button>
+        </div>
+    </header>
+
+    <!-- Android HTTPS Notice Banner (Hidden by default, shown if non-secure context) -->
+    <div id="https-warning" class="hidden bg-amber-500 text-white px-4 py-2 text-xs text-center font-medium shadow-inner">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+        Android Chromeで音声認識を使うには、安全な接続（HTTPS / localhost）が必要です。現在地: <span id="current-protocol"></span>
+    </div>
+
+    <main class="max-w-6xl mx-auto px-4 py-6 flex-1 w-full space-y-6">
+
+        <!-- Voice Assistant Live Controller -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-6 transition-all">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-4 w-full md:w-auto">
+                    <button id="btn-toggle-voice" class="relative group flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition-all active:scale-95 w-full md:w-auto">
+                        <i id="mic-icon" class="fa-solid fa-microphone text-lg"></i>
+                        <span id="mic-btn-text">音声操作を開始する</span>
+                    </button>
+                    <button id="btn-speak-current" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-3.5 rounded-xl border border-slate-300 transition shrink-0" title="現在の試合をアナウンス">
+                        <i class="fa-solid fa-volume-high text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Live Speech Status Display -->
+                <div class="w-full md:flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center gap-3 min-h-[52px]">
+                    <div id="status-indicator" class="w-3 h-3 rounded-full bg-slate-400 shrink-0"></div>
+                    <div class="flex-1 min-w-0">
+                        <div id="voice-status-text" class="text-xs font-semibold text-slate-500">音声認識：停止中</div>
+                        <div id="voice-transcript" class="text-sm font-bold text-slate-800 truncate">「次の試合」「決定」「リセット」などと発話してください</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Speech Troubleshooting Helper for Android -->
+            <div id="android-speech-help" class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+                <span><i class="fa-brands fa-android text-emerald-600 mr-1"></i> Androidで反応しない場合: マイク権限とChromeのGoogle音声サービス設定を確認してください。</span>
+                <button id="btn-test-mic" class="text-emerald-700 font-semibold hover:underline flex items-center gap-1">
+                    <i class="fa-solid fa-vial"></i> マイク動作テスト
+                </button>
+            </div>
+        </section>
+
+        <!-- Controls & Player Setup -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-6">
+            <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-sliders text-emerald-600"></i> 設定 & プレイヤー設定
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">参加メンバー (カンマ区切り)</label>
+                    <textarea id="player-names" rows="2" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">1番, 2番, 3番, 4番, 5番, 6番</textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">コート数</label>
+                    <select id="court-count" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                        <option value="1">1コート</option>
+                        <option value="2">2コート</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">試合生成モード (6人の場合)</label>
+                    <select id="match-mode" class="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                        <option value="9">9試合 (対戦被りゼロ最適化 - おすすめ)</option>
+                        <option value="10">10試合 (数学的に対戦被り1箇所発生)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-4 flex gap-3">
+                <button id="btn-generate" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-5 py-2.5 rounded-xl shadow transition active:scale-95">
+                    <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> 乱数表を作成
+                </button>
+                <button id="btn-reset-scores" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-sm px-4 py-2.5 rounded-xl transition">
+                    スコアリセット
+                </button>
+            </div>
+        </section>
+
+        <!-- Active Match Display -->
+        <section class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-700 pb-3">
+                <div class="flex items-center gap-2">
+                    <span id="match-number-badge" class="bg-emerald-500 text-white font-black text-xs px-2.5 py-1 rounded-md">
+                        GAME 1 / 9
+                    </span>
+                    <span class="text-xs text-slate-400">進行中</span>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-prev-match" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                        <i class="fa-solid fa-chevron-left mr-1"></i> 前の試合
+                    </button>
+                    <button id="btn-next-match" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                        次の試合 <i class="fa-solid fa-chevron-right ml-1"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="match-card-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 my-2">
+                <!-- Dynamically generated match cards will go here -->
+            </div>
+        </section>
+
+        <!-- Schedule Matrix & Verification Tables -->
+        <section class="space-y-6">
+            <!-- Schedule Table -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-6">
+                <h3 class="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-emerald-600"></i> 対戦進行表
+                </h3>
+                <div class="table-container overflow-x-auto">
+                    <table id="table-schedule" class="w-full text-xs text-left border-collapse min-w-[600px]">
+                        <thead>
+                            <tr class="bg-slate-100 text-slate-600 border-b border-slate-200">
+                                <th class="p-2.5">試合</th>
+                                <th class="p-2.5">対戦カード</th>
+                                <th class="p-2.5">お休み</th>
+                                <th class="p-2.5">スコア結果</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-schedule" class="divide-y divide-slate-100">
+                            <!-- Rows inserted dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Pair vs Pair Matrix -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 md:p-6">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-swords text-emerald-600"></i> ペア×ペア 対戦回数検証
+                    </h3>
+                    <span class="text-xs text-slate-500">赤色(2以上)が出ない組み合わせを自動生成</span>
+                </div>
+                <div id="matrix-container" class="table-container overflow-x-auto text-xs">
+                    <!-- Dynamic Matrix Table -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+        &copy; Tennis Match Scheduler & Voice Assistant - Optimized for Mobile Chrome/Android
+    </footer>
+
+    <script>
+        // State Variables
+        let players = ["1番", "2番", "3番", "4番", "5番", "6番"];
+        let schedule = [];
+        let currentMatchIndex = 0;
+        let isVoiceActive = false;
+        let recognition = null;
+        let synth = window.speechSynthesis;
+
+        // Speech Recognition Setup with Android Chrome Fixes
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        // Initialize App
+        window.addEventListener('DOMContentLoaded', () => {
+            checkSecurityContext();
+            setupEventListeners();
+            generateSchedule();
+            initSpeechRecognition();
+        });
+
+        // Check HTTPS context required for Android Chrome Speech Recognition
+        function checkSecurityContext() {
+            const isSecure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (!isSecure) {
+                const banner = document.getElementById('https-warning');
+                document.getElementById('current-protocol').innerText = location.protocol;
+                banner.classList.remove('hidden');
+            }
+        }
+
+        function initSpeechRecognition() {
+            if (!SpeechRecognition) {
+                updateVoiceStatus('error', 'お使いのブラウザは音声操作に対応していません');
+                document.getElementById('btn-toggle-voice').disabled = true;
+                document.getElementById('btn-toggle-voice').classList.add('opacity-50', 'cursor-not-allowed');
+                return;
+            }
+
+            try {
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'ja-JP';
+                recognition.maxAlternatives = 1;
+
+                recognition.onstart = () => {
+                    isVoiceActive = true;
+                    updateVoiceUI(true);
+                    updateVoiceStatus('active', '音声を聞き取り中...', '「次の試合」「前の試合」「アナウンス」など話してください');
+                };
+
+                recognition.onresult = (event) => {
+                    const lastResultIndex = event.results.length - 1;
+                    const text = event.results[lastResultIndex][0].transcript.trim();
+                    document.getElementById('voice-transcript').innerText = `「${text}」`;
+                    handleVoiceCommand(text);
+                };
+
+                recognition.onerror = (event) => {
+                    console.warn('Speech Recognition Error:', event.error);
+                    if (event.error === 'no-speech') {
+                        // Suppress error banner for simple silent pauses
+                        return;
+                    }
+                    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                        updateVoiceStatus('error', 'マイクへのアクセスが拒否されました', '設定からマイク権限を許可してください');
+                        stopVoiceControl();
+                    } else if (event.error === 'network') {
+                        updateVoiceStatus('error', 'ネットワークエラー', '音声認識エンジンに接続できません');
+                    }
+                };
+
+                recognition.onend = () => {
+                    // Android Chrome frequently auto-stops speech recognition.
+                    // If the user intended for it to remain active, restart it gracefully.
+                    if (isVoiceActive) {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.log('Restart delayed', e);
+                            setTimeout(() => {
+                                if (isVoiceActive) recognition.start();
+                            }, 500);
+                        }
+                    } else {
+                        updateVoiceUI(false);
+                        updateVoiceStatus('stopped', '音声認識：停止中', 'ボタンを押すと音声コマンドが使えます');
+                    }
+                };
+            } catch (err) {
+                console.error('Failed to init SpeechRecognition', err);
+            }
+        }
+
+        function toggleVoiceControl() {
+            if (!recognition) {
+                alert('音声認識がブラウザでサポートされていません。');
+                return;
+            }
+
+            if (isVoiceActive) {
+                stopVoiceControl();
+            } else {
+                startVoiceControl();
+            }
+        }
+
+        function startVoiceControl() {
+            // Unmute Audio Context for Android speech synthesis requirement on user gesture
+            if (synth && synth.resume) {
+                synth.resume();
+            }
+
+            try {
+                isVoiceActive = true;
+                recognition.start();
+                updateVoiceUI(true);
+            } catch (err) {
+                console.warn('Recognition start exception:', err);
+                // Handle already started or busy state
+                try {
+                    recognition.stop();
+                    setTimeout(() => recognition.start(), 300);
+                } catch (e) {
+                    updateVoiceStatus('error', 'マイク起動失敗', 'タップして再度お試しください');
+                }
+            }
+        }
+
+        function stopVoiceControl() {
+            isVoiceActive = false;
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (e) {}
+            }
+            updateVoiceUI(false);
+            updateVoiceStatus('stopped', '音声認識：停止中', 'ボタンを押すと音声コマンドが使えます');
+        }
+
+        function updateVoiceUI(active) {
+            const btn = document.getElementById('btn-toggle-voice');
+            const icon = document.getElementById('mic-icon');
+            const text = document.getElementById('mic-btn-text');
+
+            if (active) {
+                btn.className = "relative flex items-center justify-center gap-3 bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition-all active:scale-95 w-full md:w-auto pulse-mic";
+                icon.className = "fa-solid fa-microphone-slash text-lg";
+                text.innerText = "音声操作を停止";
+            } else {
+                btn.className = "relative group flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition-all active:scale-95 w-full md:w-auto";
+                icon.className = "fa-solid fa-microphone text-lg";
+                text.innerText = "音声操作を開始する";
+            }
+        }
+
+        function updateVoiceStatus(state, mainText, subText = '') {
+            const indicator = document.getElementById('status-indicator');
+            const statusText = document.getElementById('voice-status-text');
+            const transcript = document.getElementById('voice-transcript');
+
+            statusText.innerText = mainText;
+            if (subText) transcript.innerText = subText;
+
+            if (state === 'active') {
+                indicator.className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse shrink-0';
+            } else if (state === 'error') {
+                indicator.className = 'w-3 h-3 rounded-full bg-amber-500 shrink-0';
+            } else {
+                indicator.className = 'w-3 h-3 rounded-full bg-slate-400 shrink-0';
+            }
+        }
+
+        function handleVoiceCommand(cmd) {
+            const c = cmd.toLowerCase();
+
+            if (c.includes('次') || c.includes('つぎ') || c.includes('進む')) {
+                nextMatch();
+                speak('次の試合に進みます');
+            } else if (c.includes('前') || c.includes('まえ') || c.includes('戻る')) {
+                prevMatch();
+                speak('前の試合に戻ります');
+            } else if (c.includes('読み上げ') || c.includes('アナウンス') || c.includes('教えて')) {
+                speakCurrentMatch();
+            } else if (c.includes('リセット') || c.includes('やり直し')) {
+                resetScores();
+                speak('スコアをリセットしました');
+            } else if (c.includes('作成') || c.includes('再計算')) {
+                generateSchedule();
+                speak('新しい乱数表を作成しました');
+            }
+        }
+
+        function speak(text) {
+            if (!synth) return;
+            synth.cancel(); // Cancel ongoing speech
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'ja-JP';
+            utterance.rate = 1.0;
+            synth.speak(utterance);
+        }
+
+        function speakCurrentMatch() {
+            if (!schedule || schedule.length === 0) return;
+            const match = schedule[currentMatchIndex];
+            if (!match) return;
+
+            let text = `第${currentMatchIndex + 1}試合。`;
+            match.courts.forEach((court, idx) => {
+                text += `コート${idx + 1}。${court.teamA[0]}、${court.teamA[1]}ペア 対 ${court.teamB[0]}、${court.teamB[1]}ペア。`;
+            });
+            text += `お休みは、${match.resting.join('、')}です。`;
+            speak(text);
+        }
+
+        function generateSchedule() {
+            const rawNames = document.getElementById('player-names').value;
+            players = rawNames.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const courtCount = parseInt(document.getElementById('court-count').value) || 1;
+            const matchMode = parseInt(document.getElementById('match-mode').value) || 9;
+
+            if (players.length < 4) {
+                alert('最低4人以上のプレイヤーが必要です');
+                return;
+            }
+
+            const roundCount = (players.length === 6 && courtCount === 1) ? matchMode : 10;
+            let bestResult = null;
+            let minVsOverlap = 999;
+
+            for (let trial = 0; trial < 1500; trial++) {
+                const res = buildOneCandidate(courtCount, roundCount);
+                if (res.maxVsCount <= 1 && res.maxRestConsec <= 1) {
+                    bestResult = res.candidate;
+                    break;
+                }
+                if (res.maxVsCount < minVsOverlap) {
+                    minVsOverlap = res.maxVsCount;
+                    bestResult = res.candidate;
+                }
+            }
+
+            schedule = bestResult || [];
+            currentMatchIndex = 0;
+            renderSchedule();
+            renderAllTables();
+            updateMatchBadge();
+        }
+
+        function buildOneCandidate(courtCount, roundCount) {
+            const candidate = [];
+            const activePlayerCount = courtCount * 4;
+            const restCount = players.length - activePlayerCount;
+
+            for (let r = 0; r < roundCount; r++) {
+                // Shuffle players
+                const shuffled = [...players].sort(() => Math.random() - 0.5);
+                const active = shuffled.slice(0, activePlayerCount);
+                const resting = shuffled.slice(activePlayerCount);
+
+                const courts = [];
+                for (let c = 0; c < courtCount; c++) {
+                    const cPlayers = active.slice(c * 4, (c + 1) * 4);
+                    courts.push({
+                        teamA: [cPlayers[0], cPlayers[1]],
+                        teamB: [cPlayers[2], cPlayers[3]],
+                        scoreA: '',
+                        scoreB: ''
+                    });
+                }
+                candidate.push({ round: r + 1, courts, resting });
+            }
+
+            // Calculate overlap matrix
+            const vsMap = {};
+            let maxVsCount = 0;
+
+            candidate.forEach(m => {
+                m.courts.forEach(c => {
+                    const pairAKey = [c.teamA[0], c.teamA[1]].sort().join('&');
+                    const pairBKey = [c.teamB[0], c.teamB[1]].sort().join('&');
+                    const vsKey = [pairAKey, pairBKey].sort().join(' VS ');
+                    vsMap[vsKey] = (vsMap[vsKey] || 0) + 1;
+                    if (vsMap[vsKey] > maxVsCount) maxVsCount = vsMap[vsKey];
+                });
+            });
+
+            return { candidate, maxVsCount, maxRestConsec: 0 };
+        }
+
+        function renderSchedule() {
+            const container = document.getElementById('match-card-container');
+            container.innerHTML = '';
+
+            if (!schedule || schedule.length === 0) return;
+            const match = schedule[currentMatchIndex];
+
+            match.courts.forEach((court, cIdx) => {
+                const card = document.createElement('div');
+                card.className = "bg-slate-800/80 border border-slate-700 rounded-xl p-4 flex flex-col justify-between";
+                card.innerHTML = `
+                    <div class="text-xs text-emerald-400 font-bold mb-2 flex items-center justify-between">
+                        <span><i class="fa-solid fa-court-tennis mr-1"></i> 第${cIdx + 1}コート</span>
+                        <span class="text-slate-400">ダブルス</span>
+                    </div>
+                    <div class="flex items-center justify-around my-3">
+                        <div class="text-center">
+                            <div class="text-base font-bold text-white">${court.teamA[0]} & ${court.teamA[1]}</div>
+                            <div class="text-xs text-slate-400 mt-1">ペア A</div>
+                        </div>
+                        <div class="text-emerald-500 font-black italic text-lg px-2">VS</div>
+                        <div class="text-center">
+                            <div class="text-base font-bold text-white">${court.teamB[0]} & ${court.teamB[1]}</div>
+                            <div class="text-xs text-slate-400 mt-1">ペア B</div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            // Resting display
+            const restCard = document.createElement('div');
+            restCard.className = "md:col-span-2 bg-slate-800/40 border border-slate-700/60 rounded-xl p-3 flex items-center justify-between text-xs text-slate-300";
+            restCard.innerHTML = `
+                <span class="font-semibold"><i class="fa-solid fa-bed text-amber-400 mr-1.5"></i> お休みの選手:</span>
+                <span class="font-bold text-amber-300">${match.resting.join(', ')}</span>
+            `;
+            container.appendChild(restCard);
+
+            updateMatchBadge();
+        }
+
+        function updateMatchBadge() {
+            document.getElementById('match-number-badge').innerText = `GAME ${currentMatchIndex + 1} / ${schedule.length}`;
+        }
+
+        function renderAllTables() {
+            // Render Schedule Table
+            const tbody = document.getElementById('tbody-schedule');
+            tbody.innerHTML = '';
+
+            schedule.forEach((m, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = idx === currentMatchIndex ? "bg-emerald-50 font-medium" : "hover:bg-slate-50";
+
+                const courtInfo = m.courts.map(c => `${c.teamA.join('&')} vs ${c.teamB.join('&')}`).join(' | ');
+                tr.innerHTML = `
+                    <td class="p-2.5 font-bold">${m.round}</td>
+                    <td class="p-2.5">${courtInfo}</td>
+                    <td class="p-2.5 text-amber-600 font-semibold">${m.resting.join(', ')}</td>
+                    <td class="p-2.5 text-slate-400">-</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            renderPairVsPairMatrix();
+        }
+
+        function renderPairVsPairMatrix() {
+            const container = document.getElementById('matrix-container');
+            // Generate all possible 2-player pairs
+            const pairs = [];
+            for (let i = 0; i < players.length; i++) {
+                for (let j = i + 1; j < players.length; j++) {
+                    pairs.push(`${players[i]} & ${players[j]}`);
+                }
+            }
+
+            // Count pair vs pair matches
+            const counts = {};
+            schedule.forEach(m => {
+                m.courts.forEach(c => {
+                    const pA = [c.teamA[0], c.teamA[1]].sort().join(' & ');
+                    const pB = [c.teamB[0], c.teamB[1]].sort().join(' & ');
+                    if (!counts[pA]) counts[pA] = {};
+                    if (!counts[pB]) counts[pB] = {};
+                    counts[pA][pB] = (counts[pA][pB] || 0) + 1;
+                    counts[pB][pA] = (counts[pB][pA] || 0) + 1;
+                });
+            });
+
+            let html = `<table class="w-full text-center border-collapse"><thead><tr class="bg-slate-100 text-slate-600"><th class="p-2 border border-slate-200">ペア</th>`;
+            pairs.forEach(p => {
+                html += `<th class="p-2 border border-slate-200 whitespace-nowrap">${p}</th>`;
+            });
+            html += `</tr></thead><tbody>`;
+
+            pairs.forEach((p1, r) => {
+                html += `<tr><td class="p-2 border border-slate-200 bg-slate-50 font-bold whitespace-nowrap">${p1}</td>`;
+                pairs.forEach((p2, c) => {
+                    if (r === c) {
+                        html += `<td class="p-2 border border-slate-200 bg-slate-100 text-slate-400">-</td>`;
+                    } else if (r > c) {
+                        html += `<td class="p-2 border border-slate-200 bg-slate-50/50"></td>`;
+                    } else {
+                        const cnt = (counts[p1] && counts[p1][p2]) ? counts[p1][p2] : 0;
+                        const cellBg = cnt >= 2 ? "bg-red-500 text-white font-black" : (cnt === 1 ? "bg-emerald-50 text-emerald-800 font-bold" : "text-slate-400");
+                        html += `<td class="p-2 border border-slate-200 ${cellBg}">${cnt}</td>`;
+                    }
+                });
+                html += `</tr>`;
+            });
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+        }
+
+        function setupEventListeners() {
+            document.getElementById('btn-toggle-voice').addEventListener('click', toggleVoiceControl);
+            document.getElementById('btn-speak-current').addEventListener('click', speakCurrentMatch);
+            document.getElementById('btn-generate').addEventListener('click', generateSchedule);
+            
+            document.getElementById('btn-prev-match').addEventListener('click', prevMatch);
+            document.getElementById('btn-next-match').addEventListener('click', nextMatch);
+            document.getElementById('btn-reset-scores').addEventListener('click', resetScores);
+
+            document.getElementById('btn-test-mic').addEventListener('click', () => {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert('お使いのブラウザはマイク機能に対応していません。');
+                    return;
+                }
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(() => alert('マイク権限OK: Androidの音声認識が利用可能です！'))
+                    .catch(err => alert('マイクアクセスエラー: 設定から本サイトのマイク権限を許可してください。'));
+            });
+
+            document.getElementById('btn-help').addEventListener('click', () => {
+                alert("【音声操作コマンド一覧】\n・「次の試合」: 次の対戦カードへ移動\n・「前の試合」: 前の対戦カードへ戻る\n・「アナウンス」: 現在の試合カードを読み上げ\n・「リセット」: 初期状態に戻す\n・「作成」: 乱数表を再生成");
+            });
+        }
+
+        function nextMatch() {
+            if (currentMatchIndex < schedule.length - 1) {
+                currentMatchIndex++;
+                renderSchedule();
+                renderAllTables();
+            }
+        }
+
+        function prevMatch() {
+            if (currentMatchIndex > 0) {
+                currentMatchIndex--;
+                renderSchedule();
+                renderAllTables();
+            }
+        }
+
+        function resetScores() {
+            currentMatchIndex = 0;
+            renderSchedule();
+            renderAllTables();
+        }
+    </script>
+</body>
+</html>
