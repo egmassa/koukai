@@ -59,17 +59,18 @@
 
   .setinfo{font-size:11px; color:var(--dim); margin:3px 0; min-height:13px;
     width:100%; white-space:nowrap; overflow-x:auto; text-align:center;}
-  .rules-chips{display:grid; grid-template-columns:1fr 1fr; gap:10px 12px; margin-bottom:8px;
-    width:100%; max-width:220px; justify-items:center;}
-  .rule-chip{font-size:13px; font-weight:800; padding:5px 6px; border-radius:3px;
-    width:100%; box-sizing:border-box; text-align:center;}
+  .rules-chips{display:flex; gap:6px; margin-bottom:8px;
+    width:100%; max-width:250px;}
+  .rule-chip{font-size:11px; font-weight:800; padding:5px 4px; border-radius:3px;
+    flex:1; min-width:0; box-sizing:border-box; text-align:center;}
   .chip-games{background:rgba(90,160,220,0.22); color:#a9d3f5;}
   .chip-finish{background:rgba(220,180,90,0.22); color:#f0d99a;}
   .chip-deuce{background:rgba(180,120,220,0.22); color:#dcb3f5;}
   .rule-chip.longpress-hint{border:1.5px dotted currentColor;}
-  .return-side-strip{font-size:12px; color:var(--teal); font-weight:800;
-    padding:5px 6px; background:transparent;
-    width:100%; box-sizing:border-box; text-align:center; white-space:nowrap;}
+  .tb-return-col{display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-width:26px;}
+  .tb-return-icon{font-size:15px; line-height:1;}
+  .tb-return-tag{font-size:10px; font-weight:800; line-height:1.6; min-height:13px; color:inherit;}
   .tiebreak-badge{font-size:11px; font-weight:800; color:#04231d; background:var(--teal);
     display:inline-block; padding:2px 10px; border-radius:10px; margin-bottom:4px;}
   .match-row{cursor:pointer;}
@@ -265,7 +266,6 @@
       <span class="rule-chip chip-games" id="chipGames"></span>
       <span class="rule-chip chip-finish" id="chipFinish"></span>
       <span class="rule-chip chip-deuce" id="chipDeuce"></span>
-      <span class="return-side-strip" id="returnSideStrip"></span>
     </div>
     <div class="tiebreak-badge" id="tiebreakBadge" style="display:none;">タイブレーク</div>
 
@@ -284,6 +284,7 @@
               <span class="tb-game" id="gA">0</span>
             </span>
           </span>
+          <span class="tb-return-col" id="returnSideIcon"></span>
         </span>
         <span class="tb-sub" id="subA">セット0</span>
       </button>
@@ -301,6 +302,7 @@
               <span class="tb-game" id="gB">0</span>
             </span>
           </span>
+          <span class="tb-return-col"></span>
         </span>
         <span class="tb-sub" id="subB">セット0</span>
       </button>
@@ -983,7 +985,25 @@ function attachSimpleLongPress(el, callback){
   el.addEventListener("pointerleave", ()=> clearTimeout(timer));
   el.addEventListener("pointercancel", ()=> clearTimeout(timer));
 }
-attachSimpleLongPress($("returnSideStrip"), cycleSelfReturnSide);
+// リターンサイドのアイコンはtapAボタンの中に入れ子になっているため、
+// 親(得点タップ・サーブ順長押し)にイベントが伝わらないよう、ここで止める。
+function attachNestedLongPress(el, callback){
+  const LONG_PRESS_MS = 600;
+  let timer = null;
+  el.addEventListener("pointerdown", (e)=>{
+    e.stopPropagation();
+    timer = setTimeout(()=>{
+      if(navigator.vibrate) navigator.vibrate(30);
+      callback();
+    }, LONG_PRESS_MS);
+  });
+  const cancelTimer = (e)=>{ e.stopPropagation(); clearTimeout(timer); };
+  el.addEventListener("pointerup", cancelTimer);
+  el.addEventListener("pointerleave", cancelTimer);
+  el.addEventListener("pointercancel", cancelTimer);
+  el.addEventListener("click", (e)=>{ e.stopPropagation(); e.preventDefault(); }, true);
+}
+attachNestedLongPress($("returnSideIcon"), cycleSelfReturnSide);
 
 function cycleGamesPerSet(){
   if(!isMatchAtZero()){ toast("最初のポイントを打つ前しか変更できません"); return; }
@@ -1084,17 +1104,13 @@ function render(){
   chipFinish.textContent = FINISH_LABELS[state.settings.setFinishMode] || state.settings.setFinishMode;
   chipDeuce.textContent = DEUCE_LABELS[state.settings.deuceMode] || state.settings.deuceMode;
   [chipGames, chipFinish, chipDeuce].forEach(el => el.classList.toggle("longpress-hint", editableRules));
-  const returnSideEl = $("returnSideStrip");
+  const returnIconEl = $("returnSideIcon");
   if(state.mode==="doubles"){
     const v = state.settings.selfReturnSide;
-    const sideLabel = v==="deuce" ? "デュース側" : v==="ad" ? "アド側" : "未設定";
-    returnSideEl.textContent = `自分:${sideLabel}`;
-    returnSideEl.classList.add("longpress-hint");
-    returnSideEl.style.display = "";
+    const tag = v==="deuce" ? "D" : v==="ad" ? "A" : "";
+    returnIconEl.innerHTML = `<span class="tb-return-icon">📍</span><span class="tb-return-tag longpress-hint">${tag}</span>`;
   } else {
-    returnSideEl.textContent = "";
-    returnSideEl.classList.remove("longpress-hint");
-    returnSideEl.style.display = "none";
+    returnIconEl.innerHTML = "";
   }
   $("labelA").textContent = state.nameA;
   $("labelB").textContent = state.nameB;
@@ -1184,7 +1200,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.20"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.21"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
