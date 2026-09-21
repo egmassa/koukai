@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テニス乱数表 & 音声ナビ</title>
+    <title>テニス乱数表 & 音声ナビ v1.1.0</title>
     <style>
         :root {
             --primary: #15803d;
@@ -43,6 +43,22 @@
             justify-content: space-between;
             align-items: center;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header-title {
+            font-weight: bold;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+
+        .version-tag {
+            font-size: 0.7rem;
+            font-weight: normal;
+            background: rgba(255, 255, 255, 0.25);
+            padding: 1px 6px;
+            border-radius: 10px;
+            letter-spacing: 0.5px;
         }
 
         .btn-icon {
@@ -306,7 +322,10 @@
 
     <header>
         <button class="btn-icon" onclick="openModal('stats-modal')">📊 状況表</button>
-        <div style="font-weight:bold;">🎾 テニス乱数表 & 音声ナビ</div>
+        <div class="header-title">
+            <span>🎾 テニス乱数表</span>
+            <span class="version-tag">v1.1.0</span>
+        </div>
         <button class="btn-icon" onclick="openModal('settings-modal')">⚙️ 設定</button>
     </header>
 
@@ -442,7 +461,7 @@
 
         let recognition = null;
         let isListening = false;
-        let isSpeaking = false; // 音声合成発声中フラグ
+        let isSpeaking = false;
         let speakSafetyTimer = null;
 
         let synth = window.speechSynthesis;
@@ -812,14 +831,11 @@
             document.getElementById('current-match-badge').textContent = `現在は 第 ${currentMatchIndex + 1} 試合 です`;
         }
 
-        // 統合された安全な音声読み上げ関数
         function speakText(text) {
             if (!synth) return;
 
-            // 安全タイマーのクリア
             if (speakSafetyTimer) clearTimeout(speakSafetyTimer);
 
-            // 発声をリセット
             try { synth.cancel(); } catch (e) { }
 
             const formattedText = formatTextForSpeech(text);
@@ -831,11 +847,9 @@
             utterance.rate = parseFloat(document.getElementById('voice-rate').value) || 1.0;
             utterance.pitch = parseFloat(document.getElementById('voice-pitch').value) || 1.0;
 
-            // 発声中フラグのセット（マイク自己読み込みループ防止）
             isSpeaking = true;
 
             utterance.onend = () => {
-                // 読み上げ終了後、少しマージンをとってから自己誤検知を解除
                 setTimeout(() => { isSpeaking = false; }, 400);
             };
 
@@ -843,7 +857,6 @@
                 isSpeaking = false;
             };
 
-            // 万が一 onend が呼ばれない場合の保険タイマー（最長12秒で強制解除）
             speakSafetyTimer = setTimeout(() => {
                 isSpeaking = false;
             }, 12000);
@@ -924,7 +937,6 @@
             };
 
             recognition.onresult = (event) => {
-                // スピーカーからの読み上げ音声を拾っている最中は無視
                 if (isSpeaking) return;
 
                 const lastResultIndex = event.results.length - 1;
@@ -951,7 +963,6 @@
             };
 
             recognition.onend = () => {
-                // リスニング状態がONのまま終わった場合は自動再起動
                 if (isListening) {
                     setTimeout(() => {
                         try { recognition.start(); } catch (e) { }
