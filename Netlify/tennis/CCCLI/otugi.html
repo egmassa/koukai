@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テニス乱数表 & 音声ナビ v1.2.3</title>
+    <title>テニス乱数表 & 音声ナビ v1.4.0</title>
     <style>
         :root {
             --primary: #15803d;
@@ -101,9 +101,32 @@
             background: var(--card-bg);
             border-radius: 12px;
             padding: 16px;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             border: 1px solid var(--border);
+        }
+
+        .quick-selector-card {
+            background: #ffffff;
+            border-top: 4px solid var(--primary);
+            padding: 12px 14px;
+        }
+
+        .quick-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 120px;
+            gap: 10px;
+            align-items: end;
+        }
+
+        @media (max-width: 480px) {
+            .quick-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .quick-grid-btn {
+                grid-column: span 2;
+            }
         }
 
         .voice-control-box {
@@ -112,7 +135,7 @@
             border-radius: 12px;
             padding: 16px;
             text-align: center;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
 
         .mic-status {
@@ -134,16 +157,16 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            padding: 12px;
+            padding: 10px 12px;
             background-color: var(--primary);
             color: white;
             border: none;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: bold;
             cursor: pointer;
             transition: background-color 0.2s;
-            gap: 8px;
+            gap: 6px;
         }
 
         .btn:hover {
@@ -212,7 +235,6 @@
             font-size: 0.8rem;
         }
 
-        /* モーダル関連のスクロール調整 */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -260,7 +282,7 @@
 
         label {
             display: block;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             font-weight: 600;
             margin-bottom: 4px;
             color: #475569;
@@ -269,10 +291,10 @@
         input,
         select {
             width: 100%;
-            padding: 10px;
+            padding: 8px 10px;
             border: 1px solid #cbd5e1;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.95rem;
         }
 
         .table-container {
@@ -345,13 +367,46 @@
     <header>
         <button class="btn-icon" onclick="openModal('stats-modal')">📊 状況表</button>
         <div class="header-title">
-            <span class="header-title-text">🎾 乱数表</span>
-            <span class="version-tag">v1.2.3</span>
+            <span class="header-title-text">🎾 乱数表ナビ</span>
+            <span class="version-tag">v1.4.0</span>
         </div>
         <button class="btn-icon" onclick="openModal('settings-modal')">⚙️ 設定</button>
     </header>
 
     <div class="container">
+
+        <!-- メイン画面用 クイック条件切替 -->
+        <div class="card quick-selector-card">
+            <div class="quick-grid">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label for="quick-court-count">コート数</label>
+                    <select id="quick-court-count" onchange="syncQuickToModal()">
+                        <option value="1" selected>1 面</option>
+                        <option value="2">2 面</option>
+                        <option value="3">3 面</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label for="quick-player-count">参加人数</label>
+                    <select id="quick-player-count" onchange="syncQuickToModal()">
+                        <option value="4">4 人</option>
+                        <option value="5">5 人</option>
+                        <option value="6" selected>6 人 (標準)</option>
+                        <option value="7">7 人</option>
+                        <option value="8">8 人</option>
+                        <option value="9">9 人</option>
+                        <option value="10">10 人</option>
+                        <option value="11">11 人</option>
+                        <option value="12">12 人</option>
+                    </select>
+                </div>
+                <div class="quick-grid-btn">
+                    <button class="btn" style="padding: 9px 8px; font-size: 0.9rem;" onclick="onQuickGenerate()">
+                        🔄 表を再更新
+                    </button>
+                </div>
+            </div>
+        </div>
 
         <!-- 音声操作メインパネル -->
         <div class="voice-control-box">
@@ -389,21 +444,38 @@
 
     </div>
 
-    <!-- オプション・設定モーダル -->
+    <!-- オプション・詳細設定モーダル -->
     <div id="settings-modal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('settings-modal')">&times;</button>
-            <h3 style="color: var(--primary); margin-bottom: 16px;">⚙️ オプション・条件設定</h3>
+            <h3 style="color: var(--primary); margin-bottom: 16px;">⚙️ 条件・詳細設定</h3>
+
+            <div class="form-group">
+                <label for="mode-select">組合せ生成モード</label>
+                <select id="mode-select">
+                    <option value="preset" selected>固定リスト優先（5人・6人・7人1面）</option>
+                    <option value="auto">自動生成する（任意の人数・面数）</option>
+                </select>
+            </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group">
                     <label for="player-count">参加人数</label>
-                    <input type="number" id="player-count" value="6" min="4" max="20" onchange="generatePlayerNames()">
+                    <input type="number" id="player-count" value="6" min="4" max="20"
+                        onchange="syncModalToQuick(); generatePlayerNames();">
                 </div>
                 <div class="form-group">
                     <label for="court-count">コート数</label>
-                    <input type="number" id="court-count" value="1" min="1" max="3">
+                    <input type="number" id="court-count" value="1" min="1" max="3" onchange="syncModalToQuick();">
                 </div>
+            </div>
+
+            <div class="form-group">
+                <label for="round-count">総試合数</label>
+                <select id="round-count">
+                    <option value="20" selected>全 20 試合</option>
+                    <option value="10">前半 10 試合のみ</option>
+                </select>
             </div>
 
             <div class="form-group">
@@ -436,7 +508,7 @@
                 声のテスト再生</button>
 
             <button class="btn" onclick="generateSchedule(); closeModal('settings-modal');">
-                🎲 乱数表を再作成して完了
+                🎲 乱数表を再作成して適用
             </button>
         </div>
     </div>
@@ -477,6 +549,76 @@
     </div>
 
     <script>
+        // 固定リストデータの定義 (1ベースのプレイヤーインデックス)
+        const PRESET_LISTS = {
+            5: [
+                { tA: [1, 2], tB: [3, 4], r: [5] },
+                { tA: [2, 3], tB: [1, 5], r: [4] },
+                { tA: [4, 5], tB: [1, 3], r: [2] },
+                { tA: [2, 5], tB: [1, 4], r: [3] },
+                { tA: [3, 5], tB: [2, 4], r: [1] },
+                { tA: [1, 4], tB: [2, 3], r: [5] },
+                { tA: [3, 4], tB: [1, 5], r: [2] },
+                { tA: [1, 2], tB: [3, 5], r: [4] },
+                { tA: [2, 4], tB: [1, 5], r: [3] },
+                { tA: [2, 5], tB: [3, 4], r: [1] },
+                { tA: [1, 2], tB: [4, 5], r: [3] },
+                { tA: [1, 3], tB: [2, 4], r: [5] },
+                { tA: [3, 5], tB: [1, 4], r: [2] },
+                { tA: [2, 5], tB: [1, 3], r: [4] },
+                { tA: [2, 3], tB: [4, 5], r: [1] },
+                { tA: [1, 2], tB: [3, 5], r: [4] },
+                { tA: [1, 4], tB: [2, 5], r: [3] },
+                { tA: [1, 3], tB: [2, 4], r: [5] },
+                { tA: [3, 4], tB: [1, 5], r: [2] },
+                { tA: [2, 3], tB: [4, 5], r: [1] }
+            ],
+            6: [
+                { tA: [1, 2], tB: [3, 4], r: [5, 6] },
+                { tA: [3, 5], tB: [2, 6], r: [1, 4] },
+                { tA: [1, 4], tB: [5, 6], r: [2, 3] },
+                { tA: [2, 3], tB: [1, 6], r: [4, 5] },
+                { tA: [4, 5], tB: [1, 3], r: [2, 6] },
+                { tA: [2, 5], tB: [4, 6], r: [1, 3] },
+                { tA: [1, 5], tB: [3, 6], r: [2, 4] },
+                { tA: [2, 4], tB: [1, 6], r: [3, 5] },
+                { tA: [2, 3], tB: [4, 5], r: [1, 6] },
+                { tA: [1, 2], tB: [5, 6], r: [3, 4] },
+                { tA: [3, 5], tB: [4, 6], r: [1, 2] },
+                { tA: [1, 3], tB: [2, 4], r: [5, 6] },
+                { tA: [1, 5], tB: [2, 6], r: [3, 4] },
+                { tA: [3, 6], tB: [1, 4], r: [2, 5] },
+                { tA: [2, 5], tB: [3, 4], r: [1, 6] },
+                { tA: [2, 3], tB: [1, 6], r: [4, 5] },
+                { tA: [4, 5], tB: [2, 6], r: [1, 3] },
+                { tA: [1, 4], tB: [3, 5], r: [2, 6] },
+                { tA: [1, 2], tB: [4, 6], r: [3, 5] },
+                { tA: [2, 5], tB: [1, 3], r: [4, 6] }
+            ],
+            7: [
+                { tA: [1, 2], tB: [3, 4], r: [5, 6, 7] },
+                { tA: [2, 6], tB: [5, 7], r: [1, 3, 4] },
+                { tA: [1, 3], tB: [4, 7], r: [2, 5, 6] },
+                { tA: [2, 5], tB: [4, 6], r: [1, 3, 7] },
+                { tA: [1, 6], tB: [3, 7], r: [2, 4, 5] },
+                { tA: [2, 4], tB: [1, 5], r: [3, 6, 7] },
+                { tA: [6, 7], tB: [3, 5], r: [1, 2, 4] },
+                { tA: [1, 4], tB: [2, 7], r: [3, 5, 6] },
+                { tA: [3, 6], tB: [4, 5], r: [1, 2, 7] },
+                { tA: [2, 3], tB: [1, 7], r: [4, 5, 6] },
+                { tA: [5, 6], tB: [1, 4], r: [2, 3, 7] },
+                { tA: [3, 5], tB: [2, 7], r: [1, 4, 6] },
+                { tA: [1, 6], tB: [4, 7], r: [2, 3, 5] },
+                { tA: [2, 5], tB: [3, 6], r: [1, 4, 7] },
+                { tA: [1, 7], tB: [4, 5], r: [2, 3, 6] },
+                { tA: [2, 6], tB: [1, 3], r: [4, 5, 7] },
+                { tA: [2, 4], tB: [5, 7], r: [1, 3, 6] },
+                { tA: [3, 6], tB: [1, 5], r: [2, 4, 7] },
+                { tA: [2, 4], tB: [3, 7], r: [1, 5, 6] },
+                { tA: [1, 2], tB: [5, 6], r: [3, 4, 7] }
+            ]
+        };
+
         let players = [];
         let schedule = [];
         let currentMatchIndex = 0;
@@ -518,14 +660,38 @@
             generateSchedule();
         });
 
+        function syncQuickToModal() {
+            const qCourt = document.getElementById('quick-court-count').value;
+            const qPlayer = document.getElementById('quick-player-count').value;
+            document.getElementById('court-count').value = qCourt;
+            document.getElementById('player-count').value = qPlayer;
+            generatePlayerNames();
+        }
+
+        function syncModalToQuick() {
+            const mCourt = document.getElementById('court-count').value;
+            const mPlayer = document.getElementById('player-count').value;
+
+            const qCourtOpt = document.querySelector(`#quick-court-count option[value="${mCourt}"]`);
+            if (qCourtOpt) document.getElementById('quick-court-count').value = mCourt;
+
+            const qPlayerOpt = document.querySelector(`#quick-player-count option[value="${mPlayer}"]`);
+            if (qPlayerOpt) document.getElementById('quick-player-count').value = mPlayer;
+        }
+
+        function onQuickGenerate() {
+            syncQuickToModal();
+            generateSchedule();
+        }
+
         function openModal(id) {
             document.getElementById(id).classList.add('open');
-            document.body.style.overflow = 'hidden'; // モーダル表示時に背面スクロールを固定
+            document.body.style.overflow = 'hidden';
         }
 
         function closeModal(id) {
             document.getElementById(id).classList.remove('open');
-            document.body.style.overflow = ''; // スクロール固定を解除
+            document.body.style.overflow = '';
         }
 
         function loadVoices() {
@@ -552,6 +718,29 @@
             document.getElementById('player-names').value = names.join(', ');
         }
 
+        function buildPresetSchedule(count, maxRounds) {
+            const list = PRESET_LISTS[count];
+            if (!list) return null;
+
+            const res = [];
+            const roundsToUse = Math.min(list.length, maxRounds);
+
+            for (let i = 0; i < roundsToUse; i++) {
+                const item = list[i];
+                const teamA = item.tA.map(idx => players[idx - 1] || `${idx}番`);
+                const teamB = item.tB.map(idx => players[idx - 1] || `${idx}番`);
+                const resting = item.r.map(idx => players[idx - 1] || `${idx}番`);
+
+                res.push({
+                    round: i + 1,
+                    courts: [{ courtNo: 1, teamA, teamB }],
+                    resting: resting
+                });
+            }
+
+            return res;
+        }
+
         function buildOneCandidate(courtCount, roundCount) {
             const candidate = [];
             const playCounts = {};
@@ -570,12 +759,9 @@
 
             for (let r = 0; r < roundCount; r++) {
                 let sortedPlayers;
-
-                // ★ 第1試合（r === 0）は若い番号順（配列の登録順）に並べ替えて固定する
                 if (r === 0) {
-                    sortedPlayers = [...players]; // 入力通りの並び順（1番, 2番, 3番, ...）
+                    sortedPlayers = [...players];
                 } else {
-                    // 第2試合以降はプレイ回数や連続休憩を考慮してシャッフル
                     sortedPlayers = [...players].sort((a, b) => {
                         let scoreA = playCounts[a] * 20 - consecutiveRest[a] * 100 + consecutivePlay[a] * 15 + (Math.random() - 0.5);
                         let scoreB = playCounts[b] * 20 - consecutiveRest[b] * 100 + consecutivePlay[b] * 15 + (Math.random() - 0.5);
@@ -593,13 +779,8 @@
 
                     let best;
                     if (r === 0) {
-                        // ★ 第1試合は [1番, 2番] vs [3番, 4番] にストレートで固定
-                        best = {
-                            teamA: [four[0], four[1]],
-                            teamB: [four[2], four[3]]
-                        };
+                        best = { teamA: [four[0], four[1]], teamB: [four[2], four[3]] };
                     } else {
-                        // 第2試合以降は重複が最も少ないパターンを評価して決定
                         const p1 = four[0], p2 = four[1], p3 = four[2], p4 = four[3];
                         const patterns = [
                             { teamA: [p1, p2], teamB: [p3, p4] },
@@ -674,29 +855,34 @@
             const rawNames = document.getElementById('player-names').value;
             players = rawNames.split(',').map(s => s.trim()).filter(s => s.length > 0);
             const courtCount = parseInt(document.getElementById('court-count').value) || 1;
+            const mode = document.getElementById('mode-select').value;
+            const roundCount = parseInt(document.getElementById('round-count').value) || 20;
 
             if (players.length < 4) {
                 alert('最低4人以上のプレイヤーが必要です');
                 return;
             }
 
-            const roundCount = (players.length === 6 && courtCount === 1) ? 9 : 10;
-            let bestResult = null;
-            let minVsOverlap = 999;
+            if (mode === 'preset' && (players.length === 5 || players.length === 6 || players.length === 7) && courtCount === 1) {
+                schedule = buildPresetSchedule(players.length, roundCount);
+            } else {
+                let bestResult = null;
+                let minVsOverlap = 999;
 
-            for (let trial = 0; trial < 2000; trial++) {
-                const res = buildOneCandidate(courtCount, roundCount);
-                if (res.maxVsCount <= 1 && res.maxRestConsec <= 1) {
-                    bestResult = res.candidate;
-                    break;
+                for (let trial = 0; trial < 1500; trial++) {
+                    const res = buildOneCandidate(courtCount, roundCount);
+                    if (res.maxVsCount <= 1 && res.maxRestConsec <= 1) {
+                        bestResult = res.candidate;
+                        break;
+                    }
+                    if (res.maxVsCount < minVsOverlap) {
+                        minVsOverlap = res.maxVsCount;
+                        bestResult = res.candidate;
+                    }
                 }
-                if (res.maxVsCount < minVsOverlap) {
-                    minVsOverlap = res.maxVsCount;
-                    bestResult = res.candidate;
-                }
+
+                schedule = bestResult;
             }
-
-            schedule = bestResult;
 
             currentMatchIndex = 0;
             renderSchedule();
