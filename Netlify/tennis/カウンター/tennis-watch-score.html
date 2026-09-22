@@ -819,8 +819,26 @@ function pointText(mine, other){
   return labels[Math.min(mine,3)];
 }
 
-$("tapA").addEventListener("click", ()=>addPoint("a"));
-$("tapB").addEventListener("click", ()=>addPoint("b"));
+// ダブルタップは「戻る」として扱う。1回目のタップでは少し待ってから得点を確定させ、
+// その間に2回目のタップが来たら確定前にキャンセルする(=最初から何も起きなかった扱いにする)。
+// 「先に得点を入れてから取り消す」方式だと、一瞬だけ得点後の画面(サーブ側の切り替わりなど)が
+// 実際に描画されてしまい違和感があったため、この方式にしている。
+const DOUBLE_TAP_MS = 300;
+let pendingTap = { a: null, b: null };
+function handleTap(side){
+  if(pendingTap[side]){
+    clearTimeout(pendingTap[side]);
+    pendingTap[side] = null;
+    performUndo(); // ダブルタップ = スワイプと同じく、直前に確定済みの1点を取り消す
+    return;
+  }
+  pendingTap[side] = setTimeout(()=>{
+    pendingTap[side] = null;
+    addPoint(side);
+  }, DOUBLE_TAP_MS);
+}
+$("tapA").addEventListener("click", ()=>handleTap("a"));
+$("tapB").addEventListener("click", ()=>handleTap("b"));
 
 // 自チームがサーブ中で自分/パートナーのバッジが出ている時に長押しすると、
 // その場で自分↔パートナー↔未設定を切り替える(同じセット内は遡って正しく直す)。
@@ -940,10 +958,12 @@ function attachLongPress(btn, side){
   const MOVE_CANCEL_PX = 15; // これ以上動いたら長押しではなくスワイプ/ドラッグとみなす
   let timer = null;
   let longPressed = false;
+  let movedSignificantly = false;
   let startX = 0, startY = 0;
 
   const start = (e)=>{
     longPressed = false;
+    movedSignificantly = false;
     startX = e.clientX; startY = e.clientY;
     timer = setTimeout(()=>{
       longPressed = true;
@@ -961,6 +981,7 @@ function attachLongPress(btn, side){
   const cancelTimer = ()=>{ clearTimeout(timer); };
   const onMove = (e)=>{
     if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX){
+      movedSignificantly = true; // ドラッグ/スワイプとみなし、続くclick(得点)も無効化する
       cancelTimer();
     }
   };
@@ -970,13 +991,15 @@ function attachLongPress(btn, side){
   btn.addEventListener("pointerup", cancelTimer);
   btn.addEventListener("pointerleave", cancelTimer);
   btn.addEventListener("pointercancel", cancelTimer);
-  // 長押しが成立した場合、それに続く通常のclick(得点)は無効化する。
+  // 長押しが成立した場合や、大きく動いた(スワイプ/ドラッグだった)場合は、
+  // それに続く通常のclick(得点)を無効化する。
   // キャプチャフェーズで先に横取りして、addPoint側のclickリスナーまで届かないようにする。
   btn.addEventListener("click", (e)=>{
-    if(longPressed){
+    if(longPressed || movedSignificantly){
       e.preventDefault();
       e.stopImmediatePropagation();
       longPressed = false;
+      movedSignificantly = false;
     }
   }, true);
 }
@@ -1059,6 +1082,21 @@ attachSimpleLongPress($("chipDeuce"), cycleDeuceMode);
 
 function performUndo(){
   if(!state) return;
+  console.log(`[DEBUG performUndo] state.history.length=${state.history.length} JSON=${JSON.stringify(state.history)}`);
+  // 確定待ち(保留中)のタップがあれば、まずそれをキャンセルする。
+  // これをしないと、スワイプで戻したつもりでも、少し後に保留中だったタップが
+  // こっそり反映されてしまう(残っていたカウントが戻らない、という不具合の原因)。
+  let cancelledPending = false;
+  ["a","b"].forEach(side=>{
+    if(pendingTap[side]){
+      clearTimeout(pendingTap[side]);
+      pendingTap[side] = null;
+      cancelledPending = true;
+    }
+  });
+  if(cancelledPending){
+    return; // 保留中のタップを消しただけで、今回のスワイプの役目は終わり
+  }
   if(state.serverCorrectionBackup){
     const b = state.serverCorrectionBackup;
     state.pointLog = b.pointLog;
@@ -1087,6 +1125,7 @@ function performUndo(){
 $("finishMatchBtn").addEventListener("click", ()=>{
   customConfirm("この試合を終了して新しい試合を始めますか？\n(記録は履歴に残ります)", ()=>{
     state.finished = true;
+    state.history = []; // 終わった試合にundoスタックを残しておく意味は無いので空にする
     persist();
     showScreen("setup");
   });
@@ -1189,15 +1228,16 @@ function saveDb(db){
   try{ localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db)); }catch(e){}
 }
 function buildRecord(){
-  const {history, ...rest} = state; // undoスタックは保存対象外
+  const rest = { ...state };
   rest.updatedAt = new Date().toISOString();
-  return rest;
+  return rest; // undoスタック(history)も含めて保存する(再開時にもundoできるように)
 }
 function persist(){
   if(!state) return;
   const db = loadDb();
   const idx = db.matches.findIndex(m=>m.matchId===state.matchId);
   const rec = buildRecord();
+  console.log(`[DEBUG persist] matchId=${state.matchId} history.length=${(state.history||[]).length} rec.history.length=${(rec.history||[]).length}`);
   if(idx>=0) db.matches[idx]=rec; else db.matches.push(rec);
   saveDb(db);
 }
@@ -1211,8 +1251,10 @@ function findResumable(){
 
 function resumeIfPossible(){
   const rec = findResumable();
+  console.log(`[DEBUG resumeIfPossible] found record=${!!rec} rec.history=${rec ? JSON.stringify(rec.history) : 'N/A'}`);
   if(rec){
-    state = Object.assign({history:[]}, rec);
+    state = Object.assign({}, rec, {history: rec.history || []});
+    console.log(`[DEBUG resumeIfPossible] restored state.history.length=${state.history.length}`);
     render();
     showScreen("scoreScreen");
   }
@@ -1228,7 +1270,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.27"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-12.32"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
