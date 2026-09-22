@@ -569,11 +569,19 @@
             });
 
             for (let r = 0; r < roundCount; r++) {
-                let sortedPlayers = [...players].sort((a, b) => {
-                    let scoreA = playCounts[a] * 20 - consecutiveRest[a] * 100 + consecutivePlay[a] * 15 + (Math.random() - 0.5);
-                    let scoreB = playCounts[b] * 20 - consecutiveRest[b] * 100 + consecutivePlay[b] * 15 + (Math.random() - 0.5);
-                    return scoreA - scoreB;
-                });
+                let sortedPlayers;
+
+                // ★ 第1試合（r === 0）は若い番号順（配列の登録順）に並べ替えて固定する
+                if (r === 0) {
+                    sortedPlayers = [...players]; // 入力通りの並び順（1番, 2番, 3番, ...）
+                } else {
+                    // 第2試合以降はプレイ回数や連続休憩を考慮してシャッフル
+                    sortedPlayers = [...players].sort((a, b) => {
+                        let scoreA = playCounts[a] * 20 - consecutiveRest[a] * 100 + consecutivePlay[a] * 15 + (Math.random() - 0.5);
+                        let scoreB = playCounts[b] * 20 - consecutiveRest[b] * 100 + consecutivePlay[b] * 15 + (Math.random() - 0.5);
+                        return scoreA - scoreB;
+                    });
+                }
 
                 const requiredPlayersCount = Math.min(courtCount * 4, Math.floor(players.length / 4) * 4);
                 const activePlayers = sortedPlayers.slice(0, requiredPlayersCount);
@@ -582,28 +590,38 @@
                 const roundCourts = [];
                 for (let c = 0; c < requiredPlayersCount / 4; c++) {
                     const four = activePlayers.slice(c * 4, (c + 1) * 4);
-                    const p1 = four[0], p2 = four[1], p3 = four[2], p4 = four[3];
 
-                    const patterns = [
-                        { teamA: [p1, p2], teamB: [p3, p4] },
-                        { teamA: [p1, p3], teamB: [p2, p4] },
-                        { teamA: [p1, p4], teamB: [p2, p3] }
-                    ];
+                    let best;
+                    if (r === 0) {
+                        // ★ 第1試合は [1番, 2番] vs [3番, 4番] にストレートで固定
+                        best = {
+                            teamA: [four[0], four[1]],
+                            teamB: [four[2], four[3]]
+                        };
+                    } else {
+                        // 第2試合以降は重複が最も少ないパターンを評価して決定
+                        const p1 = four[0], p2 = four[1], p3 = four[2], p4 = four[3];
+                        const patterns = [
+                            { teamA: [p1, p2], teamB: [p3, p4] },
+                            { teamA: [p1, p3], teamB: [p2, p4] },
+                            { teamA: [p1, p4], teamB: [p2, p3] }
+                        ];
 
-                    patterns.forEach(pat => {
-                        const tA = [...pat.teamA].sort();
-                        const tB = [...pat.teamB].sort();
-                        const pairScore = pairCounts[tA[0]][tA[1]] + pairCounts[tB[0]][tB[1]];
+                        patterns.forEach(pat => {
+                            const tA = [...pat.teamA].sort();
+                            const tB = [...pat.teamB].sort();
+                            const pairScore = pairCounts[tA[0]][tA[1]] + pairCounts[tB[0]][tB[1]];
 
-                        const cardKey1 = `${tA[0]}&${tA[1]}_vs_${tB[0]}&${tB[1]}`;
-                        const cardKey2 = `${tB[0]}&${tB[1]}_vs_${tA[0]}&${tA[1]}`;
-                        const vsScore = (vsCardCounts[cardKey1] || 0) + (vsCardCounts[cardKey2] || 0);
+                            const cardKey1 = `${tA[0]}&${tA[1]}_vs_${tB[0]}&${tB[1]}`;
+                            const cardKey2 = `${tB[0]}&${tB[1]}_vs_${tA[0]}&${tA[1]}`;
+                            const vsScore = (vsCardCounts[cardKey1] || 0) + (vsCardCounts[cardKey2] || 0);
 
-                        pat.score = pairScore * 10 + vsScore * 1000 + Math.random();
-                    });
+                            pat.score = pairScore * 10 + vsScore * 1000 + Math.random();
+                        });
 
-                    patterns.sort((a, b) => a.score - b.score);
-                    const best = patterns[0];
+                        patterns.sort((a, b) => a.score - b.score);
+                        best = patterns[0];
+                    }
 
                     const tA = [...best.teamA].sort();
                     const tB = [...best.teamB].sort();
