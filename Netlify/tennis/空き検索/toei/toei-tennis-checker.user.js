@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         都立公園テニスチェッカー
 // @namespace    kouen-tennis-checker
-// @version      1.7
+// @version      1.8
 // @description  都立公園テニスコートの空き時間帯を自動収集・表示
 // -----------------------------------------------------------------------------
 // 変更履歴
@@ -17,6 +17,10 @@
 //                  「本当に空きがない0件」と「取得失敗による0件」を区別できるように
 //                  （ベータ版で検証：施設間の並列実行は都のサーバーが耐えられずエラー多発のため不採用。
 //                  　待機時間の短縮も、PCでは0msでも問題ないがスマホでは不安定だったため既定値を維持）
+// 1.8 (2026-09-25) 府中版の知見を反映。通信にタイムアウト（既定30秒・設定で変更可）を追加し、
+//                  応答が返ってこない場合も「失敗」として取り直し→❌表示の仕組みに乗せた
+//                  （以前は応答がないと画面が「N週目」のまま黙って止まり続けた）。
+//                  ヘッダーにバージョン表示、完了時に所要時間をログ出力
 // -----------------------------------------------------------------------------
 // @match        https://kouen.sports.metro.tokyo.lg.jp/*
 // @grant        GM_setClipboard
@@ -48,8 +52,11 @@
         jikan: [],       // [] = 全時間帯
         weeks: 8,        // 何週先まで検索
         startDate: '',   // '' = 今日
-        initDelayMs: 400 // initFacility後の待機時間（ms）。短くする場合はリトライに頼る前提
+        initDelayMs: 400, // initFacility後の待機時間（ms）。短くする場合はリトライに頼る前提
+        requestTimeoutSec: 30 // 通信の応答をこれ以上待たない（時間切れは「失敗」扱いで取り直し）
     };
+
+    var SCRIPT_VERSION = '1.8'; // ヘッダー表示用。@versionと必ず一致させること
 
     var API_URL = '/web/rsvWOpeInstSrchVacantAjaxAction.do';
     var LOG = [];
@@ -71,6 +78,7 @@
                 jikan:             saved.jikan  || DEFAULT_CONFIG.jikan,
                 weeks:             saved.weeks  || DEFAULT_CONFIG.weeks,
                 initDelayMs:       (typeof saved.initDelayMs === 'number') ? saved.initDelayMs : DEFAULT_CONFIG.initDelayMs,
+                requestTimeoutSec: (typeof saved.requestTimeoutSec === 'number') ? saved.requestTimeoutSec : DEFAULT_CONFIG.requestTimeoutSec,
             };
         }
         };
@@ -172,14 +180,22 @@
     ============================================================ */
     var INIT_URL  = '/web/rsvWOpeInstSrchVacantAction.do';
 
+    function requestTimeoutMs() {
+        var sec = S.cfg().requestTimeoutSec;
+        return (typeof sec === 'number' && sec > 0 ? sec : 30) * 1000;
+    }
+
     // ① 施設ページを初期化（セッションCookieにdaystart等を設定させる）
     function initFacility(bldCd, instCd, useDay) {
         return new Promise(function(resolve, reject) {
             var xhr = new XMLHttpRequest();
             xhr.open('POST', INIT_URL, true);
             xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.timeout = requestTimeoutMs();
             xhr.onload = function() { resolve(); };
             xhr.onerror = function() { resolve(); }; // エラーでも続行
+            // 応答が返ってこない場合も続行する（直後のデータ取得の検査・取り直しで救済される）
+            xhr.ontimeout = function() { log('  ⚠ 初期化の通信が' + (xhr.timeout/1000) + '秒応答なし'); resolve(); };
             var iniICd = instCd + '_3';
             var body = [
                 'displayNo=prwrc2000',
@@ -222,6 +238,9 @@
                 }
             };
             xhr.onerror = function() { reject(new Error('Network error')); };
+            // 応答が返ってこない場合は「失敗」として扱い、既存の取り直し→❌表示の仕組みに乗せる
+            xhr.timeout = requestTimeoutMs();
+            xhr.ontimeout = function() { reject(new Error('タイムアウト（' + (xhr.timeout/1000) + '秒応答なし）')); };
             xhr.send([
                 'displayNo=prwrc2000',
                 'useDay=' + useDay,
@@ -237,6 +256,7 @@
        メイン処理
     ============================================================ */
     async function runSearch() {
+        var runStartedAt = Date.now();
         var cfg = S.cfg();
         var enabledFacs = cfg.facilities.filter(function(f) {
             return cfg.enabledFacilities.indexOf(f.name) >= 0;
@@ -419,6 +439,7 @@
 
         var ts = results.length;
         log('=== 完了 ' + ts + '件 ===' + (failCount > 0 ? '（⚠取得失敗 ' + failCount + '週ぶん）' : ''));
+        log('所要時間: ' + Math.round((Date.now() - runStartedAt) / 1000) + '秒');
         setStatus('完了！ 空きコマ ' + ts + '件' + (failCount > 0 ? '（失敗' + failCount + '件）' : ''), failCount > 0 ? 'orange' : 'green');
         renderResults(results);
         renderStats(results);
@@ -1042,6 +1063,14 @@
         html += 'style="width:100%;font-size:14px;border:2px solid #ccc;border-radius:8px;padding:10px;box-sizing:border-box;">';
         html += '</div>';
 
+        // 通信のタイムアウト
+        html += '<div style="margin-bottom:14px;">';
+        html += '<div style="font-size:11px;font-weight:bold;color:#555;margin-bottom:6px;">⏱ 応答待ちの上限（秒）</div>';
+        html += '<div style="font-size:10px;color:#888;margin-bottom:6px;">これ以上応答がないと失敗扱いにして取り直します。サイトが混雑する日は長めに。既定値は30です。</div>';
+        html += '<input id="s-timeout" type="number" min="5" step="5" value="' + (cfg.requestTimeoutSec || 30) + '" ';
+        html += 'style="width:100%;font-size:14px;border:2px solid #ccc;border-radius:8px;padding:10px;box-sizing:border-box;">';
+        html += '</div>';
+
         html += '<button id="s-save" style="width:100%;padding:14px;background:#1a7a3c;color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:bold;min-height:48px;">💾 保存</button>';
         html += '</div>';
 
@@ -1126,6 +1155,8 @@
             var btn = this;
             var delayVal = parseInt(document.getElementById('s-delay').value, 10);
             if (isNaN(delayVal) || delayVal < 0) delayVal = 400;
+            var timeoutVal = parseInt(document.getElementById('s-timeout').value, 10);
+            if (isNaN(timeoutVal) || timeoutVal < 5) timeoutVal = 30;
             // 施設マスタは保存せず、ユーザー設定のみ保存
             S.set('config', {
                 weeks:             state.weeks,
@@ -1133,7 +1164,8 @@
                 jikan:             state.jikan,
                 enabledFacilities: state.enabledFacs,
                 startDate:         (document.getElementById('s-date').value||'').trim(),
-                initDelayMs:       delayVal
+                initDelayMs:       delayVal,
+                requestTimeoutSec: timeoutVal
             });
             btn.textContent = '✓ 保存しました！';
             btn.style.background = '#2196F3';
@@ -1405,7 +1437,7 @@
 
         panel.innerHTML =
             '<div id="ko-header" style="background:#1a7a3c;color:white;padding:7px 10px;font-size:13px;font-weight:bold;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;cursor:grab;">' +
-                '<span>🎾 都立公園テニスチェッカー</span>' +
+                '<span>🎾 都立公園テニスチェッカー <span style="font-size:9px;font-weight:normal;opacity:0.8;">v' + SCRIPT_VERSION + '</span></span>' +
                 '<div style="display:flex;gap:4px;">' +
                     '<span id="ko-fs" style="cursor:pointer;padding:0 4px;" title="全画面">⛶</span>' +
                     '<span id="ko-min" style="cursor:pointer;padding:0 4px;" title="最小化">━</span>' +
