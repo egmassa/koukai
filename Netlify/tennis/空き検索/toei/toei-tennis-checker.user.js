@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         都立公園テニスチェッカー
 // @namespace    kouen-tennis-checker
-// @version      1.8
+// @version      1.10
 // @description  都立公園テニスコートの空き時間帯を自動収集・表示
 // -----------------------------------------------------------------------------
 // 変更履歴
@@ -21,6 +21,19 @@
 //                  応答が返ってこない場合も「失敗」として取り直し→❌表示の仕組みに乗せた
 //                  （以前は応答がないと画面が「N週目」のまま黙って止まり続けた）。
 //                  ヘッダーにバージョン表示、完了時に所要時間をログ出力
+// 1.9 (2026-09-25) 途中で止まった結果が「完了」に見える問題を修正。
+//                  ・停止ボタンを押すと施設の残りも含めて止め、「停止（途中までN件）」と表示
+//                  ・検索中にページの再読み込み・iPhoneのSafariバックグラウンド等で処理が
+//                  　途切れた場合、次に開いたとき「⏳検索中...」のまま押せなくなっていたのを解消
+//                  ・途中で止まった結果には「途中までの結果です」の警告を常に表示
+//                  ・クリア時に失敗/中断の警告も消すように
+//                  ・画像保存のファイル名が府中版のまま(fuchu_tennis_)だったのを修正
+//                  ・失敗時の案内文のボタン名を実際の「⚡ チェック開始」に修正
+// 1.10 (2026-09-25) 「受付期間外」のコマを空きとして数えていた誤判定を修正。
+//                  altに状態の文字（空き・予約あり・保守日・受付期間外など）がある場合は
+//                  それだけで判定し、画像名やstatusによる推測はaltが無いときだけ使うように
+//                  （以前はaltが空き以外でも、画像名が満室/保守/休みでなければ空き扱いになり、
+//                  　公式サイトで印なしの11月分が「空き」として大量に表示されていた）
 // -----------------------------------------------------------------------------
 // @match        https://kouen.sports.metro.tokyo.lg.jp/*
 // @grant        GM_setClipboard
@@ -56,7 +69,7 @@
         requestTimeoutSec: 30 // 通信の応答をこれ以上待たない（時間切れは「失敗」扱いで取り直し）
     };
 
-    var SCRIPT_VERSION = '1.8'; // ヘッダー表示用。@versionと必ず一致させること
+    var SCRIPT_VERSION = '1.10'; // ヘッダー表示用。@versionと必ず一致させること
 
     var API_URL = '/web/rsvWOpeInstSrchVacantAjaxAction.do';
     var LOG = [];
@@ -111,10 +124,14 @@
         var img = item.imgURL || '';
         var s   = item.status;
 
-        // altで空きと判定
-        if (alt === '空き') return true;
-        if (alt === '一部空き') return true;
-        if (alt.indexOf('空き') >= 0 && alt.indexOf('予約') < 0 && alt.indexOf('なし') < 0) return true;
+        // altに状態の文字があれば、それだけで判定する（画像名などの推測には進まない）。
+        // 例: 空き / 一部空き → 空き、予約あり / 保守日 / 受付期間外 → 空きではない
+        if (alt) {
+            if (alt.indexOf('期間外') >= 0) return false;
+            if (alt === '空き' || alt === '一部空き') return true;
+            return alt.indexOf('空き') >= 0 && alt.indexOf('予約') < 0 && alt.indexOf('なし') < 0;
+        }
+        if (s === 700) return false; // 受付期間外（altが無い場合の保険）
 
         // imgURLで判定（svg名に"vacant"や"available"）
         if (img.indexOf('calendar_vacant') >= 0) return true;
@@ -266,6 +283,7 @@
 
         S.set('running', true);
         S.set('failCount', 0);
+        S.set('interrupted', false);
         updateButtons();
 
         // 開始日（今週の月曜）
@@ -429,18 +447,28 @@
 
                 await new Promise(function(r) { setTimeout(r, 300); });
             }
+            if (!S.get('running')) break; // 停止時は残りの施設にも進まない
             log('=== ' + fac.name + ' 完了 ===');
         }
+
+        // ループを抜けた時点でrunningがfalseなら、停止ボタンで途中終了している
+        var stopped = !S.get('running');
 
         S.set('results', results);
         S.set('lastUpdate', new Date().toISOString());
         S.set('running', false);
         S.set('failCount', failCount);
+        S.set('interrupted', stopped);
 
         var ts = results.length;
-        log('=== 完了 ' + ts + '件 ===' + (failCount > 0 ? '（⚠取得失敗 ' + failCount + '週ぶん）' : ''));
+        if (stopped) {
+            log('=== 停止 途中まで ' + ts + '件 ===');
+            setStatus('停止（途中まで ' + ts + '件）', 'red');
+        } else {
+            log('=== 完了 ' + ts + '件 ===' + (failCount > 0 ? '（⚠取得失敗 ' + failCount + '週ぶん）' : ''));
+            setStatus('完了！ 空きコマ ' + ts + '件' + (failCount > 0 ? '（失敗' + failCount + '件）' : ''), failCount > 0 ? 'orange' : 'green');
+        }
         log('所要時間: ' + Math.round((Date.now() - runStartedAt) / 1000) + '秒');
-        setStatus('完了！ 空きコマ ' + ts + '件' + (failCount > 0 ? '（失敗' + failCount + '件）' : ''), failCount > 0 ? 'orange' : 'green');
         renderResults(results);
         renderStats(results);
         updateButtons();
@@ -550,7 +578,16 @@
                 '<div style="background:#fff3e0;border:2px solid #f57c00;border-radius:8px;padding:10px;margin:8px;font-size:12px;color:#e65100;">' +
                 '<div style="font-weight:bold;margin-bottom:4px;">⚠ ' + failCountR + '週ぶん、情報を取得できませんでした</div>' +
                 '<div>サイトが混み合っていた可能性があります。下にある「空きコマなし」や件数は<b>不正確な場合があります</b>。' +
-                'お手数ですが、<b>もう一度「検索する」ボタンを押して</b>取得し直してください。</div>' +
+                'お手数ですが、<b>もう一度「⚡ チェック開始」ボタンを押して</b>取得し直してください。</div>' +
+                '</div>';
+        }
+        // 途中で止まった結果（停止ボタン・再読み込み・バックグラウンド等）
+        if (S.get('interrupted')) {
+            failBanner +=
+                '<div style="background:#fff3e0;border:2px solid #f57c00;border-radius:8px;padding:10px;margin:8px;font-size:12px;color:#e65100;">' +
+                '<div style="font-weight:bold;margin-bottom:4px;">⚠ 途中で止まったため、途中までの結果です</div>' +
+                '<div>まだ調べていない施設・週があります。「空きコマなし」や件数は<b>全体ではありません</b>。' +
+                '全部調べるには<b>「⚡ チェック開始」</b>を押してください。</div>' +
                 '</div>';
         }
 
@@ -1251,7 +1288,7 @@
                 var url = URL.createObjectURL(blob);
                 var a = document.createElement('a');
                 a.href = url;
-                a.download = 'fuchu_tennis_' + new Date().toISOString().slice(0,10) + '.png';
+                a.download = 'kouen_tennis_' + new Date().toISOString().slice(0,10) + '.png';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -1525,7 +1562,7 @@
         };
 
         document.getElementById('ko-clear').onclick = function() {
-            ['running','results','lastUpdate'].forEach(function(k){ S.del(k); });
+            ['running','results','lastUpdate','failCount','interrupted'].forEach(function(k){ S.del(k); });
             try { localStorage.removeItem('kouen_log'); } catch(e) {}
             LOG.length = 0;
             renderResults([]);
@@ -1534,6 +1571,15 @@
             document.getElementById('ko-tab-results').textContent = '結果';
             setStatus('待機中');
         };
+
+        // このスクリプトは実行中にページが変わると処理が途切れる（自動再開はしない）。
+        // 開いた時点で「実行中」の記録が残っていれば、前回の処理は途中で途切れたもの。
+        // そのままだと「⏳検索中...」でボタンが押せなくなるため、中断として扱い直す。
+        if (S.get('running')) {
+            S.set('running', false);
+            S.set('interrupted', true);
+            log('⚠ 前回の検索は途中で途切れていました（ページの再読み込み・画面の切替など）');
+        }
 
         showTab('ctrl');
         updateButtons();
@@ -1551,7 +1597,11 @@
                 else if (diffMin<1440) lastLbl = ' (' + Math.floor(diffMin/60) + '時間前)';
                 else lastLbl = ' (' + Math.floor(diffMin/1440) + '日前)';
             }
-            setStatus('前回結果: ' + existing.length + '件' + lastLbl, 'green');
+            if (S.get('interrupted')) setStatus('前回結果（途中まで）: ' + existing.length + '件' + lastLbl, 'orange');
+            else setStatus('前回結果: ' + existing.length + '件' + lastLbl, 'green');
+        } else if (S.get('interrupted')) {
+            renderResults([]);
+            setStatus('前回の検索は途中で止まりました', 'orange');
         }
     }
 
