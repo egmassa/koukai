@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.0.2
+// @version      5.0.4
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -71,16 +71,37 @@
   };
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
+  const SCRIPT_VERSION = '5.0.4'; // ヘッダー表示用。@versionと必ず一致させること
   const MONTHS_AHEAD = 3;
+  // サーバーが応答しないまま「読み込み中...」で止まらないよう、通信ごとに時間制限を設ける
+  const FETCH_TIMEOUT_MS = 30000;
 
   // ============================================================
   // データ取得
   // ============================================================
+  // fetchに時間制限を付ける。本文の読み込み（readBody）まで含めて制限内に収める。
+  async function fetchWithTimeout(url, opts, readBody) {
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS) : null;
+    try {
+      const res = await fetch(url, ctrl ? { ...opts, signal: ctrl.signal } : opts);
+      return await readBody(res);
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error(`タイムアウト（${FETCH_TIMEOUT_MS / 1000}秒応答なし）`);
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   function fetchRoomMonth(roomId, year, month) {
     const url = `https://yoyaku-mitaka.jp/reservation/room-data/${roomId}/month?year=${year}&month=${month}`;
-    return fetch(url, { credentials: 'omit' }).then((res) => {
+    return fetchWithTimeout(url, { credentials: 'omit' }, (res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      return res.json().then((data) => {
+        if (!data || typeof data !== 'object') throw new Error('応答の形式が想定外');
+        return data;
+      });
     });
   }
 
@@ -91,8 +112,11 @@
   // 古いCSRFトークンを使ってしまう不具合の元になるため、常に取り直す単純な方式にしている。
   async function refreshCsrfTokenViaReservationReload() {
     try {
-      const res = await fetch('https://yoyaku-mitaka.jp/reservation', { credentials: 'same-origin' });
-      const html = await res.text();
+      const html = await fetchWithTimeout(
+        'https://yoyaku-mitaka.jp/reservation',
+        { credentials: 'same-origin' },
+        (res) => res.text()
+      );
       const m = html.match(/<meta name="csrf-token" content="([^"]+)"/);
       return m ? m[1] : null;
     } catch (e) {
@@ -127,7 +151,7 @@
         console.error('[mitaka-tennis-checker] sessionStorage write failed', e);
       }
 
-      const response = await fetch('https://yoyaku-mitaka.jp/reservation/select-dates', {
+      const data = await fetchWithTimeout('https://yoyaku-mitaka.jp/reservation/select-dates', {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
@@ -139,8 +163,7 @@
           facility_ids: [t.facilityId],
           selected_data: [{ room_id: t.roomId, dates: [dateStr] }],
         }),
-      });
-      const data = await response.json();
+      }, (response) => response.json());
       if (data && data.success && data.redirect_url) {
         // 毎回同じURL（/reservation/booking-time）なので、ブラウザキャッシュで
         // 前回別施設の中身が出てしまわないよう、キャッシュ避けのパラメータを付ける
@@ -152,7 +175,7 @@
       }
     } catch (e) {
       console.error('[mitaka-tennis-checker] jumpToBooking failed', e);
-      alert('時間帯選択画面への遷移でエラーが発生しました。');
+      alert('時間帯選択画面への遷移でエラーが発生しました。\n' + ((e && e.message) || ''));
     }
   }
 
@@ -169,11 +192,17 @@
   }
 
   let lastFetchedAt = null; // 実際にサーバーからデータを取得できた最新日時
+  // 取得に失敗した月の記録。fetchFailures[ti] = Map('YYYY-M' → 理由)
+  // 失敗を「空きなし」と区別して画面・画像に警告を出すために使う。
+  // 失敗した月は「再取得」を押すまで取り直さない（操作のたびに30秒待たされるのを防ぐため）
+  let fetchFailures = {};
+  let initialFetchDone = false;
 
   async function ensureMonthFetched(ti, year, month) {
     fetchedMonths[ti] = fetchedMonths[ti] || new Set();
     const key = `${year}-${month}`;
     if (fetchedMonths[ti].has(key)) return;
+    if (fetchFailures[ti] && fetchFailures[ti].has(key)) return;
     const t = TARGETS[ti];
     if (!t) return;
     try {
@@ -183,12 +212,36 @@
       lastFetchedAt = new Date();
     } catch (e) {
       console.error('[mitaka-tennis-checker] fetch failed', t.name, year, month, e);
+      fetchFailures[ti] = fetchFailures[ti] || new Map();
+      fetchFailures[ti].set(key, (e && e.message) || 'エラー');
     }
+  }
+
+  function hasFailure(ti) {
+    return !!(fetchFailures[ti] && fetchFailures[ti].size > 0);
+  }
+
+  // 選択中の施設について「施設名（10月・11月）」の形で失敗箇所を並べる
+  function failureSummaryList(indices) {
+    return indices
+      .filter((ti) => hasFailure(ti))
+      .map((ti) => {
+        const keys = Array.from(fetchFailures[ti].keys()).sort((a, b) => {
+          const [ay, am] = a.split('-').map(Number);
+          const [by, bm] = b.split('-').map(Number);
+          return ay * 12 + am - (by * 12 + bm);
+        });
+        const months = keys.map((k) => `${Number(k.split('-')[1])}月`);
+        return `${TARGETS[ti] ? TARGETS[ti].name : ''}（${months.join('・')}）`;
+      });
   }
 
   async function fetchAllInitial() {
     lastData = {};
     fetchedMonths = {};
+    fetchFailures = {};
+    lastFetchedAt = null;
+    initialFetchDone = true;
     const now = new Date();
     for (let ti = 0; ti < TARGETS.length; ti++) {
       if (TARGETS[ti].enabled === false) continue;
@@ -270,12 +323,23 @@
         border-radius: 999px; padding: 3px 10px; font-size: 11px; cursor: pointer;
       }
       #mtc-panel .mtc-preset-btn:active { background: #c8e6c9; }
+      /* いまの条件と一致しているプリセットを点灯（施設タブの選択中と同じ配色） */
+      #mtc-panel .mtc-preset-btn.active { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+      #mtc-panel button.mtc-btn.secondary.active { background: #2e7d32; }
       #mtc-panel .mtc-legend { font-size: 11px; color: #555; text-align: center; margin-bottom: 8px; }
       #mtc-panel .mtc-filter-summary {
         text-align: center; font-size: 11px; color: #333; background: #f5f5f5;
         border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; line-height: 1.6;
       }
       #mtc-panel .mtc-fetched-at { font-size: 10px; color: #888; }
+      #mtc-panel .mtc-ver { font-size: 11px; font-weight: normal; color: #888; margin-left: 4px; }
+      #mtc-panel h2 { padding-right: 28px; }
+      #mtc-panel .mtc-fail-banner {
+        background: #fff3e0; border: 2px solid #f57c00; border-radius: 8px;
+        padding: 8px 10px; margin-bottom: 10px; font-size: 12px; color: #e65100; line-height: 1.6;
+        word-break: break-all;
+      }
+      #mtc-panel .mtc-fail-title { font-weight: bold; margin-bottom: 2px; }
       #mtc-panel .mtc-facility-legend {
         display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
         margin-bottom: 8px; font-size: 11px; color: #333;
@@ -754,7 +818,10 @@
         ? '全曜日'
         : [0, 1, 2, 3, 4, 5, 6].filter((d) => state.selectedDow.has(d)).map((d) => DOW[d]).join('・');
     const monthText = `${state.year}年${state.month}月`;
-    const fetchedText = lastFetchedAt ? `取得: ${formatDateTime(lastFetchedAt)}` : '';
+    const partialFail = indices.some((ti) => hasFailure(ti));
+    const fetchedText = lastFetchedAt
+      ? `取得: ${formatDateTime(lastFetchedAt)}${partialFail ? '（一部取得失敗あり）' : ''}`
+      : partialFail ? '取得失敗' : '';
     return (
       `<div class="mtc-filter-summary" id="mtc-filter-summary">` +
       `<div>${monthText}　施設: ${names}</div>` +
@@ -764,9 +831,33 @@
     );
   }
 
+  // 曜日プリセットの中身（ボタンの動作と点灯判定の両方で使う）
+  const DOW_PRESETS = {
+    weekday: [1, 2, 3, 4, 5],
+    weekend: [0, 6],
+    all: [0, 1, 2, 3, 4, 5, 6],
+  };
+
+  // 「どのボタンを押したか」ではなく「いまの条件がボタンの中身と完全に一致するか」で点灯を決める。
+  // 木曜だけ・06:00〜11:00など、どれにも一致しなければ自動的に全部消灯する。
+  function updatePresetHighlight(panel) {
+    panel.querySelectorAll('#mtc-time-presets .mtc-preset-btn').forEach((btn) => {
+      const on = timeToMin(btn.dataset.start) === state.startMin && timeToMin(btn.dataset.end) === state.endMin;
+      btn.classList.toggle('active', on);
+    });
+    const resetBtn = panel.querySelector('#mtc-time-reset');
+    if (resetBtn) resetBtn.classList.toggle('active', state.startMin === 0 && state.endMin === 24 * 60);
+    panel.querySelectorAll('#mtc-dow-presets .mtc-preset-btn').forEach((btn) => {
+      const dows = DOW_PRESETS[btn.dataset.dowPreset] || [];
+      const on = dows.length === state.selectedDow.size && dows.every((d) => state.selectedDow.has(d));
+      btn.classList.toggle('active', on);
+    });
+  }
+
   async function renderCalendarView(panel) {
+    updatePresetHighlight(panel); // 取得待ちの前に即座に反映
     const body = panel.querySelector('#mtc-body');
-    if (Object.keys(lastData).length === 0) {
+    if (!initialFetchDone) {
       body.innerHTML = '<div class="mtc-loading">読み込み中...</div>';
       await fetchAllInitial();
     }
@@ -791,7 +882,7 @@
 
     const select = panel.querySelector('#mtc-month-select');
     if (monthList.length === 0) {
-      select.innerHTML = '<option>データなし</option>';
+      select.innerHTML = indices.some((ti) => hasFailure(ti)) ? '<option>取得失敗</option>' : '<option>データなし</option>';
     } else {
       select.innerHTML = monthList
         .map(
@@ -802,8 +893,9 @@
     }
 
     let calendarsHtml = '';
+    // 取得に失敗した施設は「受付中の月がない」とは断定できないので、ここには含めず警告枠で案内する
     const missingFacilities = indices
-      .filter((ti) => !monthHasData(ti, state.year, state.month))
+      .filter((ti) => !hasFailure(ti) && !monthHasData(ti, state.year, state.month))
       .map((ti) => (TARGETS[ti] ? TARGETS[ti].name : ''));
     const noDataNotice = missingFacilities.length
       ? `<p style="color:#c62828;font-size:12px;text-align:center;">${missingFacilities.join('・')} は現在、予約受付中の月がありません。</p>`
@@ -818,12 +910,21 @@
             .join('')}</div>`
         : '';
 
+    const failList = failureSummaryList(indices);
+    const failBanner = failList.length
+      ? `<div class="mtc-fail-banner"><div class="mtc-fail-title">⚠ 一部のデータを取得できませんでした</div>` +
+        `<div>対象：${failList.join('、')}</div>` +
+        `<div>この部分は「空きなし」「予約受付中の月がありません」などと表示されていても<b>正しくない場合があります</b>。` +
+        `少し時間をおいて<b>「再取得」</b>を押してください。</div></div>`
+      : '';
+
     calendarsHtml =
       legendHtml +
       noDataNotice +
       buildCalendarMulti(indices, state.year, state.month, state.startMin, state.endMin, state.selectedDow);
 
     body.innerHTML =
+      failBanner +
       `<div class="mtc-legend">凡例：緑=全面空き　黄=一部空き　－対象外／セルをタップで詳細</div>` +
       `<div id="mtc-capture-area">` +
       buildFilterSummaryHtml(indices) +
@@ -1006,6 +1107,29 @@
     if (lastFetchedAt) {
       summaryLines.push(`取得: ${formatDateTime(lastFetchedAt)}`);
     }
+    // 取得失敗があれば、受け取った人にも分かるよう画像に警告行を入れる
+    const imgFailList = failureSummaryList(indices);
+    const warnText = imgFailList.length
+      ? `⚠ 一部取得できず：${imgFailList.join('、')}　空き表示が不正確な可能性あり`
+      : '';
+    // 曜日を絞ると画像の幅が狭くなるので、警告文は幅に合わせて折り返す
+    const warnFont = 'bold 11px sans-serif';
+    const warnLineH = 15;
+    const warnLines = [];
+    if (warnText) {
+      const wctx = document.createElement('canvas').getContext('2d');
+      wctx.font = warnFont;
+      let line = '';
+      for (const ch of warnText) {
+        if (line && wctx.measureText(line + ch).width > canvasW - 16) {
+          warnLines.push(line);
+          line = '';
+        }
+        line += ch;
+      }
+      if (line) warnLines.push(line);
+    }
+    const warnH = warnLines.length ? warnLines.length * warnLineH + 4 : 0;
 
     // 週ごとのデータを事前に計算し、各マスのチップ数からセル高さを決める
     const daysInMonth = new Date(state.year, state.month, 0).getDate();
@@ -1082,7 +1206,7 @@
     const detailTotalH =
       detailHeaderH + detailEntries.reduce((sum, e) => sum + e.h, 0) + (detailEntries.length > 0 ? 10 : 0);
 
-    const totalH = 12 + summaryLines.length * 18 + 10 + legendH + headerH + weeks.length * cellH + 16 + detailTotalH;
+    const totalH = 12 + summaryLines.length * 18 + warnH + 10 + legendH + headerH + weeks.length * cellH + 16 + detailTotalH;
 
     const canvas = document.createElement('canvas');
     canvas.width = canvasW;
@@ -1100,6 +1224,15 @@
       ctx.fillText(line, 8, y, canvas.width - 16);
       y += isFetchedLine ? 14 : 18;
     });
+    if (warnLines.length) {
+      ctx.font = warnFont;
+      ctx.fillStyle = '#e65100';
+      warnLines.forEach((wl) => {
+        ctx.fillText(wl, 8, y);
+        y += warnLineH;
+      });
+      y += 4;
+    }
     y += 4;
 
     if (indices.length > 1) {
@@ -1244,7 +1377,7 @@
 
     panel.innerHTML = `
       <button class="mtc-close" id="mtc-close-btn">×</button>
-      <h2>三鷹市テニスコート空き状況</h2>
+      <h2>三鷹市テニスコート空き状況<span class="mtc-ver">v${SCRIPT_VERSION}</span></h2>
       <div class="mtc-toolbar">
         <button class="mtc-btn" id="mtc-refresh-btn">再取得</button>
         <button class="mtc-btn secondary" id="mtc-copy-btn">LINE用に画像コピー</button>
@@ -1343,11 +1476,7 @@
 
     panel.querySelectorAll('#mtc-dow-presets .mtc-preset-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const preset = btn.dataset.dowPreset;
-        let dows;
-        if (preset === 'weekday') dows = [1, 2, 3, 4, 5];
-        else if (preset === 'weekend') dows = [0, 6];
-        else dows = [0, 1, 2, 3, 4, 5, 6];
+        const dows = DOW_PRESETS[btn.dataset.dowPreset] || DOW_PRESETS.all;
 
         state.selectedDow = new Set(dows);
         panel.querySelectorAll('#mtc-weekday-filter input[type="checkbox"]').forEach((cb) => {
@@ -1357,6 +1486,7 @@
       });
     });
 
+    updatePresetHighlight(panel);
     return panel;
   }
 
