@@ -129,6 +129,11 @@
     font-size:13px; font-family:inherit;}
   .note-section textarea::placeholder{color:var(--dim);}
 
+  .set-selector{display:flex; gap:6px; flex-wrap:wrap; margin:4px 0;}
+  .set-selector-btn{padding:5px 12px; border-radius:20px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--dim); font-size:12px; cursor:pointer;}
+  .set-selector-btn.active{background:var(--teal); color:#04231d; border-color:var(--teal); font-weight:700;}
+
   .token-settings{background:var(--panel); border:1px solid var(--line); border-radius:12px;
     padding:14px; margin-bottom:22px;}
   .token-status{font-size:12px; margin-bottom:10px;}
@@ -325,13 +330,19 @@ function wouldFinishGame(aAfter, bAfter, deuceMode, deuceCountBefore){
 
 // 試合全体のポイントログから各種スタッツを計算する。
 // 新しい指標を追加したいときは、この関数に集計処理を足すだけでよい(呼び出し側は変更不要)。
-function computeMatchStats(match){
+function computeMatchStats(match, setNumber){
+  // setNumber を渡すと、そのセットだけに絞った集計を返す(未指定/nullなら試合全体)
+  const pointLog = (match.pointLog||[]).filter(p => setNumber==null || p.setNumber === setNumber);
   const games = {};
-  (match.pointLog||[]).forEach(p=>{
+  pointLog.forEach(p=>{
     const key = p.setNumber+"-"+p.gameNumber;
     (games[key] = games[key] || []).push(p);
   });
   const deuceMode = (match.settings && match.settings.deuceMode) || "ad";
+
+  // 単純に「取ったポイント総数」(通常ゲーム・タイブレーク問わず、絞り込み範囲内の実数)
+  let totalPointsWonA=0, totalPointsWonB=0;
+  pointLog.forEach(p=>{ if(p.side==="a") totalPointsWonA++; else if(p.side==="b") totalPointsWonB++; });
 
   let serveTotalA=0, serveWonA=0, serveTotalB=0, serveWonB=0;
   let gamesServedA=0, gamesHeldA=0, gamesServedB=0, gamesHeldB=0;
@@ -409,15 +420,23 @@ function computeMatchStats(match){
     deuceGameWinPctA: pct(deuceGamesWonA, deuceGamesA), deuceGameWinPctB: pct(deuceGamesWonB, deuceGamesB),
     deuceGamesTotal,
 
-    gamesServedA, gamesServedB, bpFacedA, bpFacedB
+    gamesServedA, gamesServedB, bpFacedA, bpFacedB,
+
+    totalPointsWonA, totalPointsWonB, totalPoints: totalPointsWonA + totalPointsWonB
   };
+}
+
+// 試合中に実際に記録されているセット番号の一覧(進行中の未確定セットも含む)を昇順で返す
+function listSetNumbers(match){
+  const set = new Set((match.pointLog||[]).map(p=>p.setNumber));
+  return [...set].sort((a,b)=>a-b);
 }
 
 
 
 // ダブルスの「自分 vs パートナー」分析(match.settings.pairFirstServer / selfReturnSide が
 // 設定されている試合のみ計算できる。設定なしの過去の試合はhasPairData:falseになる)
-function computePairStats(match){
+function computePairStats(match, setNumber){
   const settings = match.settings || {};
   if(match.mode !== "doubles" || !settings.pairFirstServer || !settings.selfReturnSide) {
     return { hasPairData: false };
@@ -440,20 +459,27 @@ function computePairStats(match){
   gameKeys.forEach(key=>{
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
     if(pts[0] && pts[0].tiebreak) return; // タイブレークはサーブが1ゲーム中に何度も交代するため対象外
+    // setNumberで絞り込んでいても、自分/パートナーの交代順は試合全体を通して数える必要があるので、
+    // ゲームのループ自体は全セット分回し、集計への反映だけをここで絞る
+    const [gSet] = key.split("-").map(Number);
+    const inScope = (setNumber==null || gSet===setNumber);
     const server = pts[0].server;
     const winner = pts[pts.length-1].side;
 
     if(server === "a"){
       // 自チームのサービスゲーム: 自分/パートナーで交互に割り当て(1ゲームは同じ人が最後まで担当)
       const isSelf = selfTurn;
-      pts.forEach(p=>{
-        if(isSelf){ selfServePtsTotal++; if(p.side==="a") selfServePtsWon++; }
-        else { partnerServePtsTotal++; if(p.side==="a") partnerServePtsWon++; }
-      });
-      if(isSelf){ selfServeGames++; if(winner==="a") selfServeGamesWon++; }
-      else { partnerServeGames++; if(winner==="a") partnerServeGamesWon++; }
+      if(inScope){
+        pts.forEach(p=>{
+          if(isSelf){ selfServePtsTotal++; if(p.side==="a") selfServePtsWon++; }
+          else { partnerServePtsTotal++; if(p.side==="a") partnerServePtsWon++; }
+        });
+        if(isSelf){ selfServeGames++; if(winner==="a") selfServeGamesWon++; }
+        else { partnerServeGames++; if(winner==="a") partnerServeGamesWon++; }
+      }
       selfTurn = !selfTurn;
     } else {
+      if(!inScope) return;
       // 相手のサービスゲーム: リターンはコートサイド(デュース/アド)で自分/パートナーに分ける
       pts.forEach((p, idx)=>{
         const courtSide = (idx % 2 === 0) ? "deuce" : "ad";
@@ -532,7 +558,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1109,13 +1135,29 @@ function renderPointGrid(m){
     `</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-function showMatchDetail(matchId){
+// 詳細パネルで選んでいるセット(nullなら試合全体)。別の試合を開いたらリセットする
+let currentDetailMatchId = null;
+let currentDetailSetNumber = null;
+
+function showMatchDetail(matchId, setNumber){
   const m = filteredMatches.find(x=>x.matchId===matchId) || allMatches.find(x=>x.matchId===matchId);
   if(!m) return;
-  const st = computeMatchStats(m);
-  const pair = computePairStats(m);
+  if(matchId !== currentDetailMatchId){ currentDetailMatchId = matchId; currentDetailSetNumber = null; }
+  if(setNumber !== undefined) currentDetailSetNumber = setNumber;
+  const scopedSet = currentDetailSetNumber;
+
+  const st = computeMatchStats(m, scopedSet);
+  const pair = computePairStats(m, scopedSet);
   const panel = $("detailPanel");
   panel.style.display = "block";
+
+  const setNumbers = listSetNumbers(m);
+  const setSelectorHtml = setNumbers.length > 1 ? `
+    <div class="set-selector">
+      <button class="set-selector-btn${scopedSet==null?" active":""}" data-set-sel="all">全セット</button>
+      ${setNumbers.map(sn=>`<button class="set-selector-btn${scopedSet===sn?" active":""}" data-set-sel="${sn}">第${sn}セット</button>`).join("")}
+    </div>
+  ` : "";
 
   const pairHtml = pair.hasPairData ? `
     <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(${m.nameA}内の内訳)</div>
@@ -1140,7 +1182,11 @@ function showMatchDetail(matchId){
     <div class="desc" style="margin:10px 0 6px;">試合の流れ(各セットの見出し欄にもメモを付けられます)</div>
     ${renderPointGrid(m)}
 
+    ${setSelectorHtml}
+    <div class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
     <div class="stat-grid">
+      <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameA})</div><div class="val a">${st.totalPointsWonA}</div></div>
+      <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameB})</div><div class="val b">${st.totalPointsWonB}</div></div>
       <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameA})</div><div class="val a">${st.serviceHoldPctA??"―"}%</div></div>
       <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameB})</div><div class="val b">${st.serviceHoldPctB??"―"}%</div></div>
       <div class="stat-chip"><div class="lbl">サーブ勝率(${m.nameA})</div><div class="val a">${st.serveWinPctA??"―"}%</div></div>
@@ -1201,6 +1247,14 @@ function showMatchDetail(matchId){
       if(v) m.setNotes[sn] = v; else delete m.setNotes[sn];
       if(Object.keys(m.setNotes).length===0) delete m.setNotes;
       saveMatchesToDriveIfLoaded();
+    });
+  });
+
+  // セット選択ボタン: 押されたセットのスタッツに絞り込んで再描画する
+  panel.querySelectorAll("[data-set-sel]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const v = btn.dataset.setSel;
+      showMatchDetail(matchId, v==="all" ? null : Number(v));
     });
   });
 
