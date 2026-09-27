@@ -116,6 +116,18 @@
   .pt-grid td.tally-b{color:var(--orange); font-weight:800;}
   .pt-grid td.set-divider{background:var(--panel2); color:var(--text); font-weight:700;
     text-align:left; padding:6px 10px; border-left:none; border-right:none;}
+  .set-divider-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .set-divider-label{white-space:nowrap;}
+  .set-note-input{flex:1; min-width:160px; background:var(--bg); color:var(--text);
+    border:1px solid var(--line); border-radius:6px; padding:3px 8px; font-size:11px; font-weight:400;}
+  .set-note-input::placeholder{color:var(--dim);}
+  .note-flag{cursor:default; font-size:12px;}
+
+  .note-section{margin:10px 0 16px;}
+  .note-section textarea{width:100%; min-height:44px; resize:vertical; background:var(--panel2);
+    color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+    font-size:13px; font-family:inherit;}
+  .note-section textarea::placeholder{color:var(--dim);}
 
   .grid-legend{display:flex; flex-wrap:wrap; gap:12px; font-size:10px; color:var(--dim); margin:6px 0; align-items:center;}
   .legend-item{display:inline-flex; align-items:center; gap:4px;}
@@ -493,7 +505,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-11.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -888,7 +900,7 @@ function renderMatchTable(){
     </tr></thead><tbody>` +
     rows.map(r => `<tr data-id="${r.m.matchId}">
       <td>${r.date ? r.date.toLocaleString("ja-JP", {year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "―"}</td>
-      <td class="name">${r.m.nameA} vs ${r.m.nameB}</td>
+      <td class="name">${r.m.nameA} vs ${r.m.nameB}${r.m.note ? ` <span class="note-flag" title="${r.m.note.replace(/"/g,"&quot;")}">📝</span>` : ""}</td>
       <td>${r.m.mode==="doubles"?"ダブルス":"シングルス"}</td>
       <td>${r.setsText}</td>
       <td>${r.st.serviceHoldPctA==null?"―":r.st.serviceHoldPctA+"%"}</td>
@@ -969,7 +981,10 @@ function renderPointGrid(m){
       tallyA = 0; tallyB = 0;
       const finished = (m.sets||[])[setNumber-1];
       const label = finished ? `第${setNumber}セット 終了(${finished.a}-${finished.b})` : `第${setNumber}セット`;
-      divider = `<tr><td colspan="${totalCols}" class="set-divider">${label}</td></tr>`;
+      divider = `<tr><td colspan="${totalCols}" class="set-divider">` +
+        `<div class="set-divider-row"><span class="set-divider-label">${label}</span>` +
+        `<input type="text" class="set-note-input" data-set-note="${setNumber}" placeholder="このセットのメモ(例: 競り合いだった)"></div>` +
+        `</td></tr>`;
     }
     lastSet = setNumber;
     if(winnerLast==="a") tallyA++; else if(winnerLast==="b") tallyB++;
@@ -1041,7 +1056,12 @@ function showMatchDetail(matchId){
   panel.innerHTML = `
     <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
 
-    <div class="desc" style="margin:10px 0 6px;">試合の流れ</div>
+    <div class="note-section">
+      <div class="desc" style="margin:0 0 4px;">試合メモ</div>
+      <textarea id="matchNoteInput" placeholder="例: 1回戦相手はXさん・Yさんで、競り合いだった"></textarea>
+    </div>
+
+    <div class="desc" style="margin:10px 0 6px;">試合の流れ(各セットの見出し欄にもメモを付けられます)</div>
     ${renderPointGrid(m)}
 
     <div class="stat-grid">
@@ -1084,6 +1104,30 @@ function showMatchDetail(matchId){
     <button id="detailClose">閉じる</button>
   `;
   $("detailClose").addEventListener("click", ()=>{ panel.style.display="none"; });
+
+  // 試合メモ: 値をセットしてから、変更確定(フォーカスが外れた時)で保存する
+  const noteEl = $("matchNoteInput");
+  noteEl.value = m.note || "";
+  noteEl.addEventListener("change", ()=>{
+    const v = noteEl.value.trim();
+    if(v) m.note = v; else delete m.note;
+    renderMatchTable(); // 一覧側の📝マークを更新
+    saveMatchesToDriveIfLoaded();
+  });
+
+  // セットごとのメモ
+  panel.querySelectorAll("[data-set-note]").forEach(inp=>{
+    const sn = inp.dataset.setNote;
+    inp.value = (m.setNotes && m.setNotes[sn]) || "";
+    inp.addEventListener("change", ()=>{
+      const v = inp.value.trim();
+      m.setNotes = m.setNotes || {};
+      if(v) m.setNotes[sn] = v; else delete m.setNotes[sn];
+      if(Object.keys(m.setNotes).length===0) delete m.setNotes;
+      saveMatchesToDriveIfLoaded();
+    });
+  });
+
   // 試合一覧が長いと、上の方の試合を選んだ時に詳細が画面外になってしまうので、自動でスクロールする
   panel.scrollIntoView({behavior:"smooth", block:"start"});
 }
