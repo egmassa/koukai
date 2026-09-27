@@ -119,6 +119,7 @@
     text-align:left; padding:6px 10px; border-left:none; border-right:none;}
   .set-divider-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
   .set-divider-label{white-space:nowrap;}
+  .set-time{white-space:nowrap; font-size:11px; font-weight:400; color:var(--dim);}
   .set-note-input{flex:1; min-width:160px; background:var(--bg); color:var(--text);
     border:1px solid var(--line); border-radius:6px; padding:3px 8px; font-size:11px; font-weight:400;}
   .set-note-input::placeholder{color:var(--dim);}
@@ -570,7 +571,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.6"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.7"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1111,6 +1112,22 @@ function renderPointGrid(m){
     return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${tagHtml}<span class="w-letter">${scoreLabel}</span></td>`;
   }
 
+  // セットごとの開始・終了時刻(そのセットの最初と最後のポイントの時刻)
+  const setTimes = {};
+  (m.pointLog||[]).forEach(p=>{
+    if(typeof p.ts !== "number" || !isFinite(p.ts)) return;
+    const t = setTimes[p.setNumber] || (setTimes[p.setNumber] = {start:p.ts, end:p.ts});
+    if(p.ts < t.start) t.start = p.ts;
+    if(p.ts > t.end) t.end = p.ts;
+  });
+  const hm = ts => new Date(ts).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"});
+  function setTimeLabel(sn){
+    const t = setTimes[sn];
+    if(!t) return "";
+    const mins = Math.round((t.end - t.start) / 60000);
+    return `<span class="set-time">${hm(t.start)}〜${hm(t.end)}(${mins}分)</span>`;
+  }
+
   let tallyA = 0, tallyB = 0, lastSet = null;
   const rows = gameKeys.map(key=>{
     const pts = games[key].slice().sort((a,b)=>(a.pointInGame||0)-(b.pointInGame||0));
@@ -1125,7 +1142,7 @@ function renderPointGrid(m){
       const finished = (m.sets||[])[setNumber-1];
       const label = finished ? `第${setNumber}セット 終了(${finished.a}-${finished.b})` : `第${setNumber}セット`;
       divider = `<tr><td colspan="${totalCols}" class="set-divider">` +
-        `<div class="set-divider-row"><span class="set-divider-label">${label}</span>` +
+        `<div class="set-divider-row"><span class="set-divider-label">${label}</span>${setTimeLabel(setNumber)}` +
         `<input type="text" class="set-note-input" data-set-note="${setNumber}" placeholder="このセットのメモ(例: 競り合いだった)"></div>` +
         `</td></tr>`;
     }
