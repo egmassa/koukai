@@ -28,6 +28,7 @@
   .toolbar button.primary{background:var(--teal); color:#04231d; border:none; font-weight:700;}
   .toolbar input[type=file]{display:none;}
   #loadStatus{font-size:12px; color:var(--dim); align-self:center;}
+  #loadStatus.error{color:var(--danger); font-weight:700;}
 
   .filter-bar{display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:24px;
     padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:12px;}
@@ -558,7 +559,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.4"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -663,6 +664,9 @@ $("tokenSaveBtn").addEventListener("click", async ()=>{
   $("tokenPhraseInput").value = "";
   refreshTokenStatus();
   toast2("合言葉を保存しました");
+  // 保存に失敗した直後にここで直したケースを想定し、今のデータをその場で保存し直す
+  // (allMatchesには編集済みのメモがそのまま残っているので、再送するだけでよい)
+  if(loadedFromDriveFileId) saveMatchesToDriveIfLoaded();
 });
 $("tokenClearBtn").addEventListener("click", ()=>{
   clearStoredAppsScriptToken();
@@ -680,7 +684,7 @@ async function saveMatchesToDriveIfLoaded(){
   }
   const token = getStoredAppsScriptToken();
   if(!token){
-    toast2("合言葉が未設定のため保存できませんでした。🔑ボタンから設定してください");
+    toast2("合言葉が未設定のため保存できませんでした。🔑ボタンから設定してください", true);
     openTokenSettings();
     return;
   }
@@ -695,12 +699,19 @@ async function saveMatchesToDriveIfLoaded(){
     if(!data.ok) throw new Error(data.error || "不明なエラー");
     toast2(`Driveに保存しました(${data.matchCount}試合)`);
   }catch(e){
-    // 合言葉が間違っている可能性があるので、失敗時はキャッシュを消して次回また聞き直す
-    localStorage.removeItem(STATS_TOKEN_KEY);
-    toast2("Driveへの保存に失敗しました: " + e.message);
+    // 合言葉が間違っている可能性があるので、失敗時はキャッシュ(localStorageとメモリの両方)を
+    // 消して次回また聞き直す。メモリ側を消し忘れると、間違った合言葉のまま毎回黙って
+    // 失敗し続けてしまうので注意。
+    clearStoredAppsScriptToken();
+    toast2("⚠️ Driveへの保存に失敗しました: " + e.message + "(合言葉が違う可能性があります。🔑から入れ直してください)", true);
+    openTokenSettings();
   }
 }
-function toast2(msg){ $("loadStatus").textContent = msg; }
+function toast2(msg, isError){
+  const el = $("loadStatus");
+  el.textContent = msg;
+  el.className = isError ? "error" : "";
+}
 
 $("driveLoadBtn").addEventListener("click", ()=>{
   $("loadStatus").textContent = "Driveに接続中…";
