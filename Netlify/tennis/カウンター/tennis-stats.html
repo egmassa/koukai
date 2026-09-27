@@ -202,6 +202,7 @@
     <div id="tokenStatus" class="token-status"></div>
     <div class="token-settings-row">
       <input type="password" id="tokenPhraseInput" placeholder="合言葉を入力">
+      <button id="tokenToggleVisBtn" title="入力内容を表示/非表示">👁</button>
       <button id="tokenSaveBtn" class="primary">保存</button>
       <button id="tokenClearBtn">クリア</button>
       <button id="tokenSettingsCloseBtn">閉じる</button>
@@ -433,6 +434,16 @@ function listSetNumbers(match){
   return [...set].sort((a,b)=>a-b);
 }
 
+// 試合の開始時刻。記録されている最初のポイントの時刻を使う(Apps Script経由で新規作成された
+// 試合はstartedAtが実際の開始時刻ではなく初回同期時刻になっていることがあるため、より正確な
+// ポイントログの実測値を優先し、ポイントが無い試合だけstartedAtにフォールバックする)
+function matchStartTime(match){
+  const timestamps = (match.pointLog||[]).map(p=>p.ts).filter(t=>typeof t === "number" && isFinite(t));
+  if(timestamps.length) return new Date(Math.min(...timestamps));
+  if(match.startedAt) return new Date(match.startedAt);
+  return null;
+}
+
 
 
 // ダブルスの「自分 vs パートナー」分析(match.settings.pairFirstServer / selfReturnSide が
@@ -559,7 +570,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.5"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.6"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -652,10 +663,15 @@ function openTokenSettings(){
   refreshTokenStatus();
   $("tokenSettingsPanel").style.display = "block";
   $("tokenPhraseInput").value = "";
+  $("tokenPhraseInput").type = "password";
   $("tokenPhraseInput").focus();
 }
 $("tokenSettingsBtn").addEventListener("click", openTokenSettings);
 $("tokenSettingsCloseBtn").addEventListener("click", ()=>{ $("tokenSettingsPanel").style.display = "none"; });
+$("tokenToggleVisBtn").addEventListener("click", ()=>{
+  const input = $("tokenPhraseInput");
+  input.type = (input.type === "password") ? "text" : "password";
+});
 $("tokenSaveBtn").addEventListener("click", async ()=>{
   const phrase = $("tokenPhraseInput").value;
   if(!phrase){ toast2("合言葉が未入力です"); return; }
@@ -1012,16 +1028,21 @@ function renderMatchTable(){
   const rows = filteredMatches.map(m=>{
     const st = computeMatchStats(m);
     const setsText = (m.sets||[]).map(s=>`${s.a}-${s.b}`).join(" ") || "―";
-    return { m, st, setsText, date: m.updatedAt ? new Date(m.updatedAt) : null };
+    const startDate = matchStartTime(m);
+    return { m, st, setsText, date: m.updatedAt ? new Date(m.updatedAt) : null, startDate };
   }).sort((a,b)=> matchSortDir * ((a.date||0) - (b.date||0)));
+
+  const fmt = d => d ? d.toLocaleString("ja-JP", {year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "―";
 
   const table = $("matchTable");
   table.innerHTML = `<thead><tr>
-      <th data-sort="date">日付<span class="arrow">${matchSortDir>0?'▲':'▼'}</span></th>
+      <th>開始日時</th>
+      <th data-sort="date">終了日時<span class="arrow">${matchSortDir>0?'▲':'▼'}</span></th>
       <th>対戦</th><th>形式</th><th>セット</th><th>サーブキープ%</th><th></th>
     </tr></thead><tbody>` +
     rows.map(r => `<tr data-id="${r.m.matchId}">
-      <td>${r.date ? r.date.toLocaleString("ja-JP", {year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "―"}</td>
+      <td>${fmt(r.startDate)}</td>
+      <td>${fmt(r.date)}</td>
       <td class="name">${r.m.nameA} vs ${r.m.nameB}${r.m.note ? ` <span class="note-flag" title="${r.m.note.replace(/"/g,"&quot;")}">📝</span>` : ""}</td>
       <td>${r.m.mode==="doubles"?"ダブルス":"シングルス"}</td>
       <td>${r.setsText}</td>
