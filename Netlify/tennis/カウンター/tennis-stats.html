@@ -571,7 +571,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.7"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.8"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1200,7 +1200,8 @@ let currentDetailSetNumber = null;
 function showMatchDetail(matchId, setNumber){
   const m = filteredMatches.find(x=>x.matchId===matchId) || allMatches.find(x=>x.matchId===matchId);
   if(!m) return;
-  if(matchId !== currentDetailMatchId){ currentDetailMatchId = matchId; currentDetailSetNumber = null; }
+  const isNewMatch = (matchId !== currentDetailMatchId);
+  if(isNewMatch){ currentDetailMatchId = matchId; currentDetailSetNumber = null; }
   if(setNumber !== undefined) currentDetailSetNumber = setNumber;
   const scopedSet = currentDetailSetNumber;
 
@@ -1316,8 +1317,9 @@ function showMatchDetail(matchId, setNumber){
     });
   });
 
-  // 試合一覧が長いと、上の方の試合を選んだ時に詳細が画面外になってしまうので、自動でスクロールする
-  panel.scrollIntoView({behavior:"smooth", block:"start"});
+  // 試合一覧が長いと、上の方の試合を選んだ時に詳細が画面外になってしまうので、自動でスクロールする。
+  // ただしセット切り替えボタンを押しただけの再描画では、見ている位置から動かしたくないのでスクロールしない
+  if(isNewMatch) panel.scrollIntoView({behavior:"smooth", block:"start"});
 }
 </script>
 </body>
