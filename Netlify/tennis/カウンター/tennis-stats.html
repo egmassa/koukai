@@ -559,7 +559,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.4"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-27.5"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -696,15 +696,24 @@ async function saveMatchesToDriveIfLoaded(){
     });
     if(!res.ok) throw new Error(`送信エラー ${res.status}`);
     const data = await res.json();
-    if(!data.ok) throw new Error(data.error || "不明なエラー");
+    if(!data.ok){
+      const err = new Error(data.error || "不明なエラー");
+      err.isInvalidToken = (data.error === "invalid token"); // Apps Script側が合言葉不一致の時だけ返す文字列
+      throw err;
+    }
     toast2(`Driveに保存しました(${data.matchCount}試合)`);
   }catch(e){
-    // 合言葉が間違っている可能性があるので、失敗時はキャッシュ(localStorageとメモリの両方)を
-    // 消して次回また聞き直す。メモリ側を消し忘れると、間違った合言葉のまま毎回黙って
-    // 失敗し続けてしまうので注意。
-    clearStoredAppsScriptToken();
-    toast2("⚠️ Driveへの保存に失敗しました: " + e.message + "(合言葉が違う可能性があります。🔑から入れ直してください)", true);
-    openTokenSettings();
+    if(e.isInvalidToken){
+      // 合言葉そのものが間違っている場合だけ、キャッシュ(localStorageとメモリの両方)を消して
+      // 次回また聞き直す。メモリ側を消し忘れると、間違った合言葉のまま毎回黙って失敗し続けてしまう。
+      clearStoredAppsScriptToken();
+      toast2("⚠️ Driveへの保存に失敗しました: 合言葉が違います。🔑から入れ直してください", true);
+      openTokenSettings();
+    } else {
+      // レート制限や通信エラーなど、合言葉とは無関係な失敗では合言葉のキャッシュはそのまま残す
+      // (せっかく正しく設定したのに、無関係な失敗のたびに聞き直す羽目になるのを防ぐ)
+      toast2("⚠️ Driveへの保存に失敗しました: " + e.message, true);
+    }
   }
 }
 function toast2(msg, isError){
