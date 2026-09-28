@@ -89,6 +89,8 @@
     font-size:15px; font-weight:700; line-height:1.5;}
   .compare-item .row.a{color:var(--teal);}
   .compare-item .row.b{color:var(--orange);}
+  /* 自分 vs パートナーは同じチーム内の比較なので、下段も相手色(オレンジ)ではなくチーム色の濃淡にする */
+  .compare-grid.pair-cmp .row.b{color:#7fd6c5;}
   .compare-item .row .team{font-size:10px; font-weight:400; color:var(--dim); overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap; max-width:60%;}
 
@@ -105,6 +107,10 @@
   .pt-grid td.side-name.b{color:var(--orange);}
   .pt-grid td.w-mark{position:relative; padding:12px 8px 3px; min-width:26px;}
   .pt-grid .w-letter{font-weight:800; display:block;}
+  .actor-tag{position:absolute; right:2px; bottom:1px; font-size:8px; font-weight:800; line-height:1;}
+  .actor-tag.won, .actor-legend.won{color:var(--text);}
+  .actor-tag.lost, .actor-legend.lost{color:var(--danger);}
+  .actor-legend{font-size:10px;}
   .court-tag{position:absolute; top:1px; left:50%; transform:translateX(-50%); font-size:8px;
     font-weight:800; line-height:1; padding:0 3px; border-radius:3px; color:#fff;}
   .court-tag.court-deuce{background:var(--court-deuce);}
@@ -193,6 +199,7 @@
     .stat-chip .lbl, .compare-item .lbl, .compare-item .team, th, .desc, .sub, dd{color:#555 !important;}
     .pt-grid td.set-divider{background:#eee !important; color:#111 !important;}
     .pt-grid th, .pt-grid td{border-color:#ccc !important;}
+    .actor-tag.won, .actor-legend.won{color:#111 !important;}
     /* セットメモ・試合メモの入力欄は、印刷時は枠を消して普通の文字のように見せる */
     .set-note-input, .note-section textarea{border:none !important; background:transparent !important;
       color:#111 !important; padding:0 !important; resize:none !important;}
@@ -604,7 +611,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-28.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1135,6 +1142,7 @@ function renderPointGrid(m, setNumber){
   const selfReturnSide = (m.settings && m.settings.selfReturnSide) || "";
   const deuceMode = (m.settings && m.settings.deuceMode) || "ad";
 
+  const hasActorTags = gameKeys.some(k => games[k].some(p => p.pairActor));
   const maxPts = Math.max(...gameKeys.map(k=>games[k].length));
   const totalCols = maxPts + 5; // Sv + Gm + 選手名 + ポイント(maxPts) + nameA + nameB
 
@@ -1161,7 +1169,10 @@ function renderPointGrid(m, setNumber){
       const tag = pairTags[key];
       if(tag) tagHtml = `<span class="court-tag pair-inline">${tag==="self"?"自":"パ"}</span>`;
     }
-    return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${tagHtml}<span class="w-letter">${scoreLabel}</span></td>`;
+    // watchで左右を押し分けた記録があれば、右下に小さく「自/パ」を付ける
+    // (上段=自チームの得点なら取った人、下段=相手の得点なら失った人)
+    const actorHtml = p.pairActor ? `<span class="actor-tag ${side==="a"?"won":"lost"}">${p.pairActor==="self"?"自":"パ"}</span>` : "";
+    return `<td class="w-mark ${side} ${wonByServer?"srv-win":"ret-win"}">${tagHtml}<span class="w-letter">${scoreLabel}</span>${actorHtml}</td>`;
   }
 
   // セットごとの開始・終了時刻(そのセットの最初と最後のポイントの時刻)
@@ -1248,6 +1259,7 @@ function renderPointGrid(m, setNumber){
       <span class="legend-item"><span class="court-tag court-deuce legend-badge">D</span>デュース側</span>
       <span class="legend-item"><span class="court-tag court-ad legend-badge">A</span>アド側</span>
       <span class="legend-item"><span class="deuce-flag legend-badge">D</span>デュースまでもつれたゲーム</span>
+      ${hasActorTags ? `<span class="legend-item">右下の小さな<b class="actor-legend won">自/パ</b>=取った人(${m.nameA}の段)・<b class="actor-legend lost">自/パ</b>=失った人(${m.nameB}の段)</span>` : ""}
       ${hasPairTags ? `<span class="legend-item">Sv欄の「自/パ」=サーブが自分/パートナーどちらか</span>` : ""}
       ${selfReturnSide ? `<span class="legend-item legend-strong">自分のリターン: ${sideLabel[selfReturnSide]||selfReturnSide}(パートナーは${sideLabel[selfReturnSide==="deuce"?"ad":"deuce"]})</span>` : ""}
     </div>`;
@@ -1265,8 +1277,23 @@ function compareItem(label, nameA, valA, nameB, valB){
     <div class="row b"><span class="team">${nameB}</span><span class="v">${valB}</span></div>
   </div>`;
 }
-function compareGrid(items){
-  return `<div class="stat-grid compare-grid">${items.join("")}</div>`;
+function compareGrid(items, extraClass){
+  return `<div class="stat-grid compare-grid${extraClass?" "+extraClass:""}">${items.join("")}</div>`;
+}
+
+// watchで左右を押し分けて記録した「自チームの誰がそのポイントに関わったか」(pointLog.pairActor)の集計。
+// side==="a"(自チームの得点)なら取った人、side==="b"(相手の得点)なら失った人。
+function computeActorStats(match, setNumber){
+  const pts = (match.pointLog||[]).filter(p => setNumber==null || p.setNumber === setNumber);
+  const r = { hasData:false, selfWon:0, selfLost:0, partnerWon:0, partnerLost:0, unassigned:0 };
+  if(!(match.pointLog||[]).some(p => p.pairActor)) return r;
+  r.hasData = true;
+  pts.forEach(p=>{
+    if(p.pairActor === "self"){ if(p.side==="a") r.selfWon++; else r.selfLost++; }
+    else if(p.pairActor === "partner"){ if(p.side==="a") r.partnerWon++; else r.partnerLost++; }
+    else r.unassigned++;
+  });
+  return r;
 }
 
 // 詳細パネルで選んでいるセット(nullなら試合全体)。別の試合を開いたらリセットする
@@ -1283,6 +1310,16 @@ function showMatchDetail(matchId, setNumber){
 
   const st = computeMatchStats(m, scopedSet);
   const pair = computePairStats(m, scopedSet);
+  const actor = computeActorStats(m, scopedSet);
+  const sgn = n => (n>0?"+":"") + n;
+  const actorHtml = actor.hasData ? `
+    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(誰が取った/失ったか・watchで左右を押し分けた記録。どちらでもない: ${actor.unassigned}ポイント)</div>
+    ${compareGrid([
+      compareItem("取ったポイント", "自分", actor.selfWon, "パートナー", actor.partnerWon),
+      compareItem("失ったポイント", "自分", actor.selfLost, "パートナー", actor.partnerLost),
+      compareItem("差し引き(取った−失った)", "自分", sgn(actor.selfWon-actor.selfLost), "パートナー", sgn(actor.partnerWon-actor.partnerLost)),
+    ], "pair-cmp")}
+  ` : "";
   const panel = $("detailPanel");
   panel.style.display = "block";
 
@@ -1330,6 +1367,7 @@ function showMatchDetail(matchId, setNumber){
     ])}
 
     ${pairHtml}
+    ${actorHtml}
 
     <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
     ${compareGrid([

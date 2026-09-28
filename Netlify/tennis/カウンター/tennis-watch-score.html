@@ -90,6 +90,20 @@
   .tap-btn.a{background:var(--teal);}
   .tap-btn.b{background:var(--orange); color:#2a1200;}
   .tap-btn:active{filter:brightness(0.85);}
+  /* ダブルス時は各ボタンを左(パートナー)・中央(どちらでもない)・右(自分)の3ゾーンに分ける。
+     上(自チーム)の左右=誰が取ったか、下(相手)の左右=誰が失ったか */
+  .tap-btn{position:relative; overflow:hidden;}
+  .zone-lbl, .zone-flash{display:none;}
+  .tap-row.pair-split .tap-btn{background-image:linear-gradient(to right,
+    transparent calc(40% - 1px), rgba(0,0,0,0.28) calc(40% - 1px), rgba(0,0,0,0.28) 40%, transparent 40%,
+    transparent 60%, rgba(0,0,0,0.28) 60%, rgba(0,0,0,0.28) calc(60% + 1px), transparent calc(60% + 1px));}
+  .tap-row.pair-split .zone-lbl{display:block; position:absolute; top:3px; font-size:10px; font-weight:800;
+    opacity:0.55; pointer-events:none;}
+  .zone-lbl.l{left:8px;} .zone-lbl.r{right:8px;}
+  .tap-row.pair-split .zone-flash{display:block; position:absolute; top:0; bottom:0; background:rgba(255,255,255,0);
+    pointer-events:none;}
+  .zone-flash.on{animation:zoneFlash 0.45s ease-out;}
+  @keyframes zoneFlash{from{background:rgba(255,255,255,0.55);} to{background:rgba(255,255,255,0);}}
   .tb-name{font-size:12px; font-weight:700; opacity:0.9; max-width:90%; overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap;}
   .tb-row{display:flex; align-items:center; gap:8px; margin:2px 0; width:100%;}
@@ -97,7 +111,12 @@
   .tb-box{display:flex; flex-direction:column; align-items:center; justify-content:center;
     border-radius:12px; padding:4px 6px; flex:1; min-width:0;}
   .tb-box-label{font-size:9px; opacity:0.85; line-height:1.4; font-weight:700;}
-  .tb-box-point{background:rgba(255,255,255,0.32);}
+  .tb-box-point{background:rgba(255,255,255,0.32); position:relative;}
+  /* ダブルスで直前の1点を左右どちらで押したかの確認用(自=自分、パ=パートナー)。
+     上のボタンなら取った人、下のボタンなら失った人 */
+  .tb-actor{position:absolute; top:1px; right:3px; font-size:11px; font-weight:800; line-height:1;
+    padding:1px 3px; border-radius:4px; background:rgba(0,0,0,0.28); color:#fff;}
+  .tb-actor:empty{display:none;}
   .tb-box-game{background:rgba(0,0,0,0.4);}
   .tb-box-game .tb-box-label, .tb-box-game .tb-game{color:#fff;}
   .tb-point{font-size:52px; font-weight:800; line-height:1;}
@@ -267,6 +286,7 @@
 
     <div class="tap-row">
       <button class="tap-btn a" id="tapA">
+        <span class="zone-lbl l">パ</span><span class="zone-lbl r">自</span><span class="zone-flash"></span>
         <span class="tb-name" id="labelA">じぶん</span>
         <span class="tb-row">
           <span class="tb-serve-col"><span class="tb-serve-icon" id="serveIconA"></span></span>
@@ -274,6 +294,7 @@
             <span class="tb-box tb-box-point">
               <span class="tb-box-label">ポイント</span>
               <span class="tb-point" id="ptA">0</span>
+              <span class="tb-actor" id="actorA"></span>
             </span>
             <span class="tb-box tb-box-game">
               <span class="tb-box-label">ゲーム</span>
@@ -285,6 +306,7 @@
         <span class="tb-sub" id="subA">セット0</span>
       </button>
       <button class="tap-btn b" id="tapB">
+        <span class="zone-lbl l">パ</span><span class="zone-lbl r">自</span><span class="zone-flash"></span>
         <span class="tb-name" id="labelB">あいて</span>
         <span class="tb-row">
           <span class="tb-serve-col"><span class="tb-serve-icon" id="serveIconB"></span></span>
@@ -292,6 +314,7 @@
             <span class="tb-box tb-box-point">
               <span class="tb-box-label">ポイント</span>
               <span class="tb-point" id="ptB">0</span>
+              <span class="tb-actor" id="actorB"></span>
             </span>
             <span class="tb-box tb-box-game">
               <span class="tb-box-label">ゲーム</span>
@@ -651,7 +674,8 @@ function advanceTeamAServeTurn(){
   }
 }
 
-function addPoint(side){
+function addPoint(side, pairActor){
+  const actor = (state.mode === "doubles") ? (pairActor || null) : null;
   pushHistory();
   state.serverCorrectionBackup = null; // 新しいポイントが入ったら、直前のサーブ修正の取り消しは対象外にする
   lastActivityTime = Date.now();
@@ -659,16 +683,16 @@ function addPoint(side){
   const setNumber = state.sets.length + 1;
 
   if(state.tiebreak){
-    addTiebreakPoint(side, setNumber);
+    addTiebreakPoint(side, setNumber, actor);
   } else {
-    addNormalPoint(side, setNumber);
+    addNormalPoint(side, setNumber, actor);
   }
 
   render();
   persist();
 }
 
-function addNormalPoint(side, setNumber){
+function addNormalPoint(side, setNumber, pairActor){
   const server = state.server;
   const gameNumber = state.games.a + state.games.b + 1;
 
@@ -682,7 +706,9 @@ function addNormalPoint(side, setNumber){
     server, serverName: (server==="a" ? state.nameA : state.nameB),
     scoreA: pointText(state.points.a, state.points.b),
     scoreB: pointText(state.points.b, state.points.a),
-    pairServer: (server==="a") ? state.pairServeTurn : null
+    pairServer: (server==="a") ? state.pairServeTurn : null,
+    // 自チームの誰がこのポイントに関わったか(side==="a"なら取った人、"b"なら失った人)。不明ならnull
+    pairActor: pairActor || null
   });
   if(state.pointLog.length > 2000) state.pointLog.shift(); // 上限を設けて肥大化を防ぐ
 
@@ -692,7 +718,7 @@ function addNormalPoint(side, setNumber){
 
 // 本タイブレーク(7点先取・2点差)中のポイント処理。
 // サーブは1本目の後に交代し、以降は2本ごとに交代する(実際のテニスのルール通り)。
-function addTiebreakPoint(side, setNumber){
+function addTiebreakPoint(side, setNumber, pairActor){
   const server = state.tiebreak.server;
   const gameNumber = state.games.a + state.games.b + 1; // タイブレークも「次のゲーム」として記録する
 
@@ -706,7 +732,8 @@ function addTiebreakPoint(side, setNumber){
     server, serverName: (server==="a" ? state.nameA : state.nameB),
     scoreA: String(state.tiebreak.a), scoreB: String(state.tiebreak.b),
     tiebreak: true,
-    pairServer: (server==="a") ? state.pairServeTurn : null // このポイントを自チームが誰(自分/パートナー)がサーブしたかの記録
+    pairServer: (server==="a") ? state.pairServeTurn : null, // このポイントを自チームが誰(自分/パートナー)がサーブしたかの記録
+    pairActor: pairActor || null
   });
   if(state.pointLog.length > 2000) state.pointLog.shift();
 
@@ -825,7 +852,7 @@ function pointText(mine, other){
 // 実際に描画されてしまい違和感があったため、この方式にしている。
 const DOUBLE_TAP_MS = 300;
 let pendingTap = { a: null, b: null };
-function handleTap(side){
+function handleTap(side, pairActor){
   if(pendingTap[side]){
     clearTimeout(pendingTap[side]);
     pendingTap[side] = null;
@@ -834,11 +861,42 @@ function handleTap(side){
   }
   pendingTap[side] = setTimeout(()=>{
     pendingTap[side] = null;
-    addPoint(side);
+    addPoint(side, pairActor);
   }, DOUBLE_TAP_MS);
 }
-$("tapA").addEventListener("click", ()=>handleTap("a"));
-$("tapB").addEventListener("click", ()=>handleTap("b"));
+
+// ダブルス時: ボタンのどこを押したかで、自チームの誰がそのポイントに関わったかを記録する。
+// 左40%=パートナー、右40%=自分、中央20%=どちらでもない/不明。
+// 上(自チームの得点)なら「誰が取ったか」、下(相手の得点)なら「誰が失ったか」の意味になる。
+const PAIR_ZONE_LEFT = 0.4, PAIR_ZONE_RIGHT = 0.6;
+function pairZoneOf(btn, e){
+  if(!state || state.mode !== "doubles") return null;
+  if(e.detail === 0) return null; // キーボード操作などでタップ位置が無い場合
+  const r = btn.getBoundingClientRect();
+  if(!r.width) return null;
+  const x = (e.clientX - r.left) / r.width;
+  if(x < PAIR_ZONE_LEFT) return "partner";
+  if(x > PAIR_ZONE_RIGHT) return "self";
+  return null;
+}
+function flashPairZone(btn, actor){
+  if(!state || state.mode !== "doubles") return;
+  const f = btn.querySelector(".zone-flash");
+  if(!f) return;
+  f.style.left = actor==="partner" ? "0" : (actor==="self" ? "60%" : "40%");
+  f.style.width = actor ? "40%" : "20%";
+  f.classList.remove("on");
+  void f.offsetWidth; // アニメーションを毎回最初から再生させる
+  f.classList.add("on");
+}
+["a","b"].forEach(side=>{
+  const btn = $(side==="a" ? "tapA" : "tapB");
+  btn.addEventListener("click", (e)=>{
+    const actor = pairZoneOf(btn, e);
+    flashPairZone(btn, actor);
+    handleTap(side, actor);
+  });
+});
 
 // 自チームがサーブ中で自分/パートナーのバッジが出ている時に長押しすると、
 // その場で自分↔パートナー↔未設定を切り替える(同じセット内は遡って正しく直す)。
@@ -1032,23 +1090,36 @@ function attachNestedLongPress(el, callback){
   const MOVE_CANCEL_PX = 15;
   let timer = null;
   let startX = 0, startY = 0;
+  let fired = false, moved = false;
   el.addEventListener("pointerdown", (e)=>{
     e.stopPropagation();
+    fired = false; moved = false;
     startX = e.clientX; startY = e.clientY;
     timer = setTimeout(()=>{
+      fired = true;
       if(navigator.vibrate) navigator.vibrate(30);
       callback();
     }, LONG_PRESS_MS);
   });
   el.addEventListener("pointermove", (e)=>{
     e.stopPropagation();
-    if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX) clearTimeout(timer);
+    if(Math.abs(e.clientX-startX) > MOVE_CANCEL_PX || Math.abs(e.clientY-startY) > MOVE_CANCEL_PX){
+      moved = true;
+      clearTimeout(timer);
+    }
   });
   const cancelTimer = (e)=>{ e.stopPropagation(); clearTimeout(timer); };
   el.addEventListener("pointerup", cancelTimer);
   el.addEventListener("pointerleave", cancelTimer);
   el.addEventListener("pointercancel", cancelTimer);
-  el.addEventListener("click", (e)=>{ e.stopPropagation(); e.preventDefault(); }, true);
+  // 長押しが成立した時・ドラッグだった時だけ、親(得点ボタン)へのクリックを止める。
+  // 普通の短いタップは親に通し、ダブルスの「右=自分」ゾーンとして得点できるようにする
+  el.addEventListener("click", (e)=>{
+    if(fired || moved){
+      e.stopPropagation(); e.preventDefault();
+      fired = false; moved = false;
+    }
+  }, true);
 }
 attachNestedLongPress($("returnSideIcon"), cycleSelfReturnSide);
 
@@ -1109,6 +1180,18 @@ function performUndo(){
     toast("サーブ設定の変更を取り消しました");
     return;
   }
+  const lastSnap = state.history[state.history.length-1];
+  if(!lastSnap) return;
+  // セットを決めた1点を取り消す(=前のセットに戻る)時は、うっかり戻してしまわないよう確認を挟む。
+  // スナップショット時点のセット数が今より少なければ、それは前のセットの状態
+  if((JSON.parse(lastSnap).sets||[]).length < (state.sets||[]).length){
+    customConfirm("前のセットに戻りますか？\n(セットを決めた1点を取り消します)", restoreLastSnapshot);
+    return;
+  }
+  restoreLastSnapshot();
+}
+
+function restoreLastSnapshot(){
   const snap = state.history.pop();
   if(!snap) return;
   const s = JSON.parse(snap);
@@ -1168,6 +1251,7 @@ function render(){
   chipDeuce.textContent = DEUCE_LABELS[state.settings.deuceMode] || state.settings.deuceMode;
   [chipGames, chipFinish, chipDeuce].forEach(el => el.classList.toggle("longpress-hint", editableRules));
   const returnIconEl = $("returnSideIcon");
+  document.querySelector(".tap-row").classList.toggle("pair-split", state.mode==="doubles");
   if(state.mode==="doubles"){
     const v = state.settings.selfReturnSide;
     returnIconEl.innerHTML =
@@ -1198,6 +1282,11 @@ function render(){
 
   $("ptA").textContent = state.tiebreak ? state.tiebreak.a : pointText(state.points.a, state.points.b);
   $("ptB").textContent = state.tiebreak ? state.tiebreak.b : pointText(state.points.b, state.points.a);
+  // 直前の1点を左右どちらで押したか(押し間違い確認用)。その点を取った側のボタンのポイント欄に出す
+  const lastPt = (state.mode==="doubles" && state.pointLog.length) ? state.pointLog[state.pointLog.length-1] : null;
+  const actorLabel = (lastPt && lastPt.pairActor) ? (lastPt.pairActor==="self" ? "自" : "パ") : "";
+  $("actorA").textContent = (lastPt && lastPt.side==="a") ? actorLabel : "";
+  $("actorB").textContent = (lastPt && lastPt.side==="b") ? actorLabel : "";
 
   $("gA").textContent = state.games.a;
   $("gB").textContent = state.games.b;
@@ -1270,7 +1359,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-12.32"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.4"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
@@ -1605,8 +1694,11 @@ function collectDiff(checkpoint){
     });
     (m.sets||[]).forEach((s,i)=> sr.push([idx, i+1, s.a, s.b]));
     newPts.forEach(p=>{
+      // 9番目以降は後から追加した項目(古いApps Scriptは無視するだけなので互換性あり):
+      // [9]タイブレークか [10]自チームのサーブ担当(自分/パートナー) [11]自チームの誰が取った/失ったか
       allPts.push([idx, p.ts, p.setNumber, p.gameNumber, p.pointInGame,
-        p.side, p.server, p.scoreA, p.scoreB]);
+        p.side, p.server, p.scoreA, p.scoreB,
+        p.tiebreak ? 1 : 0, p.pairServer || null, p.pairActor || null]);
       if(p.ts > maxTs) maxTs = p.ts;
     });
   });
