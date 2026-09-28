@@ -156,6 +156,9 @@
 
   #detailClose{margin-top:8px; padding:6px 14px; border-radius:10px; border:1px solid var(--line);
     background:transparent; color:var(--dim); font-size:12px; cursor:pointer;}
+  .detail-pdf-btn{display:block; margin:10px 0; padding:6px 14px; border-radius:8px;
+    border:1px solid var(--teal); background:transparent; color:var(--teal); font-size:12px;
+    font-weight:700; cursor:pointer;}
 
   .empty{font-size:13px; color:var(--dim); padding:24px; text-align:center;
     background:var(--panel); border:1px dashed var(--line); border-radius:12px;}
@@ -168,17 +171,29 @@
   @media print{
     /* PDF出力(ブラウザの印刷機能)向け: 操作用のUIは隠し、紙映えする明るい配色に切り替える */
     .toolbar, #pdfExportBtn, #filterResetBtn, #driveLoadBtn, .del-btn, #detailClose, .version-tag,
-    #tokenSettingsPanel{display:none !important;}
+    #tokenSettingsPanel, .detail-pdf-btn, .set-selector{display:none !important;}
     body{background:#fff; color:#111;}
     .stat-chip, .table-wrap, .grid-wrap, #detailPanel, .glossary, .empty{
       background:#fff !important; border-color:#ccc !important;}
     .stat-chip .lbl, th, .desc, .sub, dd{color:#555 !important;}
     .pt-grid td.set-divider{background:#eee !important; color:#111 !important;}
+    .pt-grid th, .pt-grid td{border-color:#ccc !important;}
+    /* セットメモ・試合メモの入力欄は、印刷時は枠を消して普通の文字のように見せる */
+    .set-note-input, .note-section textarea{border:none !important; background:transparent !important;
+      color:#111 !important; padding:0 !important; resize:none !important;}
     section{page-break-inside:avoid;}
     .match-table-wrap{max-height:none !important; overflow:visible !important;}
     /* thead(table-header-group)はページをまたぐたびに自動で見出し行を繰り返す仕様のため、
        試合一覧の途中に見出しが挟まって見えてしまっていた。1回だけ表示されるようにする */
     #matchTable thead{display:table-row-group;}
+
+    /* 「この試合(セット)をPDF出力」ボタンを押した時だけ、詳細パネル以外を全て隠す
+       (bodyに一時的にprint-detail-onlyクラスを付けて実現。printDetailOnly()参照) */
+    body.print-detail-only #content > section:not(#matchListSection),
+    body.print-detail-only .version-tag{display:none !important;}
+    body.print-detail-only #matchListSection > h2,
+    body.print-detail-only #matchListSection > .desc,
+    body.print-detail-only .match-table-wrap{display:none !important;}
   }
 </style>
 </head>
@@ -261,7 +276,7 @@
       <div class="table-wrap"><table id="opponentTable"></table></div>
     </section>
 
-    <section>
+    <section id="matchListSection">
       <h2>試合一覧</h2>
       <div class="desc">日付順。行をタップすると詳細が見られます</div>
       <div class="table-wrap match-table-wrap"><table id="matchTable"></table></div>
@@ -571,7 +586,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-27.8"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-28.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -851,6 +866,22 @@ $("filterResetBtn").addEventListener("click", ()=>{
   applyFilters();
 });
 $("pdfExportBtn").addEventListener("click", ()=> window.print());
+
+// 詳細パネル内の「この試合(セット)をPDF出力」ボタン用。試合一覧・グラフなど他のセクションを
+// 一時的に隠した状態で印刷ダイアログを開き、印刷が終わったら(afterprint)元に戻す。
+function printDetailOnly(){
+  document.body.classList.add("print-detail-only");
+  let done = false;
+  const restore = ()=>{
+    if(done) return;
+    done = true;
+    document.body.classList.remove("print-detail-only");
+  };
+  window.addEventListener("afterprint", restore, {once:true});
+  window.print();
+  // afterprintが発火しない環境向けの保険(通常はafterprintで先に戻る)
+  setTimeout(restore, 5000);
+}
 $("versionTag").textContent = `v${APP_VERSION}`;
 
 function deleteMatch(matchId){
@@ -1066,10 +1097,12 @@ function renderMatchTable(){
 }
 
 // 「どんな流れだったか」を1試合分、ゲーム×ポイントのグリッドで表示する
-// (watch側のスマホ向け履歴表示と同じ形式)
-function renderPointGrid(m){
+// (watch側のスマホ向け履歴表示と同じ形式)。setNumberを渡すと、そのセットのゲームだけに絞り込む
+// (詳細パネルでセットを選んでいる時の表示・PDF出力の両方で使う)。
+function renderPointGrid(m, setNumber){
   const games = {};
   (m.pointLog||[]).forEach(p=>{
+    if(setNumber!=null && p.setNumber!==setNumber) return;
     const key = p.setNumber + "-" + p.gameNumber;
     (games[key] = games[key] || []).push(p);
   });
@@ -1238,8 +1271,11 @@ function showMatchDetail(matchId, setNumber){
       <textarea id="matchNoteInput" placeholder="例: 1回戦相手はXさん・Yさんで、競り合いだった"></textarea>
     </div>
 
-    <div class="desc" style="margin:10px 0 6px;">試合の流れ(各セットの見出し欄にもメモを付けられます)</div>
-    ${renderPointGrid(m)}
+    <div class="desc" style="margin:10px 0 6px;">
+      試合の流れ${scopedSet==null ? "(各セットの見出し欄にもメモを付けられます)" : `(第${scopedSet}セットのみ表示中)`}
+    </div>
+    <div id="pointGridArea">${renderPointGrid(m, scopedSet)}</div>
+    <button id="detailPdfBtn" class="detail-pdf-btn">📄 ${scopedSet==null ? "この試合をPDF出力" : `第${scopedSet}セットをPDF出力`}</button>
 
     ${setSelectorHtml}
     <div class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
@@ -1316,6 +1352,11 @@ function showMatchDetail(matchId, setNumber){
       showMatchDetail(matchId, v==="all" ? null : Number(v));
     });
   });
+
+  // このセット(または全セット)の「試合の流れ」だけをきれいにPDF出力する。
+  // 通常のPDF出力ボタン(#pdfExportBtn)はページ全体向けなので、こちらは詳細パネルの
+  // 中身だけが残るよう一時的にbodyへクラスを付け、印刷後(afterprint)に外す。
+  $("detailPdfBtn").addEventListener("click", printDetailOnly);
 
   // 試合一覧が長いと、上の方の試合を選んだ時に詳細が画面外になってしまうので、自動でスクロールする。
   // ただしセット切り替えボタンを押しただけの再描画では、見ている位置から動かしたくないのでスクロールしない
