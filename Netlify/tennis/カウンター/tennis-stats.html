@@ -190,10 +190,13 @@
     /* 「この試合(セット)をPDF出力」ボタンを押した時だけ、詳細パネル以外を全て隠す
        (bodyに一時的にprint-detail-onlyクラスを付けて実現。printDetailOnly()参照) */
     body.print-detail-only #content > section:not(#matchListSection),
-    body.print-detail-only .version-tag{display:none !important;}
+    body.print-detail-only .version-tag, body.print-detail-only #filterBar{display:none !important;}
     body.print-detail-only #matchListSection > h2,
     body.print-detail-only #matchListSection > .desc,
     body.print-detail-only .match-table-wrap{display:none !important;}
+    /* 「試合の流れ」と「スタッツ」が同じページに混在すると読みにくいため、スタッツ部分は
+       改ページして次のページから始まるようにする */
+    body.print-detail-only #statsSectionStart{page-break-before:always;}
   }
 </style>
 </head>
@@ -586,7 +589,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-28.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-28.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1278,7 +1281,7 @@ function showMatchDetail(matchId, setNumber){
     <button id="detailPdfBtn" class="detail-pdf-btn">📄 ${scopedSet==null ? "この試合をPDF出力" : `第${scopedSet}セットをPDF出力`}</button>
 
     ${setSelectorHtml}
-    <div class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
+    <div id="statsSectionStart" class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
     <div class="stat-grid">
       <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameA})</div><div class="val a">${st.totalPointsWonA}</div></div>
       <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameB})</div><div class="val b">${st.totalPointsWonB}</div></div>
