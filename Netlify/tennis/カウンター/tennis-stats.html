@@ -82,6 +82,16 @@
   .stat-chip .val{font-size:18px; font-weight:700;}
   .stat-chip .val.a{color:var(--teal);} .stat-chip .val.b{color:var(--orange);}
 
+  /* 自チーム/相手チームを対で表記する項目は、項目名を共通にして値を縦に並べ、比較しやすくする */
+  .compare-item{background:var(--panel2); border-radius:10px; padding:8px 10px;}
+  .compare-item .lbl{font-size:10px; color:var(--dim); margin-bottom:4px;}
+  .compare-item .row{display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+    font-size:15px; font-weight:700; line-height:1.5;}
+  .compare-item .row.a{color:var(--teal);}
+  .compare-item .row.b{color:var(--orange);}
+  .compare-item .row .team{font-size:10px; font-weight:400; color:var(--dim); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; max-width:60%;}
+
   .grid-wrap{width:100%; overflow-x:auto;}
   .pt-grid{border-collapse:collapse; font-size:12px; margin-top:6px;}
   .pt-grid th, .pt-grid td{border:1px solid var(--line); padding:4px 8px; text-align:center; white-space:nowrap;}
@@ -117,6 +127,11 @@
   .pt-grid td.tally-b{color:var(--orange); font-weight:800;}
   .pt-grid td.set-divider{background:var(--panel2); color:var(--text); font-weight:700;
     text-align:left; padding:6px 10px; border-left:none; border-right:none;}
+  /* デュースまでもつれたゲームは、行全体を薄い色で塗ってGm欄にDバッジを付け、流れの中で目立たせる */
+  .pt-grid tr.deuce-game td{background:rgba(240,193,58,0.12);}
+  .pt-grid tr.deuce-game td.set-divider{background:var(--panel2);}
+  .deuce-flag{display:inline-block; margin-left:3px; font-size:9px; font-weight:800; padding:0 4px;
+    border-radius:3px; background:#f0c13a; color:#241c04; vertical-align:middle;}
   .set-divider-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
   .set-divider-label{white-space:nowrap;}
   .set-time{white-space:nowrap; font-size:11px; font-weight:400; color:var(--dim);}
@@ -173,9 +188,9 @@
     .toolbar, #pdfExportBtn, #filterResetBtn, #driveLoadBtn, .del-btn, #detailClose, .version-tag,
     #tokenSettingsPanel, .detail-pdf-btn, .set-selector{display:none !important;}
     body{background:#fff; color:#111;}
-    .stat-chip, .table-wrap, .grid-wrap, #detailPanel, .glossary, .empty{
+    .stat-chip, .compare-item, .table-wrap, .grid-wrap, #detailPanel, .glossary, .empty{
       background:#fff !important; border-color:#ccc !important;}
-    .stat-chip .lbl, th, .desc, .sub, dd{color:#555 !important;}
+    .stat-chip .lbl, .compare-item .lbl, .compare-item .team, th, .desc, .sub, dd{color:#555 !important;}
     .pt-grid td.set-divider{background:#eee !important; color:#111 !important;}
     .pt-grid th, .pt-grid td{border-color:#ccc !important;}
     /* セットメモ・試合メモの入力欄は、印刷時は枠を消して普通の文字のように見せる */
@@ -589,7 +604,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-28.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-28.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DATA_FILENAME = "tennis-watch-score-data.json";
@@ -1118,6 +1133,7 @@ function renderPointGrid(m, setNumber){
   const pairTags = computePairPointTags(m); // 自分/パートナーのタグ(ペア設定がある試合のみ中身が入る)
   const hasPairTags = Object.keys(pairTags).length > 0;
   const selfReturnSide = (m.settings && m.settings.selfReturnSide) || "";
+  const deuceMode = (m.settings && m.settings.deuceMode) || "ad";
 
   const maxPts = Math.max(...gameKeys.map(k=>games[k].length));
   const totalCols = maxPts + 5; // Sv + Gm + 選手名 + ポイント(maxPts) + nameA + nameB
@@ -1185,6 +1201,17 @@ function renderPointGrid(m, setNumber){
     lastSet = setNumber;
     if(winnerLast==="a") tallyA++; else if(winnerLast==="b") tallyB++;
 
+    // デュースまでもつれたゲームは、流れの中で目立たせる(行の背景色+Gm欄にDバッジ)
+    let deuceRowClass = "";
+    let deuceFlagHtml = "";
+    if(!isTiebreak && pts.length){
+      const { reachedDeuce } = replayGame(pts.map(p=>({side:p.side})), server, deuceMode);
+      if(reachedDeuce){
+        deuceRowClass = " deuce-game";
+        deuceFlagHtml = `<span class="deuce-flag" title="デュースまでもつれたゲーム">D</span>`;
+      }
+    }
+
     let svLabel;
     if(isTiebreak){
       // タイブレークは1行の中でサーブが自チーム/相手・自分/パートナーと何度も入れ替わるので、
@@ -1206,12 +1233,12 @@ function renderPointGrid(m, setNumber){
     const rowB = pts.map(p=>cellFor(p,"b",isTiebreak)).join("");
 
     return divider +
-      `<tr><td rowspan="2" class="sv ${isTiebreak?"":server}">${svLabel}</td>` +
-      `<td rowspan="2">${key.split("-")[1]}</td>` +
+      `<tr class="${deuceRowClass.trim()}"><td rowspan="2" class="sv ${isTiebreak?"":server}">${svLabel}</td>` +
+      `<td rowspan="2">${key.split("-")[1]}${deuceFlagHtml}</td>` +
       `<td class="side-name a">${m.nameA}</td>${rowA}${fillerA}` +
       `<td rowspan="2" class="tally-a">${winnerLast==="a"?tallyA:""}</td>` +
       `<td rowspan="2" class="tally-b">${winnerLast==="b"?tallyB:""}</td></tr>` +
-      `<tr><td class="side-name b">${m.nameB}</td>${rowB}${fillerB}</tr>`;
+      `<tr class="${deuceRowClass.trim()}"><td class="side-name b">${m.nameB}</td>${rowB}${fillerB}</tr>`;
   }).join("");
 
   const sideLabel = { deuce:"デュース側", ad:"アド側" };
@@ -1220,6 +1247,7 @@ function renderPointGrid(m, setNumber){
       <span class="legend-item"><span class="w-mark a ret-win legend-sample"><span class="w-letter">40</span></span>枠のみ=リターン側が獲得(ブレーク)</span>
       <span class="legend-item"><span class="court-tag court-deuce legend-badge">D</span>デュース側</span>
       <span class="legend-item"><span class="court-tag court-ad legend-badge">A</span>アド側</span>
+      <span class="legend-item"><span class="deuce-flag legend-badge">D</span>デュースまでもつれたゲーム</span>
       ${hasPairTags ? `<span class="legend-item">Sv欄の「自/パ」=サーブが自分/パートナーどちらか</span>` : ""}
       ${selfReturnSide ? `<span class="legend-item legend-strong">自分のリターン: ${sideLabel[selfReturnSide]||selfReturnSide}(パートナーは${sideLabel[selfReturnSide==="deuce"?"ad":"deuce"]})</span>` : ""}
     </div>`;
@@ -1227,6 +1255,18 @@ function renderPointGrid(m, setNumber){
   return legend + `<div class="grid-wrap"><table class="pt-grid"><thead><tr>` +
     `<th>Sv</th><th>Gm</th><th></th><th colspan="${maxPts}">ポイント</th><th>${m.nameA}</th><th>${m.nameB}</th>` +
     `</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// 自チーム/相手チームを対で表記する項目は、項目名を1つにまとめ、値を縦に並べて比較しやすくする
+function compareItem(label, nameA, valA, nameB, valB){
+  return `<div class="compare-item">
+    <div class="lbl">${label}</div>
+    <div class="row a"><span class="team">${nameA}</span><span class="v">${valA}</span></div>
+    <div class="row b"><span class="team">${nameB}</span><span class="v">${valB}</span></div>
+  </div>`;
+}
+function compareGrid(items){
+  return `<div class="stat-grid compare-grid">${items.join("")}</div>`;
 }
 
 // 詳細パネルで選んでいるセット(nullなら試合全体)。別の試合を開いたらリセットする
@@ -1282,44 +1322,33 @@ function showMatchDetail(matchId, setNumber){
 
     ${setSelectorHtml}
     <div id="statsSectionStart" class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
-    <div class="stat-grid">
-      <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameA})</div><div class="val a">${st.totalPointsWonA}</div></div>
-      <div class="stat-chip"><div class="lbl">取ったポイント数(${m.nameB})</div><div class="val b">${st.totalPointsWonB}</div></div>
-      <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameA})</div><div class="val a">${st.serviceHoldPctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サービスキープ率(${m.nameB})</div><div class="val b">${st.serviceHoldPctB??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率(${m.nameA})</div><div class="val a">${st.serveWinPctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率(${m.nameB})</div><div class="val b">${st.serveWinPctB??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameA})</div><div class="val a">${st.returnWinPctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率(${m.nameB})</div><div class="val b">${st.returnWinPctB??"―"}%</div></div>
-    </div>
+    ${compareGrid([
+      compareItem("取ったポイント数", m.nameA, st.totalPointsWonA, m.nameB, st.totalPointsWonB),
+      compareItem("サービスキープ率", m.nameA, (st.serviceHoldPctA??"―")+"%", m.nameB, (st.serviceHoldPctB??"―")+"%"),
+      compareItem("サーブ勝率", m.nameA, (st.serveWinPctA??"―")+"%", m.nameB, (st.serveWinPctB??"―")+"%"),
+      compareItem("リターン勝率", m.nameA, (st.returnWinPctA??"―")+"%", m.nameB, (st.returnWinPctB??"―")+"%"),
+    ])}
 
     ${pairHtml}
 
     <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
-    <div class="stat-grid">
-      <div class="stat-chip"><div class="lbl">BPセーブ率(${m.nameA}のサーブ時)</div><div class="val a">${st.breakPointSavePctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">BPセーブ率(${m.nameB}のサーブ時)</div><div class="val b">${st.breakPointSavePctB??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">BP変換率(${m.nameA}のリターン時)</div><div class="val a">${st.breakPointConvertPctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">BP変換率(${m.nameB}のリターン時)</div><div class="val b">${st.breakPointConvertPctB??"―"}%</div></div>
-    </div>
+    ${compareGrid([
+      compareItem("BPセーブ率(サーブ時)", m.nameA, (st.breakPointSavePctA??"―")+"%", m.nameB, (st.breakPointSavePctB??"―")+"%"),
+      compareItem("BP変換率(リターン時)", m.nameA, (st.breakPointConvertPctA??"―")+"%", m.nameB, (st.breakPointConvertPctB??"―")+"%"),
+    ])}
 
     <div class="desc" style="margin:14px 0 8px;">コートサイド別(デュース側/アド側)</div>
-    <div class="stat-grid">
-      <div class="stat-chip"><div class="lbl">サーブ勝率 デュース側(${m.nameA})</div><div class="val a">${st.serveWinPctA_deuce??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率 アド側(${m.nameA})</div><div class="val a">${st.serveWinPctA_ad??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率 デュース側(${m.nameB})</div><div class="val b">${st.serveWinPctB_deuce??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率 アド側(${m.nameB})</div><div class="val b">${st.serveWinPctB_ad??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率 デュース側(${m.nameA})</div><div class="val a">${st.returnWinPctA_deuce??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率 アド側(${m.nameA})</div><div class="val a">${st.returnWinPctA_ad??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率 デュース側(${m.nameB})</div><div class="val b">${st.returnWinPctB_deuce??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率 アド側(${m.nameB})</div><div class="val b">${st.returnWinPctB_ad??"―"}%</div></div>
-    </div>
+    ${compareGrid([
+      compareItem("サーブ勝率 デュース側", m.nameA, (st.serveWinPctA_deuce??"―")+"%", m.nameB, (st.serveWinPctB_deuce??"―")+"%"),
+      compareItem("サーブ勝率 アド側", m.nameA, (st.serveWinPctA_ad??"―")+"%", m.nameB, (st.serveWinPctB_ad??"―")+"%"),
+      compareItem("リターン勝率 デュース側", m.nameA, (st.returnWinPctA_deuce??"―")+"%", m.nameB, (st.returnWinPctB_deuce??"―")+"%"),
+      compareItem("リターン勝率 アド側", m.nameA, (st.returnWinPctA_ad??"―")+"%", m.nameB, (st.returnWinPctB_ad??"―")+"%"),
+    ])}
 
     <div class="desc" style="margin:14px 0 8px;">競った場面(デュースまでもつれたゲーム、${st.deuceGamesTotal}ゲーム中)</div>
-    <div class="stat-grid">
-      <div class="stat-chip"><div class="lbl">デュースゲーム勝率(${m.nameA})</div><div class="val a">${st.deuceGameWinPctA??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">デュースゲーム勝率(${m.nameB})</div><div class="val b">${st.deuceGameWinPctB??"―"}%</div></div>
-    </div>
+    ${compareGrid([
+      compareItem("デュースゲーム勝率", m.nameA, (st.deuceGameWinPctA??"―")+"%", m.nameB, (st.deuceGameWinPctB??"―")+"%"),
+    ])}
 
     <button id="detailClose">閉じる</button>
   `;
