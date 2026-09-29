@@ -614,12 +614,82 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.7"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
-// 読み込み・保存ともwatchと同じApps Script経由(合言葉で認証)。以前はGoogleログインで
-// Driveを直接読んでいたが、起動のたびにGoogleの認証画面が出るのをなくすため切り替えた。
+const APP_VERSION = "2026-09-29.8"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+// 読み込みはGoogleログインでDriveを直接読む(速い)。保存はwatchと同じApps Script経由(合言葉)。
+// (読み込みもApps Script経由にしてみたが、1回数十秒〜かかることがあり遅すぎたため戻した)
+const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DATA_FILENAME = "tennis-watch-score-data.json";
+const DRIVE_FOLDER_ID = "1ARR8xFEX7KL6zaoU3USFAs2rjHj0cuDe";
 
 const $ = id => document.getElementById(id);
 let allMatches = [];
+
+function ensureGis(cb){
+  if(window.google && google.accounts && google.accounts.oauth2){ cb(); return; }
+  const s = document.createElement("script");
+  s.src = "https://accounts.google.com/gsi/client";
+  s.onload = cb; s.onerror = ()=>cb();
+  document.head.appendChild(s);
+}
+
+// Googleのアクセス許可(約1時間有効)をこの端末に覚えておき、有効な間は認証画面を出さずに使い回す
+const GTOKEN_KEY = "tennis-stats-google-token";
+function getSavedGoogleToken(){
+  try{
+    const t = JSON.parse(localStorage.getItem(GTOKEN_KEY) || "null");
+    if(t && t.token && t.exp > Date.now()) return t.token;
+  }catch(e){}
+  return null;
+}
+function saveGoogleToken(token, expiresInSec){
+  try{ localStorage.setItem(GTOKEN_KEY, JSON.stringify({ token, exp: Date.now() + Math.max(60, (Number(expiresInSec)||3600) - 120) * 1000 })); }catch(e){}
+}
+function clearGoogleToken(){ try{ localStorage.removeItem(GTOKEN_KEY); }catch(e){} }
+
+let tokenClient = null, pendingTokenCb = null;
+// 覚えている許可が有効ならそれを返し、無ければGoogleの画面で取り直す。
+// prompt:""なので、一度許可していれば同意画面は出ず、アカウント選択だけ(または一瞬で閉じる)になる。
+// ※画面を出す必要がある時は、ボタンを押した操作の中から呼ばないとポップアップがブロックされる
+function getAccessToken(cb){
+  const saved = getSavedGoogleToken();
+  if(saved){ cb(saved); return; }
+  ensureGis(()=>{
+    if(!(window.google && google.accounts && google.accounts.oauth2)){ cb(null); return; }
+    pendingTokenCb = cb;
+    if(!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID, scope: DRIVE_SCOPE,
+        callback: (resp)=>{
+          const done = pendingTokenCb; pendingTokenCb = null;
+          if(resp.error){ done && done(null); return; }
+          saveGoogleToken(resp.access_token, resp.expires_in);
+          done && done(resp.access_token);
+        },
+        error_callback: ()=>{ const done = pendingTokenCb; pendingTokenCb = null; done && done(null); }
+      });
+    }
+    tokenClient.requestAccessToken({prompt: ""});
+  });
+}
+async function driveFindFile(name, token){
+  let qStr = `name='${name}' and trashed=false`;
+  if(DRIVE_FOLDER_ID) qStr += ` and '${DRIVE_FOLDER_ID}' in parents`;
+  const q = encodeURIComponent(qStr);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,
+    { headers:{ Authorization:`Bearer ${token}` } });
+  if(res.status === 401){ const e = new Error("Googleの許可の期限切れ"); e.isAuth = true; throw e; }
+  if(!res.ok) throw new Error(`Drive検索エラー ${res.status}`);
+  const data = await res.json();
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+async function driveGetContent(fileId, token){
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers:{ Authorization:`Bearer ${token}` } });
+  if(res.status === 401){ const e = new Error("Googleの許可の期限切れ"); e.isAuth = true; throw e; }
+  if(!res.ok) throw new Error(`Drive読み込みエラー ${res.status}`);
+  return await res.json();
+}
 
 // watch側と同じApps Scriptを使って書き戻す。drive.fileスコープ経由の直接書き込みは、
 // Apps Scriptが作成したファイルに対して403(権限エラー)になることがあるため、
@@ -688,7 +758,6 @@ $("tokenSaveBtn").addEventListener("click", async ()=>{
   // まだ読み込んでいなければ、そのまま読み込む。読み込み済みなら、保存に失敗した直後に
   // ここで直したケースを想定して、今のデータ(編集済みのメモ含む)をその場で保存し直す
   if(loadedFromDriveFileId) saveMatchesToDriveIfLoaded();
-  else loadFromDrive();
 });
 $("tokenClearBtn").addEventListener("click", ()=>{
   clearStoredAppsScriptToken();
@@ -749,87 +818,45 @@ function toast2(msg, isError){
   el.className = isError ? "error" : "";
 }
 
-// Apps Scriptの応答は一度別URL(echo)に転送されて受け取る仕組みで、そこがたまに404や
-// 別の応答になることがあるため、失敗したら少し待って数回やり直す
-async function fetchAllWithRetry(token){
-  const MAX_TRY = 3;
-  let lastErr = null;
-  for(let i=1; i<=MAX_TRY; i++){
-    try{
-      // 毎回まったく同じ内容のリクエストを送ると、Google側で直前の応答と混同されるのか
-      // 2回目以降が404や別の応答になる現象があったため、毎回違う値(nonce)を付けて別物にする
-      // (Apps Script側はこの値を見ずに無視するだけ)
-      const nonce = Date.now() + "-" + Math.random().toString(36).slice(2);
-      const res = await fetch(APPS_SCRIPT_URL + "?n=" + encodeURIComponent(nonce), {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        cache: "no-store",
-        body: JSON.stringify({ token, action: "getAll", nonce })
-      });
-      if(!res.ok) throw new Error(`通信エラー ${res.status}`);
-      const text = await res.text();
-      try{ return JSON.parse(text); }
-      catch(e){ throw new Error("想定外の応答: " + text.slice(0,40)); }
-    }catch(e){
-      lastErr = e;
-      console.warn(`[getAll] ${i}回目失敗:`, e.message);
-      if(i < MAX_TRY){
-        toast2(`読み込みに失敗したので再試行中…(${i+1}/${MAX_TRY})`);
-        await new Promise(r=>setTimeout(r, 1500*i));
-      }
-    }
-  }
-  throw lastErr;
-}
-
-// Apps Script経由でDriveの試合データを読み込む(Googleログイン不要。🔑の合言葉を使う)
-async function loadFromDrive(){
-  const token = getStoredAppsScriptToken();
-  if(!token){
-    toast2("読み込むには合言葉が必要です。🔑から設定してください", true);
-    openTokenSettings();
+// GoogleログインでDriveの試合データを直接読み込む(速い)。
+// interactive=false(起動時の自動読み込み)の時は、覚えている許可が無ければ画面を出さずにやめる
+function loadFromDrive(interactive){
+  if(interactive === undefined || (interactive && interactive.type)) interactive = true; // ボタンのクリックイベントで呼ばれた時
+  if(!interactive && !getSavedGoogleToken()){
+    if(showingCachedData) toast2("前回のデータを表示中。最新にするには「Driveから読み込む」を押してください");
     return;
   }
-  if(!showingCachedData) toast2("Driveから読み込み中…");
+  if(!showingCachedData) toast2("Driveに接続中…");
   const t0 = Date.now();
-  try{
-    const data = await fetchAllWithRetry(token);
-    if(!data.ok){
-      if(data.error === "invalid token"){
-        clearStoredAppsScriptToken();
-        toast2("⚠️ 合言葉が違います。🔑から入れ直してください", true);
-        openTokenSettings();
+  getAccessToken(async (token)=>{
+    if(!token){ toast2("⚠️ Googleへの接続に失敗しました", true); return; }
+    try{
+      const fileId = await driveFindFile(DATA_FILENAME, token);
+      if(!fileId){ toast2("⚠️ Drive上にデータファイルが見つかりません", true); return; }
+      const data = await driveGetContent(fileId, token);
+      const matches = (data && data.matches) || [];
+      loadedFromDriveFileId = fileId; // Driveから読み込んだ印。以後の編集はApps Script経由で書き戻せる
+      showingCachedData = false;
+      loadMatches(matches);
+      saveLocalCache(matches);
+      // 詳細パネルを開いたまま最新データに入れ替わった場合は、新しいデータで開き直す
+      // (古いデータのまま編集すると、そのメモが保存対象から漏れてしまうため)
+      if(currentDetailMatchId && $("detailPanel").style.display !== "none"){
+        showMatchDetail(currentDetailMatchId, currentDetailSetNumber);
+      }
+      const sec = ((Date.now()-t0)/1000).toFixed(1);
+      toast2(`Driveから${matches.length}試合を読み込みました(${sec}秒)`);
+    }catch(e){
+      if(e.isAuth){
+        clearGoogleToken();
+        toast2("Googleの許可が切れました。「Driveから読み込む」を押してください", true);
         return;
       }
-      throw new Error(data.error || "不明なエラー");
+      toast2((showingCachedData ? "⚠️ 前回のデータを表示中(最新の読み込みに失敗: " : "⚠️ 読み込みエラー: ") + e.message + (showingCachedData ? ")" : ""), true);
     }
-    loadedFromDriveFileId = "appsscript"; // Drive(Apps Script)から読み込んだ印。以後の編集は書き戻せる
-    let matches = data.matches || [];
-    if(data.gz){
-      // Apps Scriptがgzip圧縮+base64で返してくるので展開する
-      const bin = atob(data.gz);
-      const bytes = new Uint8Array(bin.length);
-      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
-      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-      const text = await new Response(stream).text();
-      matches = JSON.parse(text).matches || [];
-      console.log(`[getAll] 圧縮 ${data.gz.length} 文字 / 展開後 ${data.rawLength} 文字`);
-    }
-    showingCachedData = false;
-    loadMatches(matches);
-    saveLocalCache(matches);
-    // 詳細パネルを開いたまま最新データに入れ替わった場合は、新しいデータで開き直す
-    // (古いデータのまま編集すると、そのメモが保存対象から漏れてしまうため)
-    if(currentDetailMatchId && $("detailPanel").style.display !== "none"){
-      showMatchDetail(currentDetailMatchId, currentDetailSetNumber);
-    }
-    const sec = ((Date.now()-t0)/1000).toFixed(1);
-    toast2(`Driveから${matches.length}試合を読み込みました(${sec}秒)`);
-  }catch(e){
-    toast2((showingCachedData ? "⚠️ 前回のデータを表示中(最新の読み込みに失敗: " : "⚠️ 読み込みエラー: ") + e.message + (showingCachedData ? ")" : ""), true);
-  }
+  });
 }
-$("driveLoadBtn").addEventListener("click", loadFromDrive);
+$("driveLoadBtn").addEventListener("click", ()=>loadFromDrive(true));
 
 // Apps Script経由の読み込みは数秒かかるので、前回読み込んだデータをこの端末に保存しておき、
 // 開いた瞬間はそれを表示→裏で最新を読み込んで差し替える。前回データを表示している間は
@@ -846,7 +873,6 @@ function readLocalCache(){
 // 合言葉が設定済みなら、開いた時に自動で最新データを読み込む
 // (loadMatchesなどが使う変数の宣言がこの後にあるため、スクリプトを最後まで読んでから実行する)
 setTimeout(()=>{
-  if(!getStoredAppsScriptToken()) return;
   const cache = readLocalCache();
   if(cache && cache.matches.length){
     showingCachedData = true;
@@ -854,7 +880,7 @@ setTimeout(()=>{
     const when = new Date(cache.savedAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
     toast2(`前回のデータ(${when}時点)を表示中・最新を読み込み中…`);
   }
-  loadFromDrive();
+  loadFromDrive(false); // Googleの許可が残っていれば自動で最新に。無ければボタンを押すまで待つ
 }, 0);
 
 $("fileInput").addEventListener("change", (e)=>{
