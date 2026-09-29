@@ -20,6 +20,7 @@
     margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--line);}
   header h1{font-size:20px; margin:0; font-weight:700;}
   header .sub{font-size:12px; color:var(--dim);}
+  .header-version{font-size:10px; opacity:0.6; margin-left:6px;}
 
   .toolbar{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px;}
   .toolbar button, .toolbar label{
@@ -228,7 +229,7 @@
 <div id="app">
   <header>
     <h1>テニススタッツ分析</h1>
-    <div class="sub">Google Driveの試合データを時系列・スタッツで見る</div>
+    <div class="sub">Google Driveの試合データを時系列・スタッツで見る <span id="headerVersion" class="header-version"></span></div>
   </header>
 
   <div class="toolbar">
@@ -613,7 +614,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.4"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.6"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込み・保存ともwatchと同じApps Script経由(合言葉で認証)。以前はGoogleログインで
 // Driveを直接読んでいたが、起動のたびにGoogleの認証画面が出るのをなくすため切り替えた。
 
@@ -750,10 +751,15 @@ async function fetchAllWithRetry(token){
   let lastErr = null;
   for(let i=1; i<=MAX_TRY; i++){
     try{
-      const res = await fetch(APPS_SCRIPT_URL, {
+      // 毎回まったく同じ内容のリクエストを送ると、Google側で直前の応答と混同されるのか
+      // 2回目以降が404や別の応答になる現象があったため、毎回違う値(nonce)を付けて別物にする
+      // (Apps Script側はこの値を見ずに無視するだけ)
+      const nonce = Date.now() + "-" + Math.random().toString(36).slice(2);
+      const res = await fetch(APPS_SCRIPT_URL + "?n=" + encodeURIComponent(nonce), {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ token, action: "getAll" })
+        cache: "no-store",
+        body: JSON.stringify({ token, action: "getAll", nonce })
       });
       if(!res.ok) throw new Error(`通信エラー ${res.status}`);
       const text = await res.text();
@@ -925,6 +931,7 @@ function printDetailOnly(){
   setTimeout(restore, 5000);
 }
 $("versionTag").textContent = `v${APP_VERSION}`;
+$("headerVersion").textContent = `v${APP_VERSION}`; // どの版が動いているか画面上部でもすぐ確認できるように
 
 function deleteMatch(matchId){
   if(!confirm("この試合を削除しますか？(元に戻せません)")) return;
