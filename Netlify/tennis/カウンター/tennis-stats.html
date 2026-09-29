@@ -614,7 +614,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.8"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.9"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込みはGoogleログインでDriveを直接読む(速い)。保存はwatchと同じApps Script経由(合言葉)。
 // (読み込みもApps Script経由にしてみたが、1回数十秒〜かかることがあり遅すぎたため戻した)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
@@ -757,7 +757,7 @@ $("tokenSaveBtn").addEventListener("click", async ()=>{
   toast2("合言葉を保存しました");
   // まだ読み込んでいなければ、そのまま読み込む。読み込み済みなら、保存に失敗した直後に
   // ここで直したケースを想定して、今のデータ(編集済みのメモ含む)をその場で保存し直す
-  if(loadedFromDriveFileId) saveMatchesToDriveIfLoaded();
+  if(loadedFromDriveFileId && unsavedChanges.size) flushUnsavedChanges();
 });
 $("tokenClearBtn").addEventListener("click", ()=>{
   clearStoredAppsScriptToken();
@@ -765,10 +765,17 @@ $("tokenClearBtn").addEventListener("click", ()=>{
   toast2("合言葉を削除しました");
 });
 
-// 削除など、データを書き換えた後に呼ぶ。Driveから読み込んだ場合のみ書き戻せる
+// メモ編集・削除をDriveに書き戻す。Driveから読み込んだ場合のみ書き戻せる
 // (ファイルから読み込んだだけの場合は、どこにも書き戻す先が無いため)。
+// 全件を送って置き換えるのではなく「この試合のこの欄だけ」をApps Scriptに頼み、Drive上の
+// 最新データに対して反映してもらう。これで別の端末で書いたメモや、分析アプリを開いた後に
+// watchから同期された試合を消してしまわない。
+// change = {action:"updateNote", matchId, setNumber(試合メモならnull), text} / {action:"deleteMatch", matchId}
 let loadedFromDriveFileId = null;
-async function saveMatchesToDriveIfLoaded(){
+const unsavedChanges = new Map(); // 保存に失敗した変更(合言葉を直した時などに送り直す)
+function changeKey(c){ return `${c.action}|${c.matchId}|${c.setNumber==null?"":c.setNumber}`; }
+
+async function sendChangeToDrive(change){
   if(!loadedFromDriveFileId){
     if(showingCachedData){
       toast2("⚠️ 最新データの読み込み中なので、まだ保存できません。読み込みが終わってから入力し直してください", true);
@@ -777,40 +784,60 @@ async function saveMatchesToDriveIfLoaded(){
     toast2("ファイルから読み込んだデータなので、Driveへの保存はできません。手元のファイルを直接編集してください。");
     return;
   }
+  unsavedChanges.set(changeKey(change), change); // 成功したら消す
   const token = getStoredAppsScriptToken();
   if(!token){
     toast2("合言葉が未設定のため保存できませんでした。🔑ボタンから設定してください", true);
     openTokenSettings();
     return;
   }
-  try{
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ token, action: "replaceAll", matches: allMatches })
-    });
-    if(!res.ok) throw new Error(`送信エラー ${res.status}`);
-    const data = await res.json();
-    if(!data.ok){
-      const err = new Error(data.error || "不明なエラー");
-      err.isInvalidToken = (data.error === "invalid token"); // Apps Script側が合言葉不一致の時だけ返す文字列
-      throw err;
-    }
-    toast2(`Driveに保存しました(${data.matchCount}試合)`);
-    saveLocalCache(allMatches);
-  }catch(e){
-    if(e.isInvalidToken){
-      // 合言葉そのものが間違っている場合だけ、キャッシュ(localStorageとメモリの両方)を消して
-      // 次回また聞き直す。メモリ側を消し忘れると、間違った合言葉のまま毎回黙って失敗し続けてしまう。
-      clearStoredAppsScriptToken();
-      toast2("⚠️ Driveへの保存に失敗しました: 合言葉が違います。🔑から入れ直してください", true);
-      openTokenSettings();
-    } else {
-      // レート制限や通信エラーなど、合言葉とは無関係な失敗では合言葉のキャッシュはそのまま残す
-      // (せっかく正しく設定したのに、無関係な失敗のたびに聞き直す羽目になるのを防ぐ)
-      toast2("⚠️ Driveへの保存に失敗しました: " + e.message, true);
+  toast2("Driveに保存中…");
+  // メモの書き換え・削除は何度送っても結果が同じなので、Google側の一時的な失敗(404など)は
+  // そのままやり直してよい。毎回違う値(nonce)を付けて、前のリクエストと混同されないようにする
+  const MAX_TRY = 3;
+  for(let i=1; i<=MAX_TRY; i++){
+    try{
+      const nonce = Date.now() + "-" + Math.random().toString(36).slice(2);
+      const res = await fetch(APPS_SCRIPT_URL + "?n=" + encodeURIComponent(nonce), {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        cache: "no-store",
+        body: JSON.stringify(Object.assign({ token, nonce }, change))
+      });
+      if(!res.ok) throw new Error(`送信エラー ${res.status}`);
+      const text = await res.text();
+      let data;
+      try{ data = JSON.parse(text); }catch(e){ throw new Error("想定外の応答: " + text.slice(0,40)); }
+      if(!data.ok){
+        const err = new Error(data.error === "match not found" ? "Drive上にこの試合が見つかりません(別の端末で削除された可能性があります)" : (data.error || "不明なエラー"));
+        err.fatal = true; // やり直しても結果が変わらない失敗
+        err.isInvalidToken = (data.error === "invalid token"); // Apps Script側が合言葉不一致の時だけ返す文字列
+        throw err;
+      }
+      unsavedChanges.delete(changeKey(change));
+      toast2(`Driveに保存しました`);
+      saveLocalCache(allMatches);
+      return;
+    }catch(e){
+      if(e.isInvalidToken){
+        // 合言葉そのものが間違っている場合だけ、キャッシュ(localStorageとメモリの両方)を消して聞き直す
+        clearStoredAppsScriptToken();
+        toast2("⚠️ Driveへの保存に失敗しました: 合言葉が違います。🔑から入れ直してください", true);
+        openTokenSettings();
+        return;
+      }
+      if(e.fatal || i === MAX_TRY){
+        toast2("⚠️ Driveへの保存に失敗しました: " + e.message, true);
+        return;
+      }
+      console.warn(`[save] ${i}回目失敗:`, e.message);
+      await new Promise(r=>setTimeout(r, 1500*i));
     }
   }
+}
+// 合言葉を直した後などに、保存できていなかった変更を順に送り直す
+async function flushUnsavedChanges(){
+  for(const c of [...unsavedChanges.values()]) await sendChangeToDrive(c);
 }
 function toast2(msg, isError){
   const el = $("loadStatus");
@@ -998,11 +1025,15 @@ $("versionTag").textContent = `v${APP_VERSION}`;
 $("headerVersion").textContent = `v${APP_VERSION}`; // どの版が動いているか画面上部でもすぐ確認できるように
 
 function deleteMatch(matchId){
+  if(showingCachedData){
+    toast2("⚠️ 最新データの読み込み中なので、まだ削除できません。読み込みが終わってから操作してください", true);
+    return;
+  }
   if(!confirm("この試合を削除しますか？(元に戻せません)")) return;
   allMatches = allMatches.filter(m=>m.matchId!==matchId);
   populateFilterOptions();
   applyFilters();
-  saveMatchesToDriveIfLoaded();
+  sendChangeToDrive({ action: "deleteMatch", matchId });
 }
 
 // 全試合をチーム名で分けず1つにまとめた「自分側」の通算成績
@@ -1487,7 +1518,7 @@ function showMatchDetail(matchId, setNumber){
     const v = noteEl.value.trim();
     if(v) m.note = v; else delete m.note;
     renderMatchTable(); // 一覧側の📝マークを更新
-    saveMatchesToDriveIfLoaded();
+    sendChangeToDrive({ action: "updateNote", matchId: m.matchId, setNumber: null, text: v });
   });
 
   // セットごとのメモ
@@ -1499,7 +1530,7 @@ function showMatchDetail(matchId, setNumber){
       m.setNotes = m.setNotes || {};
       if(v) m.setNotes[sn] = v; else delete m.setNotes[sn];
       if(Object.keys(m.setNotes).length===0) delete m.setNotes;
-      saveMatchesToDriveIfLoaded();
+      sendChangeToDrive({ action: "updateNote", matchId: m.matchId, setNumber: Number(sn), text: v });
     });
   });
 
