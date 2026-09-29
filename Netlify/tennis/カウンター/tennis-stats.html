@@ -163,7 +163,9 @@
   .token-status.set{color:var(--teal);}
   .token-status.unset{color:var(--danger);}
   .token-settings-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
-  .token-settings-row input[type=password]{flex:1; min-width:160px; background:var(--panel2);
+  /* type="password"だとスマホで日本語キーボードが出ないため、普通の入力欄を●で隠す方式にしている */
+  #tokenPhraseInput.masked{-webkit-text-security:disc; text-security:disc;}
+  .token-settings-row input{flex:1; min-width:160px; background:var(--panel2);
     color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px;}
   .token-settings-row button{padding:6px 12px; border-radius:8px; border:1px solid var(--line);
     background:transparent; color:var(--text); font-size:12px; cursor:pointer;}
@@ -242,7 +244,7 @@
     </div>
     <div id="tokenStatus" class="token-status"></div>
     <div class="token-settings-row">
-      <input type="password" id="tokenPhraseInput" placeholder="合言葉を入力">
+      <input type="text" id="tokenPhraseInput" class="masked" placeholder="合言葉を入力" autocomplete="off" autocapitalize="off" spellcheck="false">
       <button id="tokenToggleVisBtn" title="入力内容を表示/非表示">👁</button>
       <button id="tokenSaveBtn" class="primary">保存</button>
       <button id="tokenClearBtn">クリア</button>
@@ -611,7 +613,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.4"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込み・保存ともwatchと同じApps Script経由(合言葉で認証)。以前はGoogleログインで
 // Driveを直接読んでいたが、起動のたびにGoogleの認証画面が出るのをなくすため切り替えた。
 
@@ -666,17 +668,16 @@ function openTokenSettings(){
   refreshTokenStatus();
   $("tokenSettingsPanel").style.display = "block";
   $("tokenPhraseInput").value = "";
-  $("tokenPhraseInput").type = "password";
+  $("tokenPhraseInput").classList.add("masked");
   $("tokenPhraseInput").focus();
 }
 $("tokenSettingsBtn").addEventListener("click", openTokenSettings);
 $("tokenSettingsCloseBtn").addEventListener("click", ()=>{ $("tokenSettingsPanel").style.display = "none"; });
 $("tokenToggleVisBtn").addEventListener("click", ()=>{
-  const input = $("tokenPhraseInput");
-  input.type = (input.type === "password") ? "text" : "password";
+  $("tokenPhraseInput").classList.toggle("masked");
 });
 $("tokenSaveBtn").addEventListener("click", async ()=>{
-  const phrase = $("tokenPhraseInput").value;
+  const phrase = $("tokenPhraseInput").value.trim(); // watch側と同じく前後の空白は除いてからハッシュ化
   if(!phrase){ toast2("合言葉が未入力です"); return; }
   const hash = await sha256Hex(phrase);
   setStoredAppsScriptToken(hash);
@@ -742,6 +743,34 @@ function toast2(msg, isError){
   el.className = isError ? "error" : "";
 }
 
+// Apps Scriptの応答は一度別URL(echo)に転送されて受け取る仕組みで、そこがたまに404や
+// 別の応答になることがあるため、失敗したら少し待って数回やり直す
+async function fetchAllWithRetry(token){
+  const MAX_TRY = 3;
+  let lastErr = null;
+  for(let i=1; i<=MAX_TRY; i++){
+    try{
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ token, action: "getAll" })
+      });
+      if(!res.ok) throw new Error(`通信エラー ${res.status}`);
+      const text = await res.text();
+      try{ return JSON.parse(text); }
+      catch(e){ throw new Error("想定外の応答: " + text.slice(0,40)); }
+    }catch(e){
+      lastErr = e;
+      console.warn(`[getAll] ${i}回目失敗:`, e.message);
+      if(i < MAX_TRY){
+        toast2(`読み込みに失敗したので再試行中…(${i+1}/${MAX_TRY})`);
+        await new Promise(r=>setTimeout(r, 1500*i));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // Apps Script経由でDriveの試合データを読み込む(Googleログイン不要。🔑の合言葉を使う)
 async function loadFromDrive(){
   const token = getStoredAppsScriptToken();
@@ -752,13 +781,7 @@ async function loadFromDrive(){
   }
   toast2("Driveから読み込み中…");
   try{
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ token, action: "getAll" })
-    });
-    if(!res.ok) throw new Error(`通信エラー ${res.status}`);
-    const data = await res.json();
+    const data = await fetchAllWithRetry(token);
     if(!data.ok){
       if(data.error === "invalid token"){
         clearStoredAppsScriptToken();
@@ -769,7 +792,17 @@ async function loadFromDrive(){
       throw new Error(data.error || "不明なエラー");
     }
     loadedFromDriveFileId = "appsscript"; // Drive(Apps Script)から読み込んだ印。以後の編集は書き戻せる
-    const matches = data.matches || [];
+    let matches = data.matches || [];
+    if(data.gz){
+      // Apps Scriptがgzip圧縮+base64で返してくるので展開する
+      const bin = atob(data.gz);
+      const bytes = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      const text = await new Response(stream).text();
+      matches = JSON.parse(text).matches || [];
+      console.log(`[getAll] 圧縮 ${data.gz.length} 文字 / 展開後 ${data.rawLength} 文字`);
+    }
     loadMatches(matches);
     toast2(`Driveから${matches.length}試合を読み込みました`);
   }catch(e){
