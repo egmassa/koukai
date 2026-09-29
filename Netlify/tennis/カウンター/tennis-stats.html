@@ -611,51 +611,13 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.2"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
-const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-const DATA_FILENAME = "tennis-watch-score-data.json";
-const DRIVE_FOLDER_ID = "1ARR8xFEX7KL6zaoU3USFAs2rjHj0cuDe";
+const APP_VERSION = "2026-09-29.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+// 読み込み・保存ともwatchと同じApps Script経由(合言葉で認証)。以前はGoogleログインで
+// Driveを直接読んでいたが、起動のたびにGoogleの認証画面が出るのをなくすため切り替えた。
 
 const $ = id => document.getElementById(id);
 let allMatches = [];
 
-function ensureGis(cb){
-  if(window.google && google.accounts && google.accounts.oauth2){ cb(); return; }
-  const s = document.createElement("script");
-  s.src = "https://accounts.google.com/gsi/client";
-  s.onload = cb; s.onerror = ()=>cb();
-  document.head.appendChild(s);
-}
-let tokenClient = null, accessToken = null;
-function getAccessToken(cb){
-  ensureGis(()=>{
-    if(!(window.google && google.accounts && google.accounts.oauth2)){ cb(null); return; }
-    if(!tokenClient){
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID, scope: DRIVE_SCOPE,
-        callback: (resp)=>{ if(resp.error){ cb(null); return; } accessToken = resp.access_token; cb(accessToken); }
-      });
-    }
-    tokenClient.requestAccessToken({prompt: accessToken ? "" : "consent"});
-  });
-}
-async function driveFindFile(name, token){
-  let qStr = `name='${name}' and trashed=false`;
-  if(DRIVE_FOLDER_ID) qStr += ` and '${DRIVE_FOLDER_ID}' in parents`;
-  const q = encodeURIComponent(qStr);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,
-    { headers:{ Authorization:`Bearer ${token}` } });
-  if(!res.ok) throw new Error(`Drive検索エラー ${res.status}`);
-  const data = await res.json();
-  return (data.files && data.files[0]) ? data.files[0].id : null;
-}
-async function driveGetContent(fileId, token){
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    { headers:{ Authorization:`Bearer ${token}` } });
-  if(!res.ok) return null;
-  try{ return await res.json(); }catch(e){ return null; }
-}
 // watch側と同じApps Scriptを使って書き戻す。drive.fileスコープ経由の直接書き込みは、
 // Apps Scriptが作成したファイルに対して403(権限エラー)になることがあるため、
 // 削除の保存もwatchと同じApps Script経由に統一している。
@@ -721,9 +683,10 @@ $("tokenSaveBtn").addEventListener("click", async ()=>{
   $("tokenPhraseInput").value = "";
   refreshTokenStatus();
   toast2("合言葉を保存しました");
-  // 保存に失敗した直後にここで直したケースを想定し、今のデータをその場で保存し直す
-  // (allMatchesには編集済みのメモがそのまま残っているので、再送するだけでよい)
+  // まだ読み込んでいなければ、そのまま読み込む。読み込み済みなら、保存に失敗した直後に
+  // ここで直したケースを想定して、今のデータ(編集済みのメモ含む)をその場で保存し直す
   if(loadedFromDriveFileId) saveMatchesToDriveIfLoaded();
+  else loadFromDrive();
 });
 $("tokenClearBtn").addEventListener("click", ()=>{
   clearStoredAppsScriptToken();
@@ -779,22 +742,43 @@ function toast2(msg, isError){
   el.className = isError ? "error" : "";
 }
 
-$("driveLoadBtn").addEventListener("click", ()=>{
-  $("loadStatus").textContent = "Driveに接続中…";
-  getAccessToken(async (token)=>{
-    if(!token){ $("loadStatus").textContent = "Drive接続に失敗しました"; return; }
-    try{
-      const fileId = await driveFindFile(DATA_FILENAME, token);
-      if(!fileId){ $("loadStatus").textContent = "Drive上にデータファイルが見つかりません"; return; }
-      loadedFromDriveFileId = fileId;
-      const data = await driveGetContent(fileId, token);
-      loadMatches((data && data.matches) || []);
-      $("loadStatus").textContent = `Driveから${(data.matches||[]).length}試合を読み込みました`;
-    }catch(e){
-      $("loadStatus").textContent = "読み込みエラー: " + e.message;
+// Apps Script経由でDriveの試合データを読み込む(Googleログイン不要。🔑の合言葉を使う)
+async function loadFromDrive(){
+  const token = getStoredAppsScriptToken();
+  if(!token){
+    toast2("読み込むには合言葉が必要です。🔑から設定してください", true);
+    openTokenSettings();
+    return;
+  }
+  toast2("Driveから読み込み中…");
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ token, action: "getAll" })
+    });
+    if(!res.ok) throw new Error(`通信エラー ${res.status}`);
+    const data = await res.json();
+    if(!data.ok){
+      if(data.error === "invalid token"){
+        clearStoredAppsScriptToken();
+        toast2("⚠️ 合言葉が違います。🔑から入れ直してください", true);
+        openTokenSettings();
+        return;
+      }
+      throw new Error(data.error || "不明なエラー");
     }
-  });
-});
+    loadedFromDriveFileId = "appsscript"; // Drive(Apps Script)から読み込んだ印。以後の編集は書き戻せる
+    const matches = data.matches || [];
+    loadMatches(matches);
+    toast2(`Driveから${matches.length}試合を読み込みました`);
+  }catch(e){
+    toast2("⚠️ 読み込みエラー: " + e.message, true);
+  }
+}
+$("driveLoadBtn").addEventListener("click", loadFromDrive);
+// 合言葉が設定済みなら、開いた時に自動で最新データを読み込む
+if(getStoredAppsScriptToken()) loadFromDrive();
 
 $("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0];
