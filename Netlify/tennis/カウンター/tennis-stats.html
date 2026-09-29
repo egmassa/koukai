@@ -614,7 +614,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.6"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-09-29.7"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込み・保存ともwatchと同じApps Script経由(合言葉で認証)。以前はGoogleログインで
 // Driveを直接読んでいたが、起動のたびにGoogleの認証画面が出るのをなくすため切り替えた。
 
@@ -701,6 +701,10 @@ $("tokenClearBtn").addEventListener("click", ()=>{
 let loadedFromDriveFileId = null;
 async function saveMatchesToDriveIfLoaded(){
   if(!loadedFromDriveFileId){
+    if(showingCachedData){
+      toast2("⚠️ 最新データの読み込み中なので、まだ保存できません。読み込みが終わってから入力し直してください", true);
+      return;
+    }
     toast2("ファイルから読み込んだデータなので、Driveへの保存はできません。手元のファイルを直接編集してください。");
     return;
   }
@@ -724,6 +728,7 @@ async function saveMatchesToDriveIfLoaded(){
       throw err;
     }
     toast2(`Driveに保存しました(${data.matchCount}試合)`);
+    saveLocalCache(allMatches);
   }catch(e){
     if(e.isInvalidToken){
       // 合言葉そのものが間違っている場合だけ、キャッシュ(localStorageとメモリの両方)を消して
@@ -785,7 +790,8 @@ async function loadFromDrive(){
     openTokenSettings();
     return;
   }
-  toast2("Driveから読み込み中…");
+  if(!showingCachedData) toast2("Driveから読み込み中…");
+  const t0 = Date.now();
   try{
     const data = await fetchAllWithRetry(token);
     if(!data.ok){
@@ -809,15 +815,47 @@ async function loadFromDrive(){
       matches = JSON.parse(text).matches || [];
       console.log(`[getAll] 圧縮 ${data.gz.length} 文字 / 展開後 ${data.rawLength} 文字`);
     }
+    showingCachedData = false;
     loadMatches(matches);
-    toast2(`Driveから${matches.length}試合を読み込みました`);
+    saveLocalCache(matches);
+    // 詳細パネルを開いたまま最新データに入れ替わった場合は、新しいデータで開き直す
+    // (古いデータのまま編集すると、そのメモが保存対象から漏れてしまうため)
+    if(currentDetailMatchId && $("detailPanel").style.display !== "none"){
+      showMatchDetail(currentDetailMatchId, currentDetailSetNumber);
+    }
+    const sec = ((Date.now()-t0)/1000).toFixed(1);
+    toast2(`Driveから${matches.length}試合を読み込みました(${sec}秒)`);
   }catch(e){
-    toast2("⚠️ 読み込みエラー: " + e.message, true);
+    toast2((showingCachedData ? "⚠️ 前回のデータを表示中(最新の読み込みに失敗: " : "⚠️ 読み込みエラー: ") + e.message + (showingCachedData ? ")" : ""), true);
   }
 }
 $("driveLoadBtn").addEventListener("click", loadFromDrive);
+
+// Apps Script経由の読み込みは数秒かかるので、前回読み込んだデータをこの端末に保存しておき、
+// 開いた瞬間はそれを表示→裏で最新を読み込んで差し替える。前回データを表示している間は
+// 古いデータで上書きしてしまわないよう、Driveへの保存はしない
+const LOCAL_CACHE_KEY = "tennis-stats-cache-v1";
+let showingCachedData = false;
+function saveLocalCache(matches){
+  try{ localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), matches })); }catch(e){ /* 容量不足などは無視 */ }
+}
+function readLocalCache(){
+  try{ const c = JSON.parse(localStorage.getItem(LOCAL_CACHE_KEY) || "null"); return (c && Array.isArray(c.matches)) ? c : null; }
+  catch(e){ return null; }
+}
 // 合言葉が設定済みなら、開いた時に自動で最新データを読み込む
-if(getStoredAppsScriptToken()) loadFromDrive();
+// (loadMatchesなどが使う変数の宣言がこの後にあるため、スクリプトを最後まで読んでから実行する)
+setTimeout(()=>{
+  if(!getStoredAppsScriptToken()) return;
+  const cache = readLocalCache();
+  if(cache && cache.matches.length){
+    showingCachedData = true;
+    loadMatches(cache.matches);
+    const when = new Date(cache.savedAt).toLocaleString("ja-JP", {month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+    toast2(`前回のデータ(${when}時点)を表示中・最新を読み込み中…`);
+  }
+  loadFromDrive();
+}, 0);
 
 $("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0];
