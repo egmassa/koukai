@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>故障履歴ダッシュボード（決定版v27）</title>
+    <title>故障履歴ダッシュボード</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
         integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A=="
         crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -998,7 +998,8 @@
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-chart-line"></i> 故障履歴ダッシュボード</h1>
-            <p>インシデントの記録・分析・可視化</p>
+            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v28</span>
+                <span id="headerSyncState" style="font-size:0.8em; margin-left:8px;"></span></p>
 
             <!-- データセット選択 -->
             <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px;">
@@ -1506,6 +1507,12 @@
                     driveFolderId: localStorage.getItem('driveFolderId') || '',
                     driveStatus: 'disconnected', // 'disconnected'|'connecting'|'connected'|'error'
                     driveLastFile: null,
+                    driveDirty: localStorage.getItem('driveDirty') === '1',        // Drive未保存の変更があるか
+                    driveSyncedTime: localStorage.getItem('driveSyncedTime') || null, // 最後に同期したDrive側の更新日時
+                    driveConflict: false,   // 他端末でDriveが更新されている
+                    autoSaveDelay: 5000,    // 編集後、自動保存までの待ち時間(ms)
+                    autoBackupInterval: 30 * 60 * 1000, // 自動保存時にバックアップを作る最小間隔
+                    _suppressDirty: false, _saving: false, _autoSaveTimer: null, _lastJson: null, _undoTimer: null,
 
                     elements: {
                         baseYear: document.getElementById('baseYear'),
@@ -1561,6 +1568,7 @@
 
                     async init() {
                         this.loadData();
+                        this._lastJson = JSON.stringify(this.datasets);
                         this.attachEventListeners();
                         this.attachStatCardListeners();
                         this.initPresets();
@@ -1934,8 +1942,8 @@
                                 }
                             }
 
-                            // 現在のデータセットをロード
-                            this.switchDataset(this.currentDataset);
+                            // 現在のデータセットをロード（起動時は画面側が空なので書き戻さない）
+                            this.switchDataset(this.currentDataset, true);
 
                         } catch (e) {
                             console.error('データ読込エラー:', e);
@@ -1979,6 +1987,7 @@
                         try {
                             localStorage.setItem('datasets', JSON.stringify(this.datasets));
                             localStorage.setItem('currentDataset', this.currentDataset);
+                            this.trackChange();
                         } catch (e) {
                             console.error('データセット保存エラー:', e);
                             throw e;
@@ -2914,7 +2923,7 @@
                             await driveManager.getToken(true); // サイレント接続
                             this.driveStatus = 'connected';
                             this.updateDriveStatusUI();
-                            await this.loadFromDrive();
+                            await this.syncOnConnect();
                         } catch(e) {
                             // サイレント接続失敗 → 手動接続を促す
                             this.driveStatus = 'disconnected';
@@ -2939,7 +2948,7 @@
                             this.driveStatus = 'connected';
                             this.updateDriveStatusUI();
                             this.showStatus('✅ Google Driveに接続しました', 'success');
-                            await this.loadFromDrive();
+                            await this.syncOnConnect();
                         } catch(e) {
                             this.driveStatus = 'error';
                             this.updateDriveStatusUI();
@@ -2947,16 +2956,36 @@
                         }
                     },
 
-                    async loadFromDrive() {
-                        if (this.driveStatus !== 'connected') {
-                            this.showStatus('先にGoogle Driveに接続してください', 'error'); return;
-                        }
+                    // ─── 同期管理（未保存検知・自動保存・競合検知）─────────────
+                    // データが実際に変わったときだけ「未保存」にする（データセット切替だけでは立てない）
+                    trackChange() {
+                        const json = JSON.stringify(this.datasets);
+                        if (this._suppressDirty || this._lastJson === null) { this._lastJson = json; return; }
+                        if (json === this._lastJson) return;
+                        this._lastJson = json;
+                        this.setDirty(true);
+                        this.scheduleAutoSave();
+                    },
+                    setDirty(v) {
+                        this.driveDirty = v;
+                        try { localStorage.setItem('driveDirty', v ? '1' : '0'); } catch (e) {}
+                        this.updateDriveStatusUI();
+                    },
+                    setSynced(modifiedTime) {
+                        this.driveSyncedTime = modifiedTime;
+                        this.driveLastFile = { modifiedTime };
+                        this.driveConflict = false;
+                        try { localStorage.setItem('driveSyncedTime', modifiedTime); } catch (e) {}
+                    },
+                    scheduleAutoSave() {
+                        clearTimeout(this._autoSaveTimer);
+                        if (this.driveStatus !== 'connected' || this.driveConflict) return;
+                        this._autoSaveTimer = setTimeout(() => this.saveToDrive(true, { auto: true }), this.autoSaveDelay);
+                    },
+                    // Driveのデータを画面へ反映（未保存フラグは立てない）
+                    applyRemoteData(data) {
+                        this._suppressDirty = true;
                         try {
-                            this.showLoading(true);
-                            const result = await driveManager.loadJson(DRIVE_MAIN_FILENAME);
-                            if (!result) { this.showStatus('Driveにデータファイルが見つかりません', 'error'); return; }
-                            const data = result.data;
-                            this.driveLastFile = { modifiedTime: result.modifiedTime };
                             if (data.datasets) {
                                 this.datasets = data.datasets;
                                 this.currentDataset = data.currentDataset || Object.keys(data.datasets)[0];
@@ -2964,37 +2993,112 @@
                             this.switchDataset(this.currentDataset, true);
                             this.updateDatasetSelector();
                             this.renderAll();
-                            this.updateDriveStatusUI();
+                        } finally {
+                            this._suppressDirty = false;
+                            this._lastJson = JSON.stringify(this.datasets);
+                        }
+                    },
+                    // 接続直後の同期: 未保存の変更があれば勝手に上書き読込しない
+                    async syncOnConnect() {
+                        if (!this.driveDirty) return this.loadFromDrive({ force: true });
+                        let remote;
+                        try { remote = await driveManager.findExact(DRIVE_MAIN_FILENAME); }
+                        catch (e) { this.showStatus('Drive確認失敗: ' + e.message, 'error'); return; }
+                        if (!remote || remote.modifiedTime === this.driveSyncedTime) {
+                            // Drive側は前回同期から変わっていない → この端末の変更をそのまま保存
+                            await this.saveToDrive(true, { auto: true });
+                            if (!this.driveDirty) this.showStatus('✅ 未保存だった変更をDriveへ保存しました', 'success');
+                            return;
+                        }
+                        const dt = new Date(remote.modifiedTime).toLocaleString('ja-JP');
+                        const useRemote = confirm(
+                            'この端末にDrive未保存の変更があり、Drive側も別の端末で更新されています。\n' +
+                            `（Driveの更新日時: ${dt}）\n\n` +
+                            '［OK］Driveの内容を読み込む（この端末の未保存の変更は破棄）\n' +
+                            '［キャンセル］この端末の内容を残す（あとで「保存」を押すとDriveを上書き）');
+                        if (useRemote) return this.loadFromDrive({ force: true });
+                        this.driveConflict = true;
+                        this.updateDriveStatusUI();
+                    },
+
+                    async loadFromDrive(opts = {}) {
+                        if (this.driveStatus !== 'connected') {
+                            this.showStatus('先にGoogle Driveに接続してください', 'error'); return;
+                        }
+                        if (this.driveDirty && !opts.force &&
+                            !confirm('Driveに未保存の変更があります。\n破棄してDriveの内容を読み込みますか？')) return;
+                        try {
+                            this.showLoading(true);
+                            clearTimeout(this._autoSaveTimer);
+                            const result = await driveManager.loadJson(DRIVE_MAIN_FILENAME);
+                            if (!result) { this.showStatus('Driveにデータファイルが見つかりません', 'error'); return; }
+                            this.applyRemoteData(result.data);
+                            this.setSynced(result.modifiedTime);
+                            this.setDirty(false);
                             this.showStatus(`✅ Driveから読み込みました（更新日時: ${new Date(result.modifiedTime).toLocaleString('ja-JP')}）`, 'success');
                         } catch(e) {
                             this.showStatus('Drive読込失敗: ' + e.message, 'error');
                         } finally { this.showLoading(false); }
                     },
 
-                    async saveToDrive(silent) {
+                    // opts.auto: 自動保存（画面を止めない・競合時は上書きしない） / opts.force: 競合確認を省く
+                    async saveToDrive(silent, opts = {}) {
                         if (this.driveStatus !== 'connected') {
-                            this.showStatus('先にGoogle Driveに接続してください', 'error'); return;
+                            if (!opts.auto) this.showStatus('先にGoogle Driveに接続してください', 'error');
+                            return;
                         }
+                        if (this._saving) { if (opts.auto) this.scheduleAutoSave(); return; }
+                        this._saving = true;
+                        clearTimeout(this._autoSaveTimer);
                         // 現在のデータをコミット
                         if (this.currentDataset && this.datasets[this.currentDataset]) {
                             this.datasets[this.currentDataset].incidents = this.incidents;
                             this.datasets[this.currentDataset].comments = this.comments;
                         }
+                        const savedJson = JSON.stringify(this.datasets);
+                        const payload = { datasets: JSON.parse(savedJson), currentDataset: this.currentDataset };
                         try {
-                            this.showLoading(true);
-                            const result = await driveManager.saveJsonWithBackup(DRIVE_MAIN_FILENAME,
-                                { datasets: this.datasets, currentDataset: this.currentDataset },
-                                { backupPrefix: DRIVE_BACKUP_PREFIX, maxBackups: DRIVE_MAX_BACKUPS }
-                            );
-                            this.driveLastFile = { modifiedTime: result.modifiedTime };
-                            this.updateDriveStatusUI();
+                            if (!opts.auto) this.showLoading(true);
+                            // 競合検知: Drive側が、この端末が最後に同期した時点から変わっていないか
+                            const existing = await driveManager.findExact(DRIVE_MAIN_FILENAME);
+                            if (existing && !opts.force && existing.modifiedTime !== this.driveSyncedTime) {
+                                const dt = new Date(existing.modifiedTime).toLocaleString('ja-JP');
+                                if (opts.auto) {
+                                    this.driveConflict = true;
+                                    this.updateDriveStatusUI();
+                                    this.showStatus(`⚠ Driveが別の端末で更新されています（${dt}）。自動保存を止めました。「最新読込」か「保存」を選んでください`, 'error');
+                                    return;
+                                }
+                                if (!confirm(`Driveのデータは別の端末で更新されています。\n（Driveの更新日時: ${dt}）\n\n` +
+                                    '［OK］この端末の内容で上書き保存（Drive側の内容はバックアップに残り、「バックアップから復元」で戻せます）\n' +
+                                    '［キャンセル］保存を中止（「最新読込」でDriveの内容を取り込めます）')) return;
+                            }
+                            // 自動保存はバックアップを間引く（10件の履歴が数分の編集で埋まらないように）
+                            const lastBk = parseInt(localStorage.getItem('driveLastBackupAt') || '0', 10);
+                            const withBackup = !opts.auto || (Date.now() - lastBk > this.autoBackupInterval);
+                            let modifiedTime, backedUp = false;
+                            if (withBackup || !existing) {
+                                const result = await driveManager.saveJsonWithBackup(DRIVE_MAIN_FILENAME, payload,
+                                    { backupPrefix: DRIVE_BACKUP_PREFIX, maxBackups: DRIVE_MAX_BACKUPS });
+                                modifiedTime = result.modifiedTime; backedUp = result.backedUp;
+                                if (backedUp) localStorage.setItem('driveLastBackupAt', String(Date.now()));
+                            } else {
+                                await driveManager.uploadJson(DRIVE_MAIN_FILENAME, payload, existing.id);
+                                const saved = await driveManager.findExact(DRIVE_MAIN_FILENAME);
+                                modifiedTime = saved ? saved.modifiedTime : new Date().toISOString();
+                            }
+                            this.setSynced(modifiedTime);
+                            // 保存中にさらに編集されていたら未保存のまま残して再予約
+                            const stillDirty = JSON.stringify(this.datasets) !== savedJson;
+                            this.setDirty(stillDirty);
+                            if (stillDirty) this.scheduleAutoSave();
                             localStorage.setItem('lastSaveDate', new Date().toISOString());
                             localStorage.setItem('lastBackupDate', new Date().toISOString());
                             this.checkBackupStatus();
-                            if (!silent) this.showStatus('✅ Driveに保存しました' + (result.backedUp ? '（直前の状態をバックアップに退避済み）' : ''), 'success');
+                            if (!silent) this.showStatus('✅ Driveに保存しました' + (backedUp ? '（直前の状態をバックアップに退避済み）' : ''), 'success');
                         } catch(e) {
-                            this.showStatus('Drive保存失敗: ' + e.message, 'error');
-                        } finally { this.showLoading(false); }
+                            this.showStatus((opts.auto ? 'Drive自動保存失敗: ' : 'Drive保存失敗: ') + e.message, 'error');
+                        } finally { this._saving = false; if (!opts.auto) this.showLoading(false); }
                     },
 
                     // ─── バックアップからの復元 ─────────────────────────────
@@ -3039,14 +3143,10 @@
                         try {
                             this.showLoading(true);
                             const data = await driveManager.downloadJson(fileId);
-                            if (data.datasets) {
-                                this.datasets = data.datasets;
-                                this.currentDataset = data.currentDataset || Object.keys(data.datasets)[0];
-                            }
-                            this.switchDataset(this.currentDataset, true);
-                            this.updateDatasetSelector();
-                            this.renderAll();
-                            await this.saveToDrive(true); // 復元内容を新メインとして保存（＝復元前状態も自動バックアップ）
+                            clearTimeout(this._autoSaveTimer);
+                            this.applyRemoteData(data);
+                            this._saving = false;
+                            await this.saveToDrive(true, { force: true }); // 復元内容を新メインとして保存（＝復元前状態も自動バックアップ）
                             await this.refreshBackupList();
                             this.showStatus('✅ ' + dtLabel + ' の状態に復元しました', 'success');
                         } catch (e) {
@@ -3068,9 +3168,18 @@
                         badge.style.color = s.fg;
                         badge.innerHTML = `<i class="fas fa-circle" style="font-size:0.6em;margin-right:3px;"></i>${s.text}`;
                         const info = document.getElementById('driveLastFileInfo');
-                        if (info && this.driveLastFile) {
-                            info.textContent = `最終更新: ${new Date(this.driveLastFile.modifiedTime).toLocaleString('ja-JP')}`;
+                        const configured = !!(this.driveClientId && this.driveFolderId);
+                        let sync = '', syncColor = '#777';
+                        if (this.driveConflict) { sync = '⚠ 別の端末で更新あり'; syncColor = '#dc3545'; }
+                        else if (this.driveDirty && configured) { sync = '● Drive未保存の変更あり'; syncColor = '#b3690a'; }
+                        else if (this.driveStatus === 'connected' && this.driveLastFile) { sync = '✓ Drive保存済み'; syncColor = '#065f46'; }
+                        if (info) {
+                            const t = this.driveLastFile ? `最終更新: ${new Date(this.driveLastFile.modifiedTime).toLocaleString('ja-JP')}` : '';
+                            info.textContent = [t, sync].filter(Boolean).join(' ・ ');
+                            info.style.color = syncColor;
                         }
+                        const hs = document.getElementById('headerSyncState');
+                        if (hs) { hs.textContent = sync; hs.style.color = syncColor; }
                         // input欄に現在値を反映
                         const cidEl = document.getElementById('driveClientIdInput');
                         const fidEl = document.getElementById('driveFolderIdInput');
@@ -3136,11 +3245,49 @@
                         this.showStatus('保存しました');
                     },
                     deleteIncident(id) {
-                        if (confirm('削除しますか？')) {
-                            this.incidents = this.incidents.filter(x => x.id !== id);
-                            delete this.comments[id];
+                        const inc = this.incidents.find(x => x.id === id);
+                        if (!inc) return;
+                        const coms = this.comments[id];
+                        const ds = this.currentDataset;
+                        this.incidents = this.incidents.filter(x => x.id !== id);
+                        delete this.comments[id];
+                        this.saveData(); this.renderAll();
+                        this.showUndo(`「${inc.name}」を削除しました`, () => {
+                            // 削除後にデータセットを切り替えていても元のデータセットへ戻す
+                            if (ds === this.currentDataset) {
+                                this.incidents.push(inc);
+                                if (coms) this.comments[id] = coms;
+                            } else if (this.datasets[ds]) {
+                                this.datasets[ds].incidents.push(inc);
+                                if (coms) this.datasets[ds].comments[id] = coms;
+                            } else return;
                             this.saveData(); this.renderAll();
+                            this.showStatus('削除を取り消しました');
+                        });
+                    },
+                    // 取り消しボタン付きの通知（8秒で消える）
+                    showUndo(message, onUndo) {
+                        let el = document.getElementById('undoToast');
+                        if (!el) {
+                            el = document.createElement('div');
+                            el.id = 'undoToast';
+                            el.style.cssText = 'position:fixed; left:50%; bottom:84px; transform:translateX(-50%); z-index:10001;' +
+                                'background:#2d3748; color:#fff; padding:10px 14px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.3);' +
+                                'display:flex; align-items:center; gap:12px; font-size:0.9em; max-width:92vw;';
+                            document.body.appendChild(el);
                         }
+                        el.innerHTML = '';
+                        const span = document.createElement('span');
+                        span.textContent = message;
+                        span.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+                        const btn = document.createElement('button');
+                        btn.textContent = '元に戻す';
+                        btn.style.cssText = 'background:#ffc107; color:#333; border:none; border-radius:6px; padding:6px 12px; font-weight:bold; cursor:pointer; white-space:nowrap;';
+                        btn.onclick = () => { clearTimeout(this._undoTimer); el.style.display = 'none'; onUndo(); };
+                        el.appendChild(span); el.appendChild(btn);
+                        el.style.display = 'flex';
+                        clearTimeout(this._undoTimer);
+                        this._undoTimer = setTimeout(() => { el.style.display = 'none'; }, 8000);
                     },
                     clearEndDate() {
                         this.elements.incidentEndDate.value = '';
@@ -3157,10 +3304,21 @@
                         }
                     },
                     deleteComment(incId, comId) {
-                        if (confirm('コメントを削除しますか？')) {
-                            this.comments[incId] = this.comments[incId].filter(c => c.id !== comId);
+                        const list = this.comments[incId] || [];
+                        const idx = list.findIndex(c => c.id === comId);
+                        if (idx === -1) return;
+                        const removed = list[idx];
+                        const ds = this.currentDataset;
+                        this.comments[incId] = list.filter(c => c.id !== comId);
+                        this.saveData(); this.renderAll();
+                        this.showUndo('コメントを削除しました', () => {
+                            const target = ds === this.currentDataset ? this.comments : (this.datasets[ds] && this.datasets[ds].comments);
+                            if (!target) return;
+                            if (!target[incId]) target[incId] = [];
+                            target[incId].splice(Math.min(idx, target[incId].length), 0, removed);
                             this.saveData(); this.renderAll();
-                        }
+                            this.showStatus('削除を取り消しました');
+                        });
                     },
                     openEditCommentModal(incId, comId) {
                         const c = this.comments[incId].find(x => x.id === comId);
