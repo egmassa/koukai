@@ -998,7 +998,7 @@
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-chart-line"></i> 故障履歴ダッシュボード</h1>
-            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v28</span>
+            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v29</span>
                 <span id="headerSyncState" style="font-size:0.8em; margin-left:8px;"></span></p>
 
             <!-- データセット選択 -->
@@ -2614,6 +2614,9 @@
 
                     generateId() { return 'id-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9); },
 
+                    // 今日の0時（進行中の日数計算用。現在時刻をそのまま使うと1日多く数えてしまう）
+                    todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; },
+
                     parseLocalDate(dateString) {
                         if (!dateString) return null;
 
@@ -2845,7 +2848,7 @@
                                 return `[${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}] ${c.text}`;
                             }).join(' | ');
                             const s = this.parseLocalDate(i.startDate);
-                            const e = i.endDate ? this.parseLocalDate(i.endDate) : new Date();
+                            const e = i.endDate ? this.parseLocalDate(i.endDate) : this.todayStart();
                             const durFromStart = Math.ceil((e-s)/86400000)+1;
                             let durFromAction = 'N/A';
                             if (i.actionStartDate) {
@@ -3371,7 +3374,7 @@
 
                         // 経過日数を計算
                         const startDate = this.parseLocalDate(inc.startDate);
-                        const endDate = inc.endDate ? this.parseLocalDate(inc.endDate) : new Date();
+                        const endDate = inc.endDate ? this.parseLocalDate(inc.endDate) : this.todayStart();
                         const daysFromStart = Math.ceil((endDate - startDate) / 86400000) + 1;
 
                         let daysFromAction = 'N/A';
@@ -3494,7 +3497,7 @@
                                     content += '<div style="opacity:0.7;">なし</div>';
                                 } else {
                                     ongoing.forEach(inc => {
-                                        const days = Math.floor((new Date() - this.parseLocalDate(inc.startDate)) / (1000 * 60 * 60 * 24));
+                                        const days = Math.round((this.todayStart() - this.parseLocalDate(inc.startDate)) / 86400000) + 1;
                                         content += `<div style="padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.2);">
                                             ${this.esc(inc.name)}<br>
                                             <span style="font-size:0.85em; opacity:0.8;">${inc.startDate} (${days}日経過)</span>
@@ -3508,7 +3511,7 @@
                                 if (this.incidents.length > 0) {
                                     const durations = this.incidents.map(i => {
                                         const start = this.parseLocalDate(i.startDate);
-                                        const end = i.endDate ? this.parseLocalDate(i.endDate) : new Date();
+                                        const end = i.endDate ? this.parseLocalDate(i.endDate) : this.todayStart();
                                         return { name: i.name, days: Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1 };
                                     });
                                     const longest = durations.reduce((a, b) => a.days > b.days ? a : b);
@@ -3620,7 +3623,7 @@
                                 title.textContent = '期間統計';
                                 const durations = this.incidents.map(i => {
                                     const start = this.parseLocalDate(i.startDate);
-                                    const end = i.endDate ? this.parseLocalDate(i.endDate) : new Date();
+                                    const end = i.endDate ? this.parseLocalDate(i.endDate) : this.todayStart();
                                     return {
                                         name: i.name,
                                         startDate: i.startDate,
@@ -3957,7 +3960,7 @@
 
                         // 日数と分類数はフィルタ後のデータで計算
                         if (data.length > 0) {
-                            const dates = data.flatMap(i => [this.parseLocalDate(i.startDate), i.endDate ? this.parseLocalDate(i.endDate) : new Date()]);
+                            const dates = data.flatMap(i => [this.parseLocalDate(i.startDate), i.endDate ? this.parseLocalDate(i.endDate) : this.todayStart()]);
                             const min = new Date(Math.min(...dates)); const max = new Date(Math.max(...dates));
                             this.elements.totalDays.textContent = Math.ceil((max - min) / 86400000) + 1;
                             this.elements.totalTypes.textContent = new Set(data.map(i => i.category)).size;
@@ -4470,7 +4473,7 @@
                     calculateDuration(startDate, endDate, actionStartDate) {
                         const d1 = this.parseLocalDate(startDate);
                         const isOngoing = !endDate;
-                        const d2 = endDate ? this.parseLocalDate(endDate) : new Date();
+                        const d2 = endDate ? this.parseLocalDate(endDate) : this.todayStart();
                         const diffFromStart = Math.ceil((d2 - d1) / 86400000) + 1;
 
                         let result = `開始から: ${diffFromStart}日`;
