@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>故障履歴ダッシュボード（決定版v26）</title>
+    <title>故障履歴ダッシュボード（決定版v27）</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
         integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A=="
         crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -965,6 +965,32 @@
             /* 濃い緑 */
             color: #ffffff;
         }
+        /* ===== 設定パネル（v27 再構成） ===== */
+        .settings-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .sp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+            background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; }
+        .sp-label { font-weight: bold; color: #667eea; font-size: 0.9em; white-space: nowrap; min-width: 92px; }
+        .sp-input { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85em; box-sizing: border-box; }
+        .sp-pair { display: flex; align-items: center; gap: 4px; }
+        .sp-spacer { flex: 1; }
+        .sp-count { font-weight: bold; color: #666; font-size: 0.85em; white-space: nowrap; }
+        .sp-muted { font-size: 0.78em; color: #777; font-weight: normal; }
+        .sp-badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 10px; border-radius: 12px; font-size: 0.78em; white-space: nowrap; }
+        .sp-backup-list { background: #fffaf0; border: 1px solid #f0d9b5; border-radius: 8px; padding: 8px 12px; }
+        .sp-details > summary { cursor: pointer; font-size: 0.85em; color: #4a5568; padding: 4px 6px; user-select: none; }
+        .sp-details > summary:hover { color: #667eea; }
+        .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 6px; }
+        .sp-card { background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; }
+        .sp-card h4 { margin: 0 0 8px 0; color: #667eea; font-size: 0.85em; padding-bottom: 4px; border-bottom: 1px solid #c3cbf5; }
+        .sp-card label { display: block; font-size: 0.78em; font-weight: bold; margin: 6px 0 2px; }
+        .sp-card > .sp-input { width: 100%; }
+        .sp-sub { font-size: 0.75em; color: #777; margin: 6px 0 4px; }
+        .sp-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+        @media (max-width: 768px) {
+            .sp-label { min-width: 100%; }
+            .sp-spacer { display: none; }
+            .sp-row > .btn { flex: 1 1 45%; }
+        }
     </style>
 </head>
 
@@ -1023,187 +1049,118 @@
                     <button class="close-settings" id="closeSettingsBtn">&times;</button>
                 </div>
 
-                <div class="controls-wrapper">
+                <div class="settings-body">
 
-                    <!-- データ管理セクション -->
-                    <div style="background:#f8f9fa; border-radius:8px; padding:10px;">
-                        <h4
-                            style="margin:0 0 8px 0; color:#667eea; font-size:0.9em; padding-bottom:4px; border-bottom:1px solid #667eea;">
-                            <i class="fas fa-database"></i> データ管理
-                        </h4>
-
-                        <!-- データセット操作 -->
-                        <div style="margin-bottom:8px;">
-                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:0.8em;">
-                                <span style="font-weight:bold;">現在:</span>
-                                <select id="datasetSelectorInSettings"
-                                    style="padding:3px 5px; border:2px solid #667eea; border-radius:3px; font-size:0.8em; flex:1;">
-                                </select>
+                    <!-- ① フィルター（常用） -->
+                    <div class="sp-row">
+                        <span class="sp-label"><i class="fas fa-filter"></i> フィルター</span>
+                        <input type="text" id="commentSearch" class="sp-input" placeholder="🔍 検索..." style="width:160px;">
+                        <select id="statusFilter" class="sp-input">
+                            <option value="">全状態</option>
+                            <option value="ongoing">進行中</option>
+                            <option value="closed">完了</option>
+                        </select>
+                        <div class="sp-pair">
+                            <div class="multi-select-wrapper" id="categoryWrapper">
+                                <button class="multi-select-btn" id="categoryBtn">分類</button>
+                                <div class="multi-select-content" id="categoryList"></div>
                             </div>
-                            <button class="btn btn-small" id="addExcelDataBtn"
-                                style="width:100%; background:#28a745; color:white; padding:5px; font-size:0.8em;">
-                                <i class="fas fa-file-excel"></i> Excel追加
-                            </button>
-                            <input type="file" id="excelAddInput" class="file-input" accept=".xlsx,.xls"
-                                style="display:none;">
+                            <label class="exclude-toggle"><input type="checkbox" id="categoryExclude"> 除外</label>
                         </div>
-
-                        <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
-
-                        <!-- 全データのバックアップ -->
-                        <div>
-                            <div style="font-weight:bold; margin-bottom:6px; font-size:0.8em;">全データバックアップ</div>
-                            <div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:4px;">
-                                <button class="btn btn-small" id="exportJsonBtn"
-                                    style="background:#667eea; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-save"></i> JSON
-                                </button>
-                                <button class="btn btn-small" id="exportCsvAllBtn"
-                                    style="background:#667eea; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-file-csv"></i> CSV
-                                </button>
-                                <button class="btn btn-small" id="selectBackupFileBtn"
-                                    style="background:#17a2b8; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-folder-open"></i> 保存先
-                                </button>
-                                <button class="btn btn-small" id="restoreJsonBtn"
-                                    style="background:#ff9800; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-upload"></i> JSON復元
-                                </button>
-                                <button class="btn btn-small" id="restoreExcelBtn"
-                                    style="background:#ff9800; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-file-excel"></i> Excel復元
-                                </button>
-                                <button class="btn btn-small" id="copyJsonBtn"
-                                    style="background:#6c757d; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-copy"></i> コピー
-                                </button>
-                                <button class="btn btn-small" id="clearDataBtn"
-                                    style="background:#dc3545; color:white; padding:5px 4px; font-size:0.7em; white-space:nowrap;">
-                                    <i class="fas fa-trash"></i> クリア
-                                </button>
-                                <input type="file" id="jsonRestoreInput" class="file-input" accept=".json"
-                                    style="display:none;">
-                                <input type="file" id="excelRestoreInput" class="file-input" accept=".xlsx,.xls"
-                                    style="display:none;">
+                        <div class="sp-pair">
+                            <div class="multi-select-wrapper" id="actionWrapper">
+                                <button class="multi-select-btn" id="actionBtn">処置</button>
+                                <div class="multi-select-content" id="actionList"></div>
                             </div>
+                            <label class="exclude-toggle"><input type="checkbox" id="actionExclude"> 除外</label>
                         </div>
+                        <span class="sp-spacer"></span>
+                        <div class="sp-count" id="filterStatusCompact">📊 -</div>
                     </div>
 
-
-                    <!-- Google Drive連携セクション -->
-                    <div style="background:#f8f9fa; border-radius:8px; padding:10px;">
-                        <h4 style="margin:0 0 8px 0; color:#667eea; font-size:0.9em; padding-bottom:4px; border-bottom:1px solid #667eea;">
-                            <i class="fab fa-google-drive"></i> Google Drive連携
-                        </h4>
-                        <div style="margin-bottom:8px;">
-                            <span id="driveStatusBadge" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:12px;font-size:0.72em;background:#fee2e2;color:#dc3545;">
-                                <i class="fas fa-circle" style="font-size:0.6em;"></i> 未接続
-                            </span>
-                            <span id="driveLastFileInfo" style="font-size:0.7em;color:#666;margin-left:8px;"></span>
-                        </div>
-                        <div style="margin-bottom:5px;">
-                            <label style="font-size:0.72em;font-weight:bold;display:block;margin-bottom:2px;">OAuth Client ID</label>
-                            <input type="text" id="driveClientIdInput" placeholder="xxxxxxxx.apps.googleusercontent.com"
-                                style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.72em;box-sizing:border-box;">
-                        </div>
-                        <div style="margin-bottom:6px;">
-                            <label style="font-size:0.72em;font-weight:bold;display:block;margin-bottom:2px;">保存フォルダID <span style="font-weight:normal;color:#888;">（DriveのURLの末尾）</span></label>
-                            <input type="text" id="driveFolderIdInput" placeholder="1aBcDeFgHiJk..."
-                                style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font-size:0.72em;box-sizing:border-box;">
-                        </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
-                            <button id="driveSaveSettingsBtn" class="btn btn-small"
-                                style="background:#6c757d;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fas fa-save"></i> 設定保存
-                            </button>
-                            <button id="driveConnectBtn" class="btn btn-small"
-                                style="background:#4285F4;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fab fa-google"></i> Googleで接続
-                            </button>
-                        </div>
-                        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">
-                            <button id="driveLoadBtn" class="btn btn-small"
-                                style="background:#34a853;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fas fa-cloud-download-alt"></i> 最新読込
-                            </button>
-                            <button id="driveSaveJsonBtn" class="btn btn-small"
-                                style="background:#667eea;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fas fa-cloud-upload-alt"></i> JSON保存
-                            </button>
-                            <button id="driveSaveCsvBtn" class="btn btn-small"
-                                style="background:#667eea;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fas fa-file-csv"></i> CSV保存
-                            </button>
-                        </div>
-                        <div style="margin-top:4px;">
-                            <button id="driveRestoreBtn" class="btn btn-small"
-                                style="width:100%;background:#b3690a;color:white;padding:5px;font-size:0.72em;">
-                                <i class="fas fa-history"></i> バックアップから復元
-                            </button>
-                        </div>
-                        <div id="backupListPanel" style="display:none; margin-top:8px; border-top:1px solid #ddd; padding-top:8px;">
-                            <div style="font-size:0.68em; color:#888; margin-bottom:6px;">直近のバックアップ一覧（新しい順・最大10件）</div>
-                            <div id="backupListBody" style="font-size:0.7em;">読み込み中...</div>
-                        </div>
+                    <!-- ② Google Drive（保存・読込の主経路） -->
+                    <div class="sp-row">
+                        <span class="sp-label"><i class="fab fa-google-drive"></i> Drive</span>
+                        <span id="driveStatusBadge" class="sp-badge" style="background:#fee2e2;color:#dc3545;">
+                            <i class="fas fa-circle" style="font-size:0.6em;"></i> 未接続
+                        </span>
+                        <span id="driveLastFileInfo" class="sp-muted"></span>
+                        <span class="sp-spacer"></span>
+                        <button id="driveSaveJsonBtn" class="btn btn-small" style="background:#667eea;color:white;" title="全データセットをDriveへ保存（直前の状態は自動でバックアップに退避）">
+                            <i class="fas fa-cloud-upload-alt"></i> 保存
+                        </button>
+                        <button id="driveLoadBtn" class="btn btn-small" style="background:#34a853;color:white;" title="Driveの最新データを読み込む">
+                            <i class="fas fa-cloud-download-alt"></i> 最新読込
+                        </button>
+                        <button id="driveRestoreBtn" class="btn btn-small" style="background:#b3690a;color:white;" title="Drive上のバックアップ（最大10件）から復元">
+                            <i class="fas fa-history"></i> バックアップから復元
+                        </button>
+                        <button id="driveSaveCsvBtn" class="btn btn-small" style="background:#6c757d;color:white;" title="データセットごとのCSVをDriveへ保存">
+                            <i class="fas fa-file-csv"></i> CSV保存
+                        </button>
+                        <button id="driveConnectBtn" class="btn btn-small" style="background:#4285F4;color:white;">
+                            <i class="fab fa-google"></i> Googleで接続
+                        </button>
+                    </div>
+                    <div id="backupListPanel" class="sp-backup-list" style="display:none;">
+                        <div class="sp-muted" style="margin-bottom:6px;">直近のバックアップ一覧（新しい順・最大10件）</div>
+                        <div id="backupListBody" style="font-size:0.8em;">読み込み中...</div>
                     </div>
 
-                    <!-- フィルタセクション -->
-                    <div style="background:#f8f9fa; border-radius:8px; padding:10px;">
-                        <h4
-                            style="margin:0 0 8px 0; color:#667eea; font-size:0.9em; padding-bottom:4px; border-bottom:1px solid #667eea;">
-                            <i class="fas fa-filter"></i> フィルター
-                        </h4>
-
-                        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
-                            <label style="font-weight:bold; font-size:0.75em;">基準年:</label>
-                            <input type="number" id="baseYear" value="1962"
-                                style="width:50px; padding:3px; border:1px solid #ddd; border-radius:3px; font-size:0.75em;">
-                            <button class="btn btn-primary btn-small" id="updateBaseYear"
-                                style="padding:3px 6px; font-size:0.75em;">更新</button>
-                        </div>
-
-                        <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
-                            <input type="text" id="commentSearch" placeholder="🔍 検索..."
-                                style="width:110px; padding:3px 5px; border:1px solid #ddd; border-radius:3px; font-size:0.75em;">
-
-                            <select id="statusFilter"
-                                style="padding:3px 5px; border:1px solid #ddd; border-radius:3px; font-size:0.75em;">
-                                <option value="">全状態</option>
-                                <option value="ongoing">進行中</option>
-                                <option value="closed">完了</option>
-                            </select>
-
-                            <div style="display:flex; align-items:center; gap:3px;">
-                                <div class="multi-select-wrapper" id="categoryWrapper">
-                                    <button class="multi-select-btn" id="categoryBtn"
-                                        style="padding:3px 6px; font-size:0.75em;">分類</button>
-                                    <div class="multi-select-content" id="categoryList"></div>
+                    <!-- ③ たまにしか使わないもの（折りたたみ） -->
+                    <details id="dataDetails" class="sp-details">
+                        <summary><i class="fas fa-ellipsis-h"></i> 接続設定・ローカルファイル・その他</summary>
+                        <div class="sp-grid">
+                            <div class="sp-card">
+                                <h4><i class="fas fa-key"></i> Drive接続設定</h4>
+                                <label>OAuth Client ID</label>
+                                <input type="text" id="driveClientIdInput" class="sp-input" placeholder="xxxxxxxx.apps.googleusercontent.com">
+                                <label>保存フォルダID <span class="sp-muted">（DriveのURLの末尾）</span></label>
+                                <input type="text" id="driveFolderIdInput" class="sp-input" placeholder="1aBcDeFgHiJk...">
+                                <button id="driveSaveSettingsBtn" class="btn btn-small" style="background:#6c757d;color:white;margin-top:8px;">
+                                    <i class="fas fa-save"></i> 設定保存
+                                </button>
+                            </div>
+                            <div class="sp-card">
+                                <h4><i class="fas fa-file-import"></i> ローカルファイル</h4>
+                                <div class="sp-sub">取り込み</div>
+                                <div class="sp-btns">
+                                    <button class="btn btn-small" id="addExcelDataBtn" style="background:#28a745;color:white;" title="表示中のデータセットにExcelの行を追加">
+                                        <i class="fas fa-file-excel"></i> Excel追加
+                                    </button>
+                                    <button class="btn btn-small" id="restoreJsonBtn" style="background:#ff9800;color:white;" title="JSONファイルから全データを復元">
+                                        <i class="fas fa-upload"></i> JSON復元
+                                    </button>
+                                    <button class="btn btn-small" id="restoreExcelBtn" style="background:#ff9800;color:white;" title="Excelファイルから全データを復元">
+                                        <i class="fas fa-upload"></i> Excel復元
+                                    </button>
                                 </div>
-                                <label class="exclude-toggle" style="font-size:0.7em;">
-                                    <input type="checkbox" id="categoryExclude"> 除外
-                                </label>
-                            </div>
-
-                            <div style="display:flex; align-items:center; gap:3px;">
-                                <div class="multi-select-wrapper" id="actionWrapper">
-                                    <button class="multi-select-btn" id="actionBtn"
-                                        style="padding:3px 6px; font-size:0.75em;">処置</button>
-                                    <div class="multi-select-content" id="actionList"></div>
+                                <div class="sp-sub">ダウンロード</div>
+                                <div class="sp-btns">
+                                    <button class="btn btn-small" id="exportJsonBtn" style="background:#667eea;color:white;" title="全データセットをJSONでダウンロード">
+                                        <i class="fas fa-download"></i> JSON
+                                    </button>
+                                    <button class="btn btn-small" id="exportCsvAllBtn" style="background:#667eea;color:white;" title="データセットごとにCSVをダウンロード">
+                                        <i class="fas fa-download"></i> CSV
+                                    </button>
                                 </div>
-                                <label class="exclude-toggle" style="font-size:0.7em;">
-                                    <input type="checkbox" id="actionExclude"> 除外
-                                </label>
+                                <input type="file" id="excelAddInput" class="file-input" accept=".xlsx,.xls" style="display:none;">
+                                <input type="file" id="jsonRestoreInput" class="file-input" accept=".json" style="display:none;">
+                                <input type="file" id="excelRestoreInput" class="file-input" accept=".xlsx,.xls" style="display:none;">
                             </div>
-
-                            <div style="flex:1;"></div>
-
-                            <div style="font-weight:bold; color:#666; font-size:0.75em; white-space:nowrap;"
-                                id="filterStatusCompact">
-                                📊 全122件表示中
+                            <div class="sp-card">
+                                <h4><i class="fas fa-tools"></i> その他</h4>
+                                <div class="sp-pair" style="margin-bottom:10px;">
+                                    <label style="margin:0;">基準年</label>
+                                    <input type="number" id="baseYear" value="1962" class="sp-input" style="width:72px;">
+                                    <button class="btn btn-primary btn-small" id="updateBaseYear">更新</button>
+                                </div>
+                                <button class="btn btn-small" id="clearDataBtn" style="background:#dc3545;color:white;" title="表示中のデータセットの中身を全て削除">
+                                    <i class="fas fa-trash"></i> このデータセットを空にする
+                                </button>
                             </div>
                         </div>
-                    </div>
+                    </details>
 
                 </div>
             </div>
@@ -1382,10 +1339,18 @@
                     <div><label>開始日:</label><input type="date" id="incidentStartDate"></div>
                     <div style="margin-top:10px;"><label>処置開始日 (任意):</label><input type="date"
                             id="incidentActionStartDate"></div>
-                    <div style="display: flex; gap: 10px; align-items: flex-end; margin-top:10px;">
-                        <div style="flex: 1;"><label>期間 (日):</label><input type="number" id="incidentDuration" min="1"
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top:10px;">
+                        <div style="flex: 0 0 96px;"><label style="white-space:nowrap;">期間 (日):</label><input type="number" id="incidentDuration" min="1"
                                 value="1"></div>
-                        <div style="flex: 1;"><label>終了日 (空欄で進行中):</label><input type="date" id="incidentEndDate"></div>
+                        <div style="flex: 1 1 200px; min-width: 0;"><label>終了日 (空欄で進行中):</label>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <input type="date" id="incidentEndDate" style="flex:1; min-width:0;">
+                                <button type="button" class="btn btn-secondary btn-small" style="white-space:nowrap;"
+                                    onclick="dashboardApp.clearEndDate()" title="終了日を消して進行中に戻す">
+                                    <i class="fas fa-eraser"></i> クリア
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1534,9 +1499,6 @@
                     TYPE_COLORS: {},
                     d3: { margin: { top: 70, right: 30, bottom: 40, left: 150 } },
                     renderAllTimer: null,
-                    backupDirHandle: null, // File System Access API用のディレクトリハンドル（PC用）
-                    backupFileHandle: null, // File System Access API用のファイルハンドル（スマホ用）
-                    mobileBackupMode: false, // スマホバックアップモードフラグ
                     currentViewingIncident: null, // 現在モーダルで表示中のインシデント
 
                     // Google Drive連携
@@ -1549,9 +1511,6 @@
                         baseYear: document.getElementById('baseYear'),
                         updateBaseYear: document.getElementById('updateBaseYear'),
                         // fileInput, excelInput, exportBtn は削除（新ボタンに置き換え）
-                        selectBackupFileBtn: document.getElementById('selectBackupFileBtn'),
-                        selectBackupFileBtnText: document.getElementById('selectBackupFileBtnText'),
-                        copyJsonBtn: document.getElementById('copyJsonBtn'),
                         // exportExcelBtn は削除（exportExcelAllBtnに置き換え）
                         addIncidentBtn: document.getElementById('addIncidentBtn'),
                         clearDataBtn: document.getElementById('clearDataBtn'),
@@ -1608,6 +1567,12 @@
                         this.updateDatasetSelector(); // データセット選択肢を初期化
                         this.renderAll();
                         this.checkBackupStatus();
+                        this.updateDriveStatusUI();
+                        // Drive未設定なら接続設定を開いた状態で見せる
+                        if (!this.driveClientId || !this.driveFolderId) {
+                            const det = document.getElementById('dataDetails');
+                            if (det) det.open = true;
+                        }
                         // Drive設定があれば自動接続を試みる
                         if (this.driveClientId && this.driveFolderId) {
                             await this.autoConnectDrive();
@@ -1730,10 +1695,6 @@
                             restoreExcelBtn.addEventListener('click', () => excelRestoreInput.click());
                             excelRestoreInput.addEventListener('change', (e) => this.handleExcelRestore(e));
                         }
-
-                        this.elements.selectBackupFileBtn.addEventListener('click', () => this.selectBackupFile());
-                        this.elements.copyJsonBtn.addEventListener('click', () => this.copyJsonToClipboard());
-                        // this.elements.exportExcelBtn.addEventListener('click', () => this.exportToExcel());
                         this.elements.addIncidentBtn.addEventListener('click', () => this.openAddIncidentModal());
                         this.elements.clearDataBtn.addEventListener('click', () => this.clearAllData());
 
@@ -2762,92 +2723,6 @@
                         }
                     },
 
-                    handleFileImport(event) {
-                        const file = event.target.files[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            try {
-                                const data = JSON.parse(e.target.result);
-                                if (data.incidents) this.incidents = data.incidents;
-                                if (data.comments) this.comments = data.comments;
-                                this.saveData(); this.renderAll(); this.showStatus('インポート完了', 'success');
-                            } catch (e) { this.showStatus('読み込みエラー', 'error'); }
-                            event.target.value = '';
-                        };
-                        reader.readAsText(file);
-                    },
-
-                    handleExcelImport(event) {
-                        const file = event.target.files[0];
-                        if (!file) return;
-                        this.showLoading(true);
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                            try {
-                                const data = new Uint8Array(e.target.result);
-                                const workbook = XLSX.read(data, { type: 'array' });
-                                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                                const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                                const imported = [];
-                                const newComments = {};
-                                let skipCount = 0;
-                                jsonData.forEach(row => {
-                                    const name = (row['インシデント名'] || row['名前'] || '').toString().trim();
-                                    const start = this.parseExcelDate(row['開始日'] || row['開始']);
-                                    const actionStart = this.parseExcelDate(row['処置開始日']);
-                                    const endVal = row['終了日'] || row['終了'];
-                                    let end = this.parseExcelDate(endVal);
-                                    if (name && start) {
-                                        if (!end) end = '';
-                                        const exists = this.incidents.some(i => i.name === name && i.startDate === start && i.endDate === end);
-                                        if (exists) { skipCount++; return; }
-                                        const newId = this.generateId();
-                                        const cat = (row['分類'] || row['カテゴリ'] || row['Category'] || row['タイプ'] || row['Type'] || '未分類').toString().trim();
-                                        const act = (row['処置'] || row['対処'] || row['Action'] || '').toString().trim();
-                                        imported.push({
-                                            id: newId,
-                                            name: name,
-                                            category: cat,
-                                            action: act,
-                                            startDate: start,
-                                            actionStartDate: actionStart || null,
-                                            endDate: end
-                                        });
-                                        const commentText = (row['コメント'] || row['Comments'] || row['備考'] || '').toString();
-                                        if (commentText) {
-                                            const lines = commentText.split('\n');
-                                            const comms = [];
-                                            lines.forEach(line => {
-                                                const trimmed = line.trim();
-                                                if (!trimmed) return;
-                                                const match = trimmed.match(/^\[(.*?)\]\s*(.*)$/);
-                                                if (match) {
-                                                    const parsedDate = new Date(match[1]);
-                                                    const isValidDate = !isNaN(parsedDate.getTime());
-                                                    comms.push({ id: this.generateId(), date: isValidDate ? parsedDate.toISOString() : new Date().toISOString(), text: match[2] });
-                                                } else {
-                                                    comms.push({ id: this.generateId(), date: new Date().toISOString(), text: trimmed });
-                                                }
-                                            });
-                                            if (comms.length > 0) newComments[newId] = comms;
-                                        }
-                                    }
-                                });
-                                if (imported.length > 0) {
-                                    this.incidents = [...this.incidents, ...imported];
-                                    this.comments = { ...this.comments, ...newComments };
-                                    this.saveData(); this.renderAll();
-                                    this.showStatus(`${imported.length}件インポート (重複${skipCount}件スキップ)`, 'success');
-                                } else {
-                                    this.showStatus(skipCount > 0 ? `全${skipCount}件が重複のためスキップ` : '有効データなし', skipCount > 0 ? 'info' : 'error');
-                                }
-                            } catch (e) { console.error(e); this.showStatus('Excel読込エラー', 'error'); }
-                            finally { this.showLoading(false); event.target.value = ''; }
-                        };
-                        reader.readAsArrayBuffer(file);
-                    },
-
                     parseExcelDate(val) {
                         if (!val) return '';
                         if (typeof val === 'number') {
@@ -2886,62 +2761,6 @@
 
                         // --- 以下、保存の実行処理 ---
 
-                        // ...（前半部分はそのまま）...
-                        // データセット構築やJSON文字列化の部分は変更なし
-
-                        // ★★★ ここから修正 ★★★
-
-                        // スマホバックアップモードの場合
-                        if (this.mobileBackupMode && this.backupFileHandle) {
-                            try {
-                                const options = {
-                                    types: [
-                                        {
-                                            description: 'JSONファイル',
-                                            accept: {
-                                                'application/json': ['.json']
-                                            }
-                                        }
-                                    ],
-                                    suggestedName: filename
-                                };
-
-                                // Excelと同じように、毎回保存先ピッカーを開く
-                                const newHandle = await window.showSaveFilePicker(options);
-                                const writable = await newHandle.createWritable();
-                                await writable.write(dataStr);
-                                await writable.close();
-
-                                this.showStatus(`${filename} として保存しました`, 'success');
-                                return;
-                            } catch (error) {
-                                if (error.name === 'AbortError') {
-                                    return; // キャンセル時は何もしない
-                                }
-                                console.error('ファイル保存エラー:', error);
-                                // エラー時は通常のダウンロードへフォールバック
-                            }
-                        }
-
-                        // ★★★ 修正ここまで ★★★
-
-                        // ...（PCディレクトリ保存や通常のダウンロード処理はそのまま）...
-
-                        // PCディレクトリ保存の場合
-                        if (this.backupDirHandle) {
-                            try {
-                                const fileHandle = await this.backupDirHandle.getFileHandle(filename, { create: true });
-                                const writable = await fileHandle.createWritable();
-                                await writable.write(dataStr);
-                                await writable.close();
-                                this.showStatus(`${filename} として保存しました`, 'success');
-                                return;
-                            } catch (error) {
-                                console.error('フォルダ保存エラー:', error);
-                                // エラー時はダウンロードへフォールバック
-                            }
-                        }
-
                         // 通常ダウンロード（フォールバック）
                         const a = document.createElement('a');
                         a.href = URL.createObjectURL(blob);
@@ -2950,6 +2769,9 @@
                         a.click();
                         document.body.removeChild(a);
                         URL.revokeObjectURL(a.href);
+                        localStorage.setItem('lastBackupDate', new Date().toISOString());
+                        this.checkBackupStatus();
+                        this.showStatus(`${filename} をダウンロードしました`, 'success');
                     },
 
                     downloadFile(blob, filename) {
@@ -2962,267 +2784,11 @@
                         URL.revokeObjectURL(a.href);
                     },
 
-                    // バックアップディレクトリを選択（File System Access API）
-                    async selectBackupFile() {
-                        // スマホ・タブレット判定
-                        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-                        if (isMobile) {
-                            // スマホの場合：showSavePickerでファイルを保存してコンテキストを記憶
-                            if (!('showSaveFilePicker' in window)) {
-                                this.showStatus('このブラウザはFile System Access APIに対応していません', 'error');
-                                return;
-                            }
-
-                            try {
-                                const options = {
-                                    types: [
-                                        {
-                                            description: 'JSONファイル',
-                                            accept: {
-                                                'application/json': ['.json']
-                                            }
-                                        }
-                                    ],
-                                    suggestedName: `incidents_backup.json`
-                                };
-
-                                // ファイルを保存（これでフォルダのコンテキストを記憶）
-                                this.backupFileHandle = await window.showSaveFilePicker(options);
-
-                                // データを保存
-                                const dataStr = JSON.stringify({ incidents: this.incidents, comments: this.comments }, null, 2);
-                                const writable = await this.backupFileHandle.createWritable();
-                                await writable.write(dataStr);
-                                await writable.close();
-
-                                this.showStatus(`保存先を設定しました: ${this.backupFileHandle.name}`, 'success');
-
-                                // フラグを立てる（スマホモード）
-                                this.mobileBackupMode = true;
-
-                            } catch (error) {
-                                if (error.name !== 'AbortError') {
-                                    console.error('ファイル選択エラー:', error);
-                                    this.showStatus('ファイル選択に失敗しました', 'error');
-                                }
-                            }
-                        } else {
-                            // PCの場合：showDirectoryPickerでフォルダ選択
-                            if (!('showDirectoryPicker' in window)) {
-                                this.showStatus('このブラウザはFile System Access APIに対応していません。Chrome/Edge/Vivaldiをお試しください', 'error');
-                                return;
-                            }
-
-                            try {
-                                // ディレクトリを選択
-                                this.backupDirHandle = await window.showDirectoryPicker();
-
-                                // ボタンテキストを更新
-                                this.updateBackupFileBtnText();
-
-                                this.showStatus(`保存先フォルダを設定しました: ${this.backupDirHandle.name}`, 'success');
-
-                            } catch (error) {
-                                if (error.name !== 'AbortError') {
-                                    console.error('フォルダ選択エラー:', error);
-                                    this.showStatus('フォルダ選択に失敗しました', 'error');
-                                }
-                            }
-                        }
-                    },
-
-                    // バックアップファイルボタンのテキストを更新
-                    updateBackupFileBtnText() {
-                        const btn = document.getElementById('selectBackupFileBtn');
-                        if (!btn) return;
-
-                        let text = '保存先選択';
-                        if (this.backupDirHandle) {
-                            // PC: ディレクトリ名を表示
-                            text = `📁 ${this.backupDirHandle.name}`;
-                        } else if (this.backupFileHandle) {
-                            // スマホ: ファイル名を表示
-                            text = `📁 ${this.backupFileHandle.name}`;
-                        }
-
-                        // ボタンの中身を丸ごと書き換える（エラー回避）
-                        btn.innerHTML = `<i class="fas fa-folder-open"></i> ${text}`;
-                    },
-
-                    // JSONをクリップボードにコピー
-                    copyJsonToClipboard() {
-                        const dataStr = JSON.stringify({ incidents: this.incidents, comments: this.comments }, null, 2);
-
-                        console.log('=== クリップボードコピー開始 ===');
-                        console.log('データサイズ:', dataStr.length, '文字');
-                        console.log('navigator.clipboard:', navigator.clipboard ? '利用可能' : '利用不可');
-                        console.log('HTTPS:', window.location.protocol === 'https:' ? 'はい' : 'いいえ');
-
-                        // 方法1: Clipboard API（モダンブラウザ）
-                        if (navigator.clipboard && navigator.clipboard.writeText) {
-                            console.log('方法1: Clipboard API を試行');
-                            navigator.clipboard.writeText(dataStr)
-                                .then(() => {
-                                    console.log('✓ Clipboard API 成功');
-                                    this.showStatus('クリップボードにコピーしました！Google Driveで新規テキストファイルを作成して貼り付けてください', 'success');
-
-                                    // バックアップ日時を記録
-                                    try {
-                                        localStorage.setItem('lastBackupDate', new Date().toISOString());
-                                        this.checkBackupStatus();
-                                    } catch (e) {
-                                        console.error('バックアップ日時の記録失敗:', e);
-                                    }
-                                })
-                                .catch(err => {
-                                    console.error('✗ Clipboard API 失敗:', err.name, err.message);
-                                    // フォールバック方法を試行
-                                    this.copyJsonFallback(dataStr);
-                                });
-                        } else {
-                            console.log('Clipboard API 利用不可、フォールバックへ');
-                            this.copyJsonFallback(dataStr);
-                        }
-                    },
-
-                    // フォールバック：複数の方法を試行
-                    copyJsonFallback(dataStr) {
-                        console.log('=== フォールバック方法を試行 ===');
-
-                        // 方法2: document.execCommand('copy')
-                        console.log('方法2: execCommand を試行');
-                        const textArea = document.createElement('textarea');
-                        textArea.value = dataStr;
-                        textArea.style.position = 'fixed';
-                        textArea.style.top = '0';
-                        textArea.style.left = '0';
-                        textArea.style.width = '2em';
-                        textArea.style.height = '2em';
-                        textArea.style.padding = '0';
-                        textArea.style.border = 'none';
-                        textArea.style.outline = 'none';
-                        textArea.style.boxShadow = 'none';
-                        textArea.style.background = 'transparent';
-                        document.body.appendChild(textArea);
-                        textArea.focus();
-                        textArea.select();
-
-                        try {
-                            const successful = document.execCommand('copy');
-                            console.log('execCommand 結果:', successful ? '成功' : '失敗');
-
-                            if (successful) {
-                                this.showStatus('クリップボードにコピーしました！Google Driveで新規テキストファイルを作成して貼り付けてください', 'success');
-
-                                // バックアップ日時を記録
-                                try {
-                                    localStorage.setItem('lastBackupDate', new Date().toISOString());
-                                    this.checkBackupStatus();
-                                } catch (e) {
-                                    console.error('バックアップ日時の記録失敗:', e);
-                                }
-                            } else {
-                                console.error('✗ execCommand 失敗');
-                                this.showCopyModal(dataStr);
-                            }
-                        } catch (err) {
-                            console.error('✗ execCommand エラー:', err.name, err.message);
-                            this.showCopyModal(dataStr);
-                        } finally {
-                            document.body.removeChild(textArea);
-                        }
-                    },
-
-                    // 方法3: モーダルで表示（最終手段）
-                    showCopyModal(dataStr) {
-                        console.log('方法3: モーダル表示（手動コピー）');
-
-                        const modal = document.createElement('div');
-                        modal.style.cssText = `
-                            position: fixed;
-                            top: 0;
-                            left: 0;
-                            width: 100%;
-                            height: 100%;
-                            background: rgba(0,0,0,0.8);
-                            z-index: 10000;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            padding: 20px;
-                        `;
-
-                        const content = document.createElement('div');
-                        content.style.cssText = `
-                            background: white;
-                            border-radius: 10px;
-                            padding: 20px;
-                            max-width: 600px;
-                            width: 100%;
-                            max-height: 80vh;
-                            display: flex;
-                            flex-direction: column;
-                        `;
-
-                        const title = document.createElement('h3');
-                        title.textContent = 'JSONデータ（手動でコピーしてください）';
-                        title.style.cssText = 'margin: 0 0 15px 0; color: #333;';
-
-                        const instruction = document.createElement('p');
-                        instruction.textContent = '以下のテキストを全選択してコピーし、Google Driveに新規テキストファイルとして保存してください。';
-                        instruction.style.cssText = 'margin: 0 0 10px 0; color: #666; font-size: 0.9em;';
-
-                        const textarea = document.createElement('textarea');
-                        textarea.value = dataStr;
-                        textarea.style.cssText = `
-                            width: 100%;
-                            height: 300px;
-                            font-family: monospace;
-                            font-size: 12px;
-                            padding: 10px;
-                            border: 1px solid #ddd;
-                            border-radius: 5px;
-                            resize: vertical;
-                        `;
-                        textarea.readOnly = true;
-
-                        const buttonContainer = document.createElement('div');
-                        buttonContainer.style.cssText = 'display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;';
-
-                        const selectBtn = document.createElement('button');
-                        selectBtn.textContent = '全選択';
-                        selectBtn.className = 'btn btn-primary';
-                        selectBtn.onclick = () => {
-                            textarea.select();
-                            this.showStatus('テキストを選択しました。コピーしてください', 'info');
-                        };
-
-                        const closeBtn = document.createElement('button');
-                        closeBtn.textContent = '閉じる';
-                        closeBtn.className = 'btn btn-secondary';
-                        closeBtn.onclick = () => document.body.removeChild(modal);
-
-                        buttonContainer.appendChild(selectBtn);
-                        buttonContainer.appendChild(closeBtn);
-
-                        content.appendChild(title);
-                        content.appendChild(instruction);
-                        content.appendChild(textarea);
-                        content.appendChild(buttonContainer);
-                        modal.appendChild(content);
-                        document.body.appendChild(modal);
-
-                        // 自動選択
-                        setTimeout(() => textarea.select(), 100);
-
-                        this.showStatus('自動コピーに失敗しました。モーダルからテキストを手動でコピーしてください', 'info');
-                    },
-
                     // クイックバックアップ（警告バナーから）
-                    quickBackup() {
-                        this.exportData();
-                        this.showStatus('バックアップを保存しました', 'success');
+                    async quickBackup() {
+                        // Drive接続中はDriveへ、未接続ならJSONダウンロード
+                        if (this.driveStatus === 'connected') await this.saveToDrive();
+                        else await this.exportData();
                     },
 
                     // バックアップ状態チェック
@@ -3254,167 +2820,6 @@
                         } catch (e) {
                             console.error('バックアップ状態チェック失敗:', e);
                         }
-                    },
-
-                    async exportToExcel() {
-                        // 全データセットを複数シートで出力
-                        const wb = XLSX.utils.book_new();
-
-                        Object.keys(this.datasets).sort().forEach(datasetName => {
-                            const dataset = this.datasets[datasetName];
-                            const incidents = dataset.incidents || [];
-                            const comments = dataset.comments || {};
-
-                            const data = incidents.map(i => {
-                                let comms = comments[i.id] || [];
-                                comms = comms.sort((a, b) => new Date(a.date) - new Date(b.date));
-                                const commentStr = comms.map(c => {
-                                    const d = new Date(c.date);
-                                    const dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                                    return `[${dateStr}] ${c.text}`;
-                                }).join('\n');
-                                const s = this.parseLocalDate(i.startDate);
-                                const e = i.endDate ? this.parseLocalDate(i.endDate) : new Date();
-                                const durFromStart = Math.ceil((e - s) / 86400000) + 1;
-
-                                // 処置開始日からの経過日数
-                                let durFromAction = 'N/A';
-                                if (i.actionStartDate) {
-                                    const as = this.parseLocalDate(i.actionStartDate);
-                                    durFromAction = Math.ceil((e - as) / 86400000) + 1;
-                                }
-
-                                return {
-                                    'インシデント名': i.name,
-                                    '分類': i.category,
-                                    '処置': i.action,
-                                    '開始日': i.startDate,
-                                    '処置開始日': i.actionStartDate || '',
-                                    '終了日': i.endDate || '',
-                                    '状態': i.endDate ? '完了' : '進行中',
-                                    '開始からの経過日数': durFromStart,
-                                    '処置からの経過日数': durFromAction,
-                                    'コメント': commentStr
-                                };
-                            });
-
-                            const ws = XLSX.utils.json_to_sheet(data);
-                            // シート名は最大31文字（Excelの制限）
-                            const sheetName = datasetName.substring(0, 31);
-                            XLSX.utils.book_append_sheet(wb, ws, sheetName);
-                        });
-
-                        // ローカルタイムゾーンで日付を取得
-                        const now = new Date();
-                        const year = now.getFullYear();
-                        const month = String(now.getMonth() + 1).padStart(2, '0');
-                        const day = String(now.getDate()).padStart(2, '0');
-                        const filename = `incidents_all_${year}-${month}-${day}.xlsx`;
-
-                        // スマホ・タブレット判定
-                        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-                        // スマホバックアップモードの場合（showSavePickerを使う）
-                        if (this.mobileBackupMode && this.backupFileHandle) {
-                            try {
-                                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-
-                                const options = {
-                                    types: [
-                                        {
-                                            description: 'Excelファイル',
-                                            accept: {
-                                                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
-                                            }
-                                        }
-                                    ],
-                                    suggestedName: filename
-                                };
-
-                                console.log('=== スマホExcel保存デバッグ ===');
-                                console.log('保存ファイル名:', filename);
-                                console.log('データセット数:', Object.keys(this.datasets).length);
-
-                                // 新しいファイルとして保存（ブラウザが前回フォルダを記憶）
-                                const newHandle = await window.showSaveFilePicker(options);
-                                const writable = await newHandle.createWritable();
-                                await writable.write(wbout);
-                                await writable.close();
-
-                                console.log('Excel書き込み完了: データサイズ', wbout.byteLength, 'バイト');
-
-                                this.showStatus(`${filename} として保存しました（全${Object.keys(this.datasets).length}データセット）`, 'success');
-                                return;
-                            } catch (error) {
-                                if (error.name === 'AbortError') {
-                                    // ユーザーがキャンセルした場合は何もしない
-                                    return;
-                                }
-                                console.error('Excel保存エラー:', error);
-                                this.showStatus('保存先ファイルへの書き込みに失敗しました。通常のダウンロードを実行します', 'error');
-                                // エラーの場合は通常のダウンロード処理へ
-                            }
-                        }
-
-                        // PCディレクトリハンドルがある場合
-                        if (this.backupDirHandle) {
-                            try {
-                                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-
-                                console.log('=== Excel ディレクトリ保存デバッグ ===');
-                                console.log('保存ファイル名:', filename);
-                                console.log('保存先ディレクトリ:', this.backupDirHandle.name);
-
-                                // ディレクトリ内にファイルを作成
-                                const fileHandle = await this.backupDirHandle.getFileHandle(filename, { create: true });
-                                const writable = await fileHandle.createWritable();
-                                await writable.write(wbout);
-                                await writable.close();
-
-                                console.log('Excel書き込み完了: データサイズ', wbout.byteLength, 'バイト');
-
-                                this.showStatus(`${filename} として保存しました`, 'success');
-                                return;
-                            } catch (error) {
-                                if (error.name === 'AbortError') {
-                                    // ユーザーがキャンセルした場合は何もしない
-                                    return;
-                                }
-                                console.error('Excel保存エラー:', error);
-                                this.showStatus('保存先ファイルへの書き込みに失敗しました。通常のダウンロードを実行します', 'error');
-                                // エラーの場合は通常のダウンロード処理へ
-                            }
-                        }
-
-                        // Web Share API が使える場合（主にスマホ）
-                        if (isMobile && navigator.share && navigator.canShare) {
-                            // XLSXをBlobとして生成
-                            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                            const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-                            const file = new File([blob], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-
-                            if (navigator.canShare({ files: [file] })) {
-                                navigator.share({
-                                    files: [file],
-                                    title: 'インシデントデータ（Excel）',
-                                    text: 'バックアップファイル'
-                                })
-                                    .then(() => {
-                                        this.showStatus('共有しました', 'success');
-                                    })
-                                    .catch((error) => {
-                                        if (error.name !== 'AbortError') {
-                                            console.error('共有エラー:', error);
-                                            // 共有が失敗した場合は通常のダウンロードにフォールバック
-                                            XLSX.writeFile(wb, filename);
-                                        }
-                                    });
-                                return;
-                            }
-                        }
-
-                        // PCまたはWeb Share API非対応の場合は通常のダウンロード
-                        XLSX.writeFile(wb, filename);
                     },
 
                     // ─── CSV エクスポート ────────────────────────────────────────
@@ -3584,6 +2989,8 @@
                             this.driveLastFile = { modifiedTime: result.modifiedTime };
                             this.updateDriveStatusUI();
                             localStorage.setItem('lastSaveDate', new Date().toISOString());
+                            localStorage.setItem('lastBackupDate', new Date().toISOString());
+                            this.checkBackupStatus();
                             if (!silent) this.showStatus('✅ Driveに保存しました' + (result.backedUp ? '（直前の状態をバックアップに退避済み）' : ''), 'success');
                         } catch(e) {
                             this.showStatus('Drive保存失敗: ' + e.message, 'error');
@@ -3672,7 +3079,7 @@
                     },
 
                     clearAllData() {
-                        if (confirm('全データを削除しますか？')) {
+                        if (confirm(`データセット「${this.currentDataset}」の中身を全て削除しますか？`)) {
                             this.incidents = []; this.comments = {};
                             this.saveData(); this.renderAll();
                         }
@@ -3695,7 +3102,7 @@
                         this.elements.incidentAction.value = i.action;
                         this.elements.incidentStartDate.value = i.startDate;
                         this.elements.incidentActionStartDate.value = i.actionStartDate || ''; // 処置開始日
-                        this.elements.incidentEndDate.value = i.endDate;
+                        this.elements.incidentEndDate.value = i.endDate || '';
                         this.recalcDates('end');
                         this.elements.incidentModal.classList.add('show');
                     },
@@ -3718,7 +3125,7 @@
                             action: act,
                             startDate: start,
                             actionStartDate: actionStart || null, // 空欄ならnull
-                            endDate: end
+                            endDate: end || null // 空欄なら進行中
                         };
 
                         if (this.editingIncidentId) {
@@ -3734,6 +3141,10 @@
                             delete this.comments[id];
                             this.saveData(); this.renderAll();
                         }
+                    },
+                    clearEndDate() {
+                        this.elements.incidentEndDate.value = '';
+                        this.elements.incidentEndDate.focus();
                     },
                     closeModal() { this.elements.incidentModal.classList.remove('show'); },
 
@@ -4200,7 +3611,7 @@
                         const s = this.parseLocalDate(sVal);
                         if (trigger === 'duration' || trigger === 'start') {
                             const days = parseInt(dVal) || 1;
-                            if (eVal) { const e = new Date(s); e.setDate(s.getDate() + days - 1); this.elements.incidentEndDate.value = e.toISOString().split('T')[0]; }
+                            if (eVal) { const e = new Date(s); e.setDate(s.getDate() + days - 1); this.elements.incidentEndDate.value = `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; }
                         } else if (trigger === 'end' && eVal) {
                             const e = this.parseLocalDate(eVal);
                             const diff = Math.ceil((e - s) / (86400000)) + 1;
