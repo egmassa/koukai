@@ -234,6 +234,12 @@
       <button class="mode-btn active" data-value="doubles">ダブル</button>
     </div>
 
+    <div class="grp-label">試合のセット数</div>
+    <div class="mode-toggle" data-group="bestOf">
+      <button class="mode-btn active" data-value="1">1セット</button>
+      <button class="mode-btn" data-value="3">3セット</button>
+    </div>
+
     <div class="grp-label">1セットのゲーム数</div>
     <div class="mode-toggle" data-group="gamesPerSet">
       <button class="mode-btn active" data-value="4">4</button>
@@ -410,7 +416,7 @@ window.addEventListener("resize", detectDevice);
 const LOCAL_DB_KEY = "tennis-watch-matches"; // ローカル永続DB(Drive未接続でも履歴閲覧可能)
 
 /* ====================== セットアップ入力の一時保持 ====================== */
-let pendingSettings = { mode:"doubles", gamesPerSet:4, setFinishMode:"firstTo", deuceMode:"noAd", firstServer:"a",
+let pendingSettings = { mode:"doubles", bestOf:1, gamesPerSet:4, setFinishMode:"firstTo", deuceMode:"noAd", firstServer:"a",
   pairFirstServer:"partner", selfReturnSide:"deuce" };
 
 document.querySelectorAll(".mode-toggle").forEach(group=>{
@@ -521,6 +527,7 @@ function newMatchState(nameA, nameB){
     mode: pendingSettings.mode,
     settings: {
       gamesPerSet: pendingSettings.gamesPerSet, setFinishMode: pendingSettings.setFinishMode, deuceMode: pendingSettings.deuceMode,
+      bestOf: pendingSettings.bestOf, // 1=1セットマッチ / 3=3セットマッチ(2セット先取)。決着したら自動で次の試合へ
       // ダブルスのペア分析用(シングルスの場合は無視される)
       pairFirstServer: pendingSettings.mode==="doubles" ? pendingSettings.pairFirstServer : undefined,
       selfReturnSide: pendingSettings.mode==="doubles" ? pendingSettings.selfReturnSide : undefined
@@ -688,8 +695,63 @@ function addPoint(side, pairActor){
     addNormalPoint(side, setNumber, actor);
   }
 
+  if(isMatchOver()){
+    startNextMatchSameConditions();
+    return;
+  }
   render();
   persist();
+}
+
+// 試合のセット数(1セット/3セット)に達して試合が決着したか。
+// bestOfが無い試合(この機能を入れる前に始めた試合)は従来通り自動では終わらせない
+function isMatchOver(){
+  const bo = state.settings && state.settings.bestOf;
+  if(!bo) return false;
+  const need = bo >= 3 ? 2 : 1;
+  const winsA = state.sets.filter(x=>x.a>x.b).length, winsB = state.sets.filter(x=>x.b>x.a).length;
+  return winsA >= need || winsB >= need || state.sets.length >= bo; // 消化方式の引き分けセットも数に入れる
+}
+
+// 試合が決着したら、その試合を終了扱いにして、同じ名前・同じルールで次の試合を自動で始める
+// (同じ条件で続けて試合をすることが多く、毎回ルール設定から始め直すのが手間なため)。
+// サーブの順番(どちらのチームか・自分/パートナーのどちらか)は、そのまま続きとして引き継ぐ。
+function startNextMatchSameConditions(){
+  const prev = state;
+  prev.finished = true; // historyは残す(次の試合の最初で「戻る」と、この試合の最後の1点を取り消せるように)
+  persist();
+  const next = newMatchState(prev.nameA, prev.nameB);
+  next.mode = prev.mode;
+  next.settings = Object.assign({}, prev.settings);
+  next.server = prev.server; // 直前のゲーム終了時点で、次のゲームのサーブ側に切り替わっている
+  if(prev.mode === "doubles" && prev.settings.pairFirstServer && prev.pairServeTurn){
+    // 自チームが次にサーブする時の担当。次が自チームのサーブなら既に次の担当に進んでいるのでそのまま、
+    // 相手のサーブなら(直前に自チームでサーブした人の)反対の人
+    const nextSelfServer = (prev.server === "a") ? prev.pairServeTurn : (prev.pairServeTurn === "self" ? "partner" : "self");
+    next.settings.pairFirstServer = nextSelfServer;
+    next.pairServeTurn = (next.server === "a") ? nextSelfServer : null;
+  } else {
+    next.pairServeTurn = null;
+  }
+  next.prevMatchId = prev.matchId;
+  state = next;
+  render();
+  persist();
+  const result = prev.sets.map(x=>`${x.a}-${x.b}`).join(" ");
+  toast(`試合終了 ${result} → 同じ条件で次の試合へ`);
+}
+
+// 自動で次の試合に切り替わった直後(まだ1点も入っていない)に「戻る」を押した時、
+// 前の試合を再開して、その試合を決めた最後の1点を取り消す
+function reopenPreviousMatch(){
+  const db = loadDb();
+  const prevRec = (db.matches||[]).find(x=>x.matchId===state.prevMatchId);
+  if(!prevRec){ toast("前の試合が見つかりません"); return; }
+  db.matches = db.matches.filter(x=>x.matchId!==state.matchId); // 空の今の試合は消す
+  saveDb(db);
+  state = Object.assign({}, prevRec, { finished:false, history: prevRec.history || [] });
+  if(state.history.length) restoreLastSnapshot(); else { render(); persist(); }
+  toast("前の試合に戻りました");
 }
 
 function addNormalPoint(side, setNumber, pairActor){
@@ -1181,7 +1243,12 @@ function performUndo(){
     return;
   }
   const lastSnap = state.history[state.history.length-1];
-  if(!lastSnap) return;
+  if(!lastSnap){
+    if(state.prevMatchId && state.pointLog.length === 0){
+      customConfirm("前の試合に戻りますか？\n(試合を決めた1点を取り消します)", reopenPreviousMatch);
+    }
+    return;
+  }
   // セットを決めた1点を取り消す(=前のセットに戻る)時は、うっかり戻してしまわないよう確認を挟む。
   // スナップショット時点のセット数が今より少なければ、それは前のセットの状態
   if((JSON.parse(lastSnap).sets||[]).length < (state.sets||[]).length){
@@ -1305,7 +1372,7 @@ function render(){
 function rulesSummary(st){
   const finishLabel = {winByTwo:"タイブレあり", firstTo:"先取", fixed:"消化"}[st.setFinishMode] || st.setFinishMode;
   const deuceLabel = {ad:"アドバンテージ", noAd:"ノーアド", oneDeuce:"1デュース"}[st.deuceMode] || st.deuceMode;
-  return `${st.gamesPerSet}ゲーム・${finishLabel}・${deuceLabel}`;
+  return `${st.bestOf ? st.bestOf+"セット・" : ""}${st.gamesPerSet}ゲーム・${finishLabel}・${deuceLabel}`;
 }
 
 /* ====================== ローカル永続DB(Drive未接続でも履歴を保持・閲覧) ====================== */
@@ -1359,7 +1426,7 @@ function resumeIfPossible(){
    ソースコードに直接書いてよい。一方、合言葉(トークン)だけは
    watch上で音声入力してもらい、この端末のlocalStorageにだけ保存する
    (公開されているページのソースを誰かが見ても、実際の合言葉は見えないようにするため)。 */
-const APP_VERSION = "2026-09-29.4"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-10-11.1"; // 更新のたびに日付+連番で上げる(接続設定画面に小さく表示、動作には影響なし)
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwNA8cGjifkE7pUFYctbWg0mYDZ6RnWmWjI_co4lr7HY0IMs5PKwWzw5MBkCG3pcGUw/exec";
 const APPS_SCRIPT_CONFIG_KEY = "tennis-watch-appsscript-config";
 const APPS_SCRIPT_CHECKPOINT_KEY = "tennis-watch-appsscript-checkpoint";
