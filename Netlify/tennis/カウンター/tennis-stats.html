@@ -153,6 +153,16 @@
     font-size:13px; font-family:inherit;}
   .note-section textarea::placeholder{color:var(--dim);}
 
+  .rule-line{font-size:12px; color:var(--dim); margin:-4px 0 10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .rule-fix-btn{padding:3px 10px; border-radius:8px; border:1px solid var(--line); background:transparent;
+    color:var(--dim); font-size:11px; cursor:pointer;}
+  .rule-fix-panel{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px; margin:0 0 14px;}
+  .rule-fix-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0;}
+  .rule-fix-row select{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:5px 8px; font-size:13px;}
+  .rule-fix-row button{padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--text); font-size:12px; cursor:pointer;}
+  .rule-fix-row button.rule-apply-btn{background:var(--teal); color:#04231d; border:none; font-weight:700;}
+  .rule-fix-row button:disabled{opacity:0.4; cursor:default;}
+  .rule-preview{font-size:13px; line-height:1.7; margin:6px 0;}
   .day-picker{display:flex; gap:6px; align-items:center; margin-bottom:12px;}
   .day-picker select{background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px;
     padding:6px 10px; font-size:13px;}
@@ -211,7 +221,7 @@
   @media print{
     /* PDF出力(ブラウザの印刷機能)向け: 操作用のUIは隠し、紙映えする明るい配色に切り替える */
     .toolbar, #pdfExportBtn, #filterResetBtn, #driveLoadBtn, .del-btn, #detailClose, .version-tag,
-    #tokenSettingsPanel, .detail-pdf-btn, .set-selector{display:none !important;}
+    #tokenSettingsPanel, .detail-pdf-btn, .set-selector, .rule-fix-btn, .rule-fix-panel, .day-picker button{display:none !important;}
     body{background:#fff; color:#111;}
     .stat-chip, .compare-item, .table-wrap, .grid-wrap, #detailPanel, .glossary, .empty{
       background:#fff !important; border-color:#ccc !important;}
@@ -515,6 +525,42 @@ function sumCounts(list){
   return out;
 }
 
+// セットの決着ルールを変えた場合に、記録済みのゲームの並び(勝者)はそのままで、
+// セットの区切りとセット結果を計算し直す。ポイント自体(どちらが取ったか・スコア表示)は変えず、
+// 各ポイントのセット番号・ゲーム番号だけを付け直す。
+// mode: 'winByTwo'(2差・N-Nでタイブレーク) | 'firstTo'(N先取) | 'fixed'(Nゲーム消化)
+function resplitSets(match, gamesPerSet, mode){
+  const N = gamesPerSet;
+  const games = {};
+  (match.pointLog||[]).forEach(p=>{ const k = p.setNumber+"-"+p.gameNumber; (games[k]=games[k]||[]).push(p); });
+  const keys = Object.keys(games).sort((x,y)=>{
+    const [xs,xg]=x.split("-").map(Number), [ys,yg]=y.split("-").map(Number);
+    return xs-ys || xg-yg;
+  });
+  const sets = [];
+  const newLog = [];
+  let a = 0, b = 0, setNo = 1, gameNo = 0;
+  keys.forEach(k=>{
+    const pts = games[k].slice().sort((x,y)=>(x.pointInGame||0)-(y.pointInGame||0));
+    gameNo++;
+    pts.forEach(p=> newLog.push(Object.assign({}, p, { setNumber: setNo, gameNumber: gameNo })));
+    const winner = pts[pts.length-1].side;
+    // ゲームの途中で終わっている(=試合の最後の未完ゲーム)可能性もあるが、記録上の最後の
+    // ポイントの勝者をそのゲームの勝者として扱う(元の記録と同じ扱い)
+    if(winner==="a") a++; else b++;
+    const isTb = !!(pts[0] && pts[0].tiebreak);
+    let done;
+    if(mode==="firstTo") done = (a>=N || b>=N);
+    else if(mode==="fixed") done = (a+b >= N);
+    else done = (a>=N || b>=N) && (Math.abs(a-b)>=2 || isTb);
+    if(done){ sets.push({a, b}); setNo++; a = 0; b = 0; gameNo = 0; }
+  });
+  // 最後の未完ゲームはゲーム数に入れない方が正確だが、元の記録との整合を優先し、
+  // 未完ゲームかどうかはここでは判定しない(最後のセットが未完なら sets には入らない)
+  newLog.sort((x,y)=>(x.ts||0)-(y.ts||0));
+  return { sets, pointLog: newLog };
+}
+
 // 試合中に実際に記録されているセット番号の一覧(進行中の未確定セットも含む)を昇順で返す
 function listSetNumbers(match){
   const set = new Set((match.pointLog||[]).map(p=>p.setNumber));
@@ -662,7 +708,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-10-11.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-10-11.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込みはGoogleログインでDriveを直接読む(速い)。保存はwatchと同じApps Script経由(合言葉)。
 // (読み込みもApps Script経由にしてみたが、1回数十秒〜かかることがあり遅すぎたため戻した)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
@@ -832,7 +878,8 @@ async function sendChangeToDrive(change){
     toast2("ファイルから読み込んだデータなので、Driveへの保存はできません。手元のファイルを直接編集してください。");
     return;
   }
-  unsavedChanges.set(changeKey(change), change); // 成功したら消す
+  // 成功したら消す(ルール修正は保存できた時だけ画面に反映する作りなので、送り直しの対象外)
+  if(change.action !== "fixMatchRule") unsavedChanges.set(changeKey(change), change);
   const token = getStoredAppsScriptToken();
   if(!token){
     toast2("合言葉が未設定のため保存できませんでした。🔑ボタンから設定してください", true);
@@ -865,18 +912,18 @@ async function sendChangeToDrive(change){
       unsavedChanges.delete(changeKey(change));
       toast2(`Driveに保存しました`);
       saveLocalCache(allMatches);
-      return;
+      return true;
     }catch(e){
       if(e.isInvalidToken){
         // 合言葉そのものが間違っている場合だけ、キャッシュ(localStorageとメモリの両方)を消して聞き直す
         clearStoredAppsScriptToken();
         toast2("⚠️ Driveへの保存に失敗しました: 合言葉が違います。🔑から入れ直してください", true);
         openTokenSettings();
-        return;
+        return false;
       }
       if(e.fatal || i === MAX_TRY){
         toast2("⚠️ Driveへの保存に失敗しました: " + e.message, true);
-        return;
+        return false;
       }
       console.warn(`[save] ${i}回目失敗:`, e.message);
       await new Promise(r=>setTimeout(r, 1500*i));
@@ -1464,6 +1511,127 @@ function computeActorStats(match, setNumber){
   return r;
 }
 
+/* ====================== ルールの修正(先取/消化などを間違えて記録した試合を直す) ====================== */
+const FINISH_MODE_LABELS = { winByTwo:"タイブレあり(2ゲーム差)", firstTo:"先取", fixed:"消化" };
+function ruleText(m){
+  const st = m.settings || {};
+  const n = st.gamesPerSet, fm = FINISH_MODE_LABELS[st.setFinishMode] || st.setFinishMode || "不明";
+  return n ? `${n}ゲーム ${fm}` : fm;
+}
+function setsText(sets){ return (sets||[]).map(s=>`${s.a}-${s.b}`).join(" ") || "(なし)"; }
+function openRuleFix(m){
+  const panel = $("ruleFixPanel");
+  if(panel.style.display === "block"){ panel.style.display = "none"; return; }
+  const st = m.settings || {};
+  const curN = st.gamesPerSet || 4, curMode = st.setFinishMode || "firstTo";
+  panel.innerHTML = `
+    <div class="desc" style="margin:0 0 8px;">記録した時のルール設定を間違えた場合に、正しいルールでセットの区切りとセット結果を計算し直します。
+      各ポイント(どちらが取ったか)はそのままです。</div>
+    <div class="rule-fix-row">
+      <select id="ruleN">${[1,2,3,4,5,6,7,8].map(n=>`<option value="${n}"${n===curN?" selected":""}>${n}ゲーム</option>`).join("")}</select>
+      <select id="ruleMode">${Object.keys(FINISH_MODE_LABELS).map(k=>`<option value="${k}"${k===curMode?" selected":""}>${FINISH_MODE_LABELS[k]}</option>`).join("")}</select>
+    </div>
+    <div id="rulePreview" class="rule-preview"></div>
+    <div class="rule-fix-row">
+      <button id="ruleApplyBtn" class="rule-apply-btn">この内容で修正して保存</button>
+      <button id="ruleCancelBtn">やめる</button>
+    </div>`;
+  panel.style.display = "block";
+  const preview = ()=>{
+    const r = resplitSets(m, Number($("ruleN").value), $("ruleMode").value);
+    const changed = setsText(r.sets) !== setsText(m.sets);
+    const hasSetNotes = m.setNotes && Object.keys(m.setNotes).length;
+    $("rulePreview").innerHTML =
+      `今のセット結果: <b>${setsText(m.sets)}</b><br>修正後のセット結果: <b>${setsText(r.sets)}</b>` +
+      (changed ? "" : `<br><span style="color:var(--dim)">(セット結果は変わりません)</span>`) +
+      (changed && hasSetNotes ? `<br><span style="color:var(--danger)">※セットごとのメモは元のセット番号のまま残ります。必要なら修正後に書き直してください</span>` : "");
+    $("ruleApplyBtn").disabled = !changed && Number($("ruleN").value)===curN && $("ruleMode").value===curMode;
+  };
+  $("ruleN").addEventListener("change", preview);
+  $("ruleMode").addEventListener("change", preview);
+  preview();
+  $("ruleCancelBtn").addEventListener("click", ()=>{ panel.style.display = "none"; });
+  $("ruleApplyBtn").addEventListener("click", async ()=>{
+    if(!loadedFromDriveFileId){
+      toast2(showingCachedData ? "⚠️ 最新データの読み込み中なので、まだ修正できません" : "ファイルから読み込んだデータなので、Driveへの保存はできません", true);
+      return;
+    }
+    const N = Number($("ruleN").value), mode = $("ruleMode").value;
+    const r = resplitSets(m, N, mode);
+    if(!confirm(`この試合のルールを「${N}ゲーム ${FINISH_MODE_LABELS[mode]}」に直し、セット結果を ${setsText(r.sets)} にして保存しますか？`)) return;
+    const ok = await sendChangeToDrive({ action:"fixMatchRule", matchId: m.matchId, gamesPerSet: N, setFinishMode: mode, sets: r.sets, pointLog: r.pointLog });
+    if(!ok) return;
+    m.settings = Object.assign({}, m.settings, { gamesPerSet: N, setFinishMode: mode });
+    m.sets = r.sets;
+    m.pointLog = r.pointLog;
+    applyFilters();
+    showMatchDetail(m.matchId, null);
+    toast2(`ルールを修正しました(セット結果 ${setsText(r.sets)})`);
+  });
+}
+
+// その日の試合をまとめて同じルールに直す(同じ日の試合は同じルール設定で記録していることが多いため)
+function openDayRuleFix(ms){
+  const panel = $("dayRuleFixPanel");
+  if(panel.style.display === "block"){ panel.style.display = "none"; return; }
+  const st0 = (ms[0] && ms[0].settings) || {};
+  const curN = st0.gamesPerSet || 4, curMode = st0.setFinishMode || "firstTo";
+  panel.innerHTML = `
+    <div class="desc" style="margin:0 0 8px;">この日の全試合(${ms.length}試合)を、選んだルールでセットの区切りとセット結果を計算し直します。各ポイントはそのままです。</div>
+    <div class="rule-fix-row">
+      <select id="dayRuleN">${[1,2,3,4,5,6,7,8].map(n=>`<option value="${n}"${n===curN?" selected":""}>${n}ゲーム</option>`).join("")}</select>
+      <select id="dayRuleMode">${Object.keys(FINISH_MODE_LABELS).map(k=>`<option value="${k}"${k===curMode?" selected":""}>${FINISH_MODE_LABELS[k]}</option>`).join("")}</select>
+    </div>
+    <div id="dayRulePreview" class="rule-preview"></div>
+    <div class="rule-fix-row">
+      <button id="dayRuleApplyBtn" class="rule-apply-btn">この内容でまとめて修正して保存</button>
+      <button id="dayRuleCancelBtn">やめる</button>
+    </div>`;
+  panel.style.display = "block";
+  const plan = ()=>{
+    const N = Number($("dayRuleN").value), mode = $("dayRuleMode").value;
+    return ms.map(m=>{
+      const r = resplitSets(m, N, mode);
+      const st = m.settings || {};
+      const changed = setsText(r.sets) !== setsText(m.sets) || st.gamesPerSet !== N || st.setFinishMode !== mode;
+      return { m, r, N, mode, changed };
+    });
+  };
+  const preview = ()=>{
+    const p = plan();
+    const nChanged = p.filter(x=>x.changed).length;
+    $("dayRulePreview").innerHTML = p.map(x=>
+      `${x.m.nameA} vs ${x.m.nameB}: ${ruleText(x.m)} <b>${setsText(x.m.sets)}</b> → <b>${setsText(x.r.sets)}</b>${x.changed?"":" <span style='color:var(--dim)'>(変更なし)</span>"}`
+    ).join("<br>") + `<br><span style="color:var(--dim)">${nChanged}試合を修正します</span>`;
+    $("dayRuleApplyBtn").disabled = (nChanged === 0);
+  };
+  $("dayRuleN").addEventListener("change", preview);
+  $("dayRuleMode").addEventListener("change", preview);
+  preview();
+  $("dayRuleCancelBtn").addEventListener("click", ()=>{ panel.style.display = "none"; });
+  $("dayRuleApplyBtn").addEventListener("click", async ()=>{
+    if(!loadedFromDriveFileId){
+      toast2(showingCachedData ? "⚠️ 最新データの読み込み中なので、まだ修正できません" : "ファイルから読み込んだデータなので、Driveへの保存はできません", true);
+      return;
+    }
+    const targets = plan().filter(x=>x.changed);
+    if(!confirm(`${targets.length}試合のルールを「${targets[0].N}ゲーム ${FINISH_MODE_LABELS[targets[0].mode]}」に直して保存しますか？`)) return;
+    $("dayRuleApplyBtn").disabled = true;
+    let done = 0;
+    for(const x of targets){
+      const ok = await sendChangeToDrive({ action:"fixMatchRule", matchId: x.m.matchId, gamesPerSet: x.N, setFinishMode: x.mode, sets: x.r.sets, pointLog: x.r.pointLog });
+      if(!ok) break; // 失敗したらそこで止める(エラーは表示済み)。済んだ分は反映する
+      x.m.settings = Object.assign({}, x.m.settings, { gamesPerSet: x.N, setFinishMode: x.mode });
+      x.m.sets = x.r.sets;
+      x.m.pointLog = x.r.pointLog;
+      done++;
+    }
+    applyFilters();
+    if(done === targets.length) toast2(`${done}試合のルールを修正しました`);
+    else toast2(`⚠️ ${targets.length}試合中${done}試合まで修正しました(残りは保存に失敗)`, true);
+  });
+}
+
 /* ====================== 日別スタッツ(その日の全試合をまとめた成績) ====================== */
 let selectedDayKey = null;
 // 試合を「どの日の試合か」で分ける。最初のポイントの時刻(無ければ最終更新日時)の日付を使う
@@ -1528,9 +1696,12 @@ function renderDayStats(){
           <span class="res ${r}">${setsText} ${resLabel[r]}</span></li>`;
       }).join("")}
     </ul>
-    <div class="desc" style="margin:4px 0 8px;">試合をタップすると、その試合の詳細(試合一覧の下)が開きます</div>
+    <div class="desc" style="margin:4px 0 8px;">試合をタップすると、その試合の詳細(試合一覧の下)が開きます
+      <button id="dayRuleFixBtn" class="rule-fix-btn" style="margin-left:6px;">この日の試合のルールをまとめて修正</button></div>
+    <div id="dayRuleFixPanel" class="rule-fix-panel" style="display:none;"></div>
     ${buildStatsBlocksHtml(nameA, nameB, st, pair, actor)}
   </div>`;
+  $("dayRuleFixBtn").addEventListener("click", ()=> openDayRuleFix(ms));
   $("dayStats").querySelectorAll("[data-day-match]").forEach(li=>{
     li.addEventListener("click", ()=> showMatchDetail(li.dataset.dayMatch));
   });
@@ -1622,6 +1793,8 @@ function showMatchDetail(matchId, setNumber){
 
   panel.innerHTML = `
     <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
+    <div class="rule-line">ルール: ${ruleText(m)} <button id="ruleFixBtn" class="rule-fix-btn">ルールを修正</button></div>
+    <div id="ruleFixPanel" class="rule-fix-panel" style="display:none;"></div>
 
     <div class="note-section">
       <div class="desc" style="margin:0 0 4px;">試合メモ</div>
@@ -1641,6 +1814,7 @@ function showMatchDetail(matchId, setNumber){
     <button id="detailClose">閉じる</button>
   `;
   $("detailClose").addEventListener("click", ()=>{ panel.style.display="none"; });
+  $("ruleFixBtn").addEventListener("click", ()=> openRuleFix(m));
 
   // 試合メモ: 値をセットしてから、変更確定(フォーカスが外れた時)で保存する
   const noteEl = $("matchNoteInput");
