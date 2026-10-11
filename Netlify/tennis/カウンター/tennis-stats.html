@@ -153,6 +153,22 @@
     font-size:13px; font-family:inherit;}
   .note-section textarea::placeholder{color:var(--dim);}
 
+  .day-picker{display:flex; gap:6px; align-items:center; margin-bottom:12px;}
+  .day-picker select{background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px;
+    padding:6px 10px; font-size:13px;}
+  .day-picker button{padding:6px 10px; border-radius:8px; border:1px solid var(--line); background:var(--panel);
+    color:var(--text); font-size:12px; cursor:pointer;}
+  .day-picker button:disabled{opacity:0.35; cursor:default;}
+  #dayStats .day-box{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;}
+  .day-summary{display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; margin-bottom:12px;}
+  .day-matches{list-style:none; margin:0 0 6px; padding:0;}
+  .day-matches li{display:flex; gap:10px; align-items:baseline; padding:7px 4px; border-bottom:1px solid var(--line);
+    font-size:13px; cursor:pointer;}
+  .day-matches li:hover{background:var(--panel2);}
+  .day-matches .t{color:var(--dim); font-size:12px; min-width:44px;}
+  .day-matches .res{margin-left:auto; font-weight:700; white-space:nowrap;}
+  .day-matches .res.win{color:var(--teal);} .day-matches .res.lose{color:var(--orange);} .day-matches .res.draw{color:var(--dim);}
+  #dayStats .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:14px;}
   .set-selector{display:flex; gap:6px; flex-wrap:wrap; margin:4px 0;}
   .set-selector-btn{padding:5px 12px; border-radius:20px; border:1px solid var(--line);
     background:var(--panel2); color:var(--dim); font-size:12px; cursor:pointer;}
@@ -304,6 +320,17 @@
       <div class="table-wrap"><table id="opponentTable"></table></div>
     </section>
 
+    <section id="daySection">
+      <h2>日別スタッツ</h2>
+      <div class="desc">選んだ日に記録した全試合をまとめた成績です(上のフィルター条件も反映されます)</div>
+      <div class="day-picker">
+        <button id="dayPrevBtn" title="前の日">◀</button>
+        <select id="daySelect"></select>
+        <button id="dayNextBtn" title="次の日">▶</button>
+      </div>
+      <div id="dayStats"></div>
+    </section>
+
     <section id="matchListSection">
       <h2>試合一覧</h2>
       <div class="desc">日付順。行をタップすると詳細が見られます</div>
@@ -445,31 +472,47 @@ function computeMatchStats(match, setNumber){
     }
   });
 
+  // 割合(%)ではなく元の件数(分子・分母)も持っておく。複数試合(その日全体など)をまとめる時は
+  // 件数を足し合わせてから割合を出す(試合ごとの%を平均すると、ポイント数の少ない試合が効きすぎるため)
+  const raw = { serveTotalA, serveWonA, serveTotalB, serveWonB, gamesServedA, gamesHeldA, gamesServedB, gamesHeldB, bpFacedA, bpSavedA, bpFacedB, bpSavedB, bpChanceA, bpConvertedA, bpChanceB, bpConvertedB, serveDeuceTotalA, serveDeuceWonA, serveAdTotalA, serveAdWonA, serveDeuceTotalB, serveDeuceWonB, serveAdTotalB, serveAdWonB, retDeuceTotalA, retDeuceWonA, retAdTotalA, retAdWonA, retDeuceTotalB, retDeuceWonB, retAdTotalB, retAdWonB, deuceGamesA, deuceGamesWonA, deuceGamesB, deuceGamesWonB, deuceGamesTotal, totalPointsWonA, totalPointsWonB };
+  return Object.assign(
+    { matchId: match.matchId, nameA: match.nameA, nameB: match.nameB, updatedAt: match.updatedAt },
+    statsFromRaw(raw),
+    { raw }
+  );
+}
+
+// computeMatchStatsの件数(raw)から各種の割合を計算する(1試合でも、複数試合を合算した件数でも使える)
+function statsFromRaw(r){
   const pct = (n,d)=> d>0 ? Math.round((n/d)*1000)/10 : null;
-
   return {
-    matchId: match.matchId, nameA: match.nameA, nameB: match.nameB, updatedAt: match.updatedAt,
+    serveWinPctA: pct(r.serveWonA, r.serveTotalA), serveWinPctB: pct(r.serveWonB, r.serveTotalB),
+    returnWinPctA: pct(r.serveTotalB-r.serveWonB, r.serveTotalB), returnWinPctB: pct(r.serveTotalA-r.serveWonA, r.serveTotalA),
+    serviceHoldPctA: pct(r.gamesHeldA, r.gamesServedA), serviceHoldPctB: pct(r.gamesHeldB, r.gamesServedB),
 
-    serveWinPctA: pct(serveWonA, serveTotalA), serveWinPctB: pct(serveWonB, serveTotalB),
-    returnWinPctA: pct(serveTotalB-serveWonB, serveTotalB), returnWinPctB: pct(serveTotalA-serveWonA, serveTotalA),
-    serviceHoldPctA: pct(gamesHeldA, gamesServedA), serviceHoldPctB: pct(gamesHeldB, gamesServedB),
+    breakPointSavePctA: pct(r.bpSavedA, r.bpFacedA), breakPointSavePctB: pct(r.bpSavedB, r.bpFacedB),
+    breakPointConvertPctA: pct(r.bpConvertedA, r.bpChanceA), breakPointConvertPctB: pct(r.bpConvertedB, r.bpChanceB),
+    bpChanceA: r.bpChanceA, bpChanceB: r.bpChanceB,
 
-    breakPointSavePctA: pct(bpSavedA, bpFacedA), breakPointSavePctB: pct(bpSavedB, bpFacedB),
-    breakPointConvertPctA: pct(bpConvertedA, bpChanceA), breakPointConvertPctB: pct(bpConvertedB, bpChanceB),
-    bpChanceA, bpChanceB,
+    serveWinPctA_deuce: pct(r.serveDeuceWonA, r.serveDeuceTotalA), serveWinPctA_ad: pct(r.serveAdWonA, r.serveAdTotalA),
+    serveWinPctB_deuce: pct(r.serveDeuceWonB, r.serveDeuceTotalB), serveWinPctB_ad: pct(r.serveAdWonB, r.serveAdTotalB),
+    returnWinPctA_deuce: pct(r.retDeuceWonA, r.retDeuceTotalA), returnWinPctA_ad: pct(r.retAdWonA, r.retAdTotalA),
+    returnWinPctB_deuce: pct(r.retDeuceWonB, r.retDeuceTotalB), returnWinPctB_ad: pct(r.retAdWonB, r.retAdTotalB),
 
-    serveWinPctA_deuce: pct(serveDeuceWonA, serveDeuceTotalA), serveWinPctA_ad: pct(serveAdWonA, serveAdTotalA),
-    serveWinPctB_deuce: pct(serveDeuceWonB, serveDeuceTotalB), serveWinPctB_ad: pct(serveAdWonB, serveAdTotalB),
-    returnWinPctA_deuce: pct(retDeuceWonA, retDeuceTotalA), returnWinPctA_ad: pct(retAdWonA, retAdTotalA),
-    returnWinPctB_deuce: pct(retDeuceWonB, retDeuceTotalB), returnWinPctB_ad: pct(retAdWonB, retAdTotalB),
+    deuceGameWinPctA: pct(r.deuceGamesWonA, r.deuceGamesA), deuceGameWinPctB: pct(r.deuceGamesWonB, r.deuceGamesB),
+    deuceGamesTotal: r.deuceGamesTotal,
 
-    deuceGameWinPctA: pct(deuceGamesWonA, deuceGamesA), deuceGameWinPctB: pct(deuceGamesWonB, deuceGamesB),
-    deuceGamesTotal,
+    gamesServedA: r.gamesServedA, gamesServedB: r.gamesServedB, bpFacedA: r.bpFacedA, bpFacedB: r.bpFacedB,
 
-    gamesServedA, gamesServedB, bpFacedA, bpFacedB,
-
-    totalPointsWonA, totalPointsWonB, totalPoints: totalPointsWonA + totalPointsWonB
+    totalPointsWonA: r.totalPointsWonA, totalPointsWonB: r.totalPointsWonB, totalPoints: r.totalPointsWonA + r.totalPointsWonB
   };
+}
+
+// 件数オブジェクト(computeMatchStatsのraw、computePairStatsのraw など)を項目ごとに足し合わせる
+function sumCounts(list){
+  const out = {};
+  list.forEach(o=>{ Object.keys(o||{}).forEach(k=>{ out[k] = (out[k]||0) + (Number(o[k])||0); }); });
+  return out;
 }
 
 // 試合中に実際に記録されているセット番号の一覧(進行中の未確定セットも含む)を昇順で返す
@@ -546,16 +589,21 @@ function computePairStats(match, setNumber){
     }
   });
 
+  const raw = { selfServePtsTotal, selfServePtsWon, partnerServePtsTotal, partnerServePtsWon,
+    selfServeGames, selfServeGamesWon, partnerServeGames, partnerServeGamesWon,
+    selfReturnPtsTotal, selfReturnPtsWon, partnerReturnPtsTotal, partnerReturnPtsWon };
+  return Object.assign({ hasPairData: true }, pairStatsFromRaw(raw), { raw });
+}
+function pairStatsFromRaw(r){
   const pct = (n,d)=> d>0 ? Math.round((n/d)*1000)/10 : null;
   return {
-    hasPairData: true,
-    selfServeGames, partnerServeGames,
-    selfServeWinPct: pct(selfServePtsWon, selfServePtsTotal),
-    partnerServeWinPct: pct(partnerServePtsWon, partnerServePtsTotal),
-    selfHoldPct: pct(selfServeGamesWon, selfServeGames),
-    partnerHoldPct: pct(partnerServeGamesWon, partnerServeGames),
-    selfReturnWinPct: pct(selfReturnPtsWon, selfReturnPtsTotal),
-    partnerReturnWinPct: pct(partnerReturnPtsWon, partnerReturnPtsTotal)
+    selfServeGames: r.selfServeGames, partnerServeGames: r.partnerServeGames,
+    selfServeWinPct: pct(r.selfServePtsWon, r.selfServePtsTotal),
+    partnerServeWinPct: pct(r.partnerServePtsWon, r.partnerServePtsTotal),
+    selfHoldPct: pct(r.selfServeGamesWon, r.selfServeGames),
+    partnerHoldPct: pct(r.partnerServeGamesWon, r.partnerServeGames),
+    selfReturnWinPct: pct(r.selfReturnPtsWon, r.selfReturnPtsTotal),
+    partnerReturnWinPct: pct(r.partnerReturnPtsWon, r.partnerReturnPtsTotal)
   };
 }
 
@@ -614,7 +662,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-09-29.9"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-10-11.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込みはGoogleログインでDriveを直接読む(速い)。保存はwatchと同じApps Script経由(合言葉)。
 // (読み込みもApps Script経由にしてみたが、1回数十秒〜かかることがあり遅すぎたため戻した)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
@@ -984,7 +1032,7 @@ function applyFilters(){
   $("filterCount").textContent = `${filteredMatches.length} / ${allMatches.length} 試合を表示中`;
 
   if(filteredMatches.length===0){
-    ["overallSummary","leaderboardTable","opponentTable","matchTable"].forEach(id=> $(id).innerHTML = "");
+    ["overallSummary","leaderboardTable","opponentTable","matchTable","daySelect","dayStats"].forEach(id=> $(id).innerHTML = "");
     $("trendChart").innerHTML = "";
     $("detailPanel").style.display = "none";
     return;
@@ -993,6 +1041,7 @@ function applyFilters(){
   try{ renderTrendChart(); }catch(e){ console.error("グラフ描画エラー:", e); $("trendChart").textContent = "グラフを表示できませんでした"; }
   try{ renderLeaderboard(); }catch(e){ console.error("リーダーボード描画エラー:", e); }
   try{ renderOpponentTable(); }catch(e){ console.error("対戦相手別表描画エラー:", e); }
+  try{ renderDayStats(); }catch(e){ console.error("日別スタッツ描画エラー:", e); }
   try{ renderMatchTable(); }catch(e){ console.error("試合一覧描画エラー:", e); }
 }
 
@@ -1415,6 +1464,135 @@ function computeActorStats(match, setNumber){
   return r;
 }
 
+/* ====================== 日別スタッツ(その日の全試合をまとめた成績) ====================== */
+let selectedDayKey = null;
+// 試合を「どの日の試合か」で分ける。最初のポイントの時刻(無ければ最終更新日時)の日付を使う
+function matchDayKey(m){
+  const d = matchStartTime(m) || (m.updatedAt ? new Date(m.updatedAt) : null);
+  if(!d) return null;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function dayLabel(key){
+  const [y,mo,d] = key.split("-").map(Number);
+  const wd = "日月火水木金土"[new Date(y, mo-1, d).getDay()];
+  return `${y}/${mo}/${d}(${wd})`;
+}
+function matchResult(m){
+  const setsA = (m.sets||[]).filter(s=>s.a>s.b).length, setsB = (m.sets||[]).filter(s=>s.b>s.a).length;
+  return setsA>setsB ? "win" : (setsB>setsA ? "lose" : "draw");
+}
+function renderDayStats(){
+  const groups = {};
+  filteredMatches.forEach(m=>{ const k = matchDayKey(m); if(k) (groups[k] = groups[k] || []).push(m); });
+  const keys = Object.keys(groups).sort().reverse(); // 新しい日が先頭
+  const sel = $("daySelect");
+  if(keys.length === 0){ sel.innerHTML = ""; $("dayStats").innerHTML = '<div class="desc">対象の試合がありません</div>'; return; }
+  if(!selectedDayKey || !groups[selectedDayKey]) selectedDayKey = keys[0];
+  sel.innerHTML = keys.map(k=>`<option value="${k}"${k===selectedDayKey?" selected":""}>${dayLabel(k)}  ${groups[k].length}試合</option>`).join("");
+  const idx = keys.indexOf(selectedDayKey);
+  $("dayPrevBtn").disabled = (idx >= keys.length-1); // 前の日 = 古い方
+  $("dayNextBtn").disabled = (idx <= 0);
+
+  const ms = groups[selectedDayKey].slice().sort((a,b)=> (matchStartTime(a)||0) - (matchStartTime(b)||0));
+  const st = statsFromRaw(sumCounts(ms.map(m=>computeMatchStats(m).raw)));
+  const pairs = ms.map(m=>computePairStats(m)).filter(p=>p.hasPairData);
+  // 記録が一部の試合にしか無い場合は、何試合分の集計かを見出しに添える
+  const scope = (n)=> n < ms.length ? `・${ms.length}試合中、記録のある${n}試合分` : "";
+  const pair = pairs.length ? Object.assign({ hasPairData:true, scopeNote: scope(pairs.length) }, pairStatsFromRaw(sumCounts(pairs.map(p=>p.raw)))) : { hasPairData:false };
+  const actors = ms.map(m=>computeActorStats(m)).filter(a=>a.hasData);
+  const actor = actors.length ? Object.assign({ hasData:true, scopeNote: scope(actors.length) }, sumCounts(actors.map(a=>({ selfWon:a.selfWon, selfLost:a.selfLost, partnerWon:a.partnerWon, partnerLost:a.partnerLost, unassigned:a.unassigned })))) : { hasData:false };
+
+  const wins = ms.filter(m=>matchResult(m)==="win").length, loses = ms.filter(m=>matchResult(m)==="lose").length;
+  const draws = ms.length - wins - loses;
+  let gamesA = 0, gamesB = 0;
+  ms.forEach(m=>(m.sets||[]).forEach(s=>{ gamesA += s.a; gamesB += s.b; }));
+  const uniq = arr => [...new Set(arr)];
+  // 自チーム名・相手名がその日すべて同じならその名前、違うなら「自チーム」「相手」とまとめて表示
+  const nameA = uniq(ms.map(m=>m.nameA)).length===1 ? ms[0].nameA : "自チーム";
+  const nameB = uniq(ms.map(m=>m.nameB)).length===1 ? ms[0].nameB : "相手";
+  const hm = d => d ? d.toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"}) : "";
+  const resLabel = { win:"勝ち", lose:"負け", draw:"引分/途中" };
+
+  $("dayStats").innerHTML = `<div class="day-box">
+    <div class="day-summary">
+      <div class="stat-chip"><div class="lbl">試合数</div><div class="val">${ms.length}試合</div></div>
+      <div class="stat-chip"><div class="lbl">勝敗</div><div class="val a">${wins}勝${loses}敗${draws?` ${draws}分`:""}</div></div>
+      <div class="stat-chip"><div class="lbl">取ったゲーム数</div><div class="val a">${gamesA}<span style="color:var(--dim);font-size:13px;"> - ${gamesB}</span></div></div>
+    </div>
+    <ul class="day-matches">
+      ${ms.map(m=>{
+        const r = matchResult(m);
+        const setsText = (m.sets||[]).map(s=>`${s.a}-${s.b}`).join(" ") || "―";
+        return `<li data-day-match="${m.matchId}"><span class="t">${hm(matchStartTime(m))}</span>
+          <span>${m.nameA} vs ${m.nameB}${m.note ? ' <span class="note-flag">📝</span>' : ""}</span>
+          <span class="res ${r}">${setsText} ${resLabel[r]}</span></li>`;
+      }).join("")}
+    </ul>
+    <div class="desc" style="margin:4px 0 8px;">試合をタップすると、その試合の詳細(試合一覧の下)が開きます</div>
+    ${buildStatsBlocksHtml(nameA, nameB, st, pair, actor)}
+  </div>`;
+  $("dayStats").querySelectorAll("[data-day-match]").forEach(li=>{
+    li.addEventListener("click", ()=> showMatchDetail(li.dataset.dayMatch));
+  });
+}
+$("daySelect").addEventListener("change", ()=>{ selectedDayKey = $("daySelect").value; renderDayStats(); });
+function shiftDay(delta){
+  const opts = [...$("daySelect").options].map(o=>o.value);
+  const i = opts.indexOf(selectedDayKey) + delta;
+  if(i>=0 && i<opts.length){ selectedDayKey = opts[i]; renderDayStats(); }
+}
+$("dayPrevBtn").addEventListener("click", ()=> shiftDay(+1)); // 一覧は新しい日が先なので、+1 = 前の日
+$("dayNextBtn").addEventListener("click", ()=> shiftDay(-1));
+
+// スタッツの各欄(基本・自分vsパートナー・BP・コートサイド・デュース)のHTML。
+// 1試合の詳細と、その日全体のまとめの両方で使う
+function buildStatsBlocksHtml(nameA, nameB, st, pair, actor){
+  const sgn = n => (n>0?"+":"") + n;
+  const P = v => (v ?? "―") + "%";
+  const pairHtml = (pair && pair.hasPairData) ? `
+    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(${nameA}内の内訳・サーブ/リターン${pair.scopeNote||""})</div>
+    ${compareGrid([
+      compareItem(`サービスキープ率`, `自分(${pair.selfServeGames}G)`, P(pair.selfHoldPct), `パートナー(${pair.partnerServeGames}G)`, P(pair.partnerHoldPct)),
+      compareItem("サーブ勝率", "自分", P(pair.selfServeWinPct), "パートナー", P(pair.partnerServeWinPct)),
+      compareItem("リターン勝率", "自分", P(pair.selfReturnWinPct), "パートナー", P(pair.partnerReturnWinPct)),
+    ], "pair-cmp")}
+  ` : "";
+  const actorHtml = (actor && actor.hasData) ? `
+    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(誰が取った/失ったか・watchで左右を押し分けた記録。どちらでもない: ${actor.unassigned}ポイント${actor.scopeNote||""})</div>
+    ${compareGrid([
+      compareItem("取ったポイント", "自分", actor.selfWon, "パートナー", actor.partnerWon),
+      compareItem("失ったポイント", "自分", actor.selfLost, "パートナー", actor.partnerLost),
+      compareItem("差し引き(取った−失った)", "自分", sgn(actor.selfWon-actor.selfLost), "パートナー", sgn(actor.partnerWon-actor.partnerLost)),
+    ], "pair-cmp")}
+  ` : "";
+  return `
+    ${compareGrid([
+      compareItem("取ったポイント数", nameA, st.totalPointsWonA, nameB, st.totalPointsWonB),
+      compareItem("サービスキープ率", nameA, P(st.serviceHoldPctA), nameB, P(st.serviceHoldPctB)),
+      compareItem("サーブ勝率", nameA, P(st.serveWinPctA), nameB, P(st.serveWinPctB)),
+      compareItem("リターン勝率", nameA, P(st.returnWinPctA), nameB, P(st.returnWinPctB)),
+    ])}
+    ${pairHtml}
+    ${actorHtml}
+    <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
+    ${compareGrid([
+      compareItem("BPセーブ率(サーブ時)", nameA, P(st.breakPointSavePctA), nameB, P(st.breakPointSavePctB)),
+      compareItem("BP変換率(リターン時)", nameA, P(st.breakPointConvertPctA), nameB, P(st.breakPointConvertPctB)),
+    ])}
+    <div class="desc" style="margin:14px 0 8px;">コートサイド別(デュース側/アド側)</div>
+    ${compareGrid([
+      compareItem("サーブ勝率 デュース側", nameA, P(st.serveWinPctA_deuce), nameB, P(st.serveWinPctB_deuce)),
+      compareItem("サーブ勝率 アド側", nameA, P(st.serveWinPctA_ad), nameB, P(st.serveWinPctB_ad)),
+      compareItem("リターン勝率 デュース側", nameA, P(st.returnWinPctA_deuce), nameB, P(st.returnWinPctB_deuce)),
+      compareItem("リターン勝率 アド側", nameA, P(st.returnWinPctA_ad), nameB, P(st.returnWinPctB_ad)),
+    ])}
+    <div class="desc" style="margin:14px 0 8px;">競った場面(デュースまでもつれたゲーム、${st.deuceGamesTotal}ゲーム中)</div>
+    ${compareGrid([
+      compareItem("デュースゲーム勝率", nameA, P(st.deuceGameWinPctA), nameB, P(st.deuceGameWinPctB)),
+    ])}
+  `;
+}
+
 // 詳細パネルで選んでいるセット(nullなら試合全体)。別の試合を開いたらリセットする
 let currentDetailMatchId = null;
 let currentDetailSetNumber = null;
@@ -1430,15 +1608,6 @@ function showMatchDetail(matchId, setNumber){
   const st = computeMatchStats(m, scopedSet);
   const pair = computePairStats(m, scopedSet);
   const actor = computeActorStats(m, scopedSet);
-  const sgn = n => (n>0?"+":"") + n;
-  const actorHtml = actor.hasData ? `
-    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(誰が取った/失ったか・watchで左右を押し分けた記録。どちらでもない: ${actor.unassigned}ポイント)</div>
-    ${compareGrid([
-      compareItem("取ったポイント", "自分", actor.selfWon, "パートナー", actor.partnerWon),
-      compareItem("失ったポイント", "自分", actor.selfLost, "パートナー", actor.partnerLost),
-      compareItem("差し引き(取った−失った)", "自分", sgn(actor.selfWon-actor.selfLost), "パートナー", sgn(actor.partnerWon-actor.partnerLost)),
-    ], "pair-cmp")}
-  ` : "";
   const panel = $("detailPanel");
   panel.style.display = "block";
 
@@ -1450,17 +1619,6 @@ function showMatchDetail(matchId, setNumber){
     </div>
   ` : "";
 
-  const pairHtml = pair.hasPairData ? `
-    <div class="desc" style="margin:14px 0 8px;">自分 vs パートナー(${m.nameA}内の内訳)</div>
-    <div class="stat-grid">
-      <div class="stat-chip"><div class="lbl">サービスキープ率(自分・${pair.selfServeGames}ゲーム)</div><div class="val a">${pair.selfHoldPct??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サービスキープ率(パートナー・${pair.partnerServeGames}ゲーム)</div><div class="val a">${pair.partnerHoldPct??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率(自分)</div><div class="val a">${pair.selfServeWinPct??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">サーブ勝率(パートナー)</div><div class="val a">${pair.partnerServeWinPct??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率(自分)</div><div class="val a">${pair.selfReturnWinPct??"―"}%</div></div>
-      <div class="stat-chip"><div class="lbl">リターン勝率(パートナー)</div><div class="val a">${pair.partnerReturnWinPct??"―"}%</div></div>
-    </div>
-  ` : "";
 
   panel.innerHTML = `
     <h3>${m.nameA} vs ${m.nameB} ${m.updatedAt ? "・"+new Date(m.updatedAt).toLocaleString("ja-JP") : ""}</h3>
@@ -1478,34 +1636,7 @@ function showMatchDetail(matchId, setNumber){
 
     ${setSelectorHtml}
     <div id="statsSectionStart" class="desc" style="margin:14px 0 6px;">${scopedSet==null ? "スタッツ(試合全体)" : `スタッツ(第${scopedSet}セットのみ)`}</div>
-    ${compareGrid([
-      compareItem("取ったポイント数", m.nameA, st.totalPointsWonA, m.nameB, st.totalPointsWonB),
-      compareItem("サービスキープ率", m.nameA, (st.serviceHoldPctA??"―")+"%", m.nameB, (st.serviceHoldPctB??"―")+"%"),
-      compareItem("サーブ勝率", m.nameA, (st.serveWinPctA??"―")+"%", m.nameB, (st.serveWinPctB??"―")+"%"),
-      compareItem("リターン勝率", m.nameA, (st.returnWinPctA??"―")+"%", m.nameB, (st.returnWinPctB??"―")+"%"),
-    ])}
-
-    ${pairHtml}
-    ${actorHtml}
-
-    <div class="desc" style="margin:14px 0 8px;">ブレークポイント(セーブ=サーブ中に守れた率、変換=リターン中にモノにできた率)</div>
-    ${compareGrid([
-      compareItem("BPセーブ率(サーブ時)", m.nameA, (st.breakPointSavePctA??"―")+"%", m.nameB, (st.breakPointSavePctB??"―")+"%"),
-      compareItem("BP変換率(リターン時)", m.nameA, (st.breakPointConvertPctA??"―")+"%", m.nameB, (st.breakPointConvertPctB??"―")+"%"),
-    ])}
-
-    <div class="desc" style="margin:14px 0 8px;">コートサイド別(デュース側/アド側)</div>
-    ${compareGrid([
-      compareItem("サーブ勝率 デュース側", m.nameA, (st.serveWinPctA_deuce??"―")+"%", m.nameB, (st.serveWinPctB_deuce??"―")+"%"),
-      compareItem("サーブ勝率 アド側", m.nameA, (st.serveWinPctA_ad??"―")+"%", m.nameB, (st.serveWinPctB_ad??"―")+"%"),
-      compareItem("リターン勝率 デュース側", m.nameA, (st.returnWinPctA_deuce??"―")+"%", m.nameB, (st.returnWinPctB_deuce??"―")+"%"),
-      compareItem("リターン勝率 アド側", m.nameA, (st.returnWinPctA_ad??"―")+"%", m.nameB, (st.returnWinPctB_ad??"―")+"%"),
-    ])}
-
-    <div class="desc" style="margin:14px 0 8px;">競った場面(デュースまでもつれたゲーム、${st.deuceGamesTotal}ゲーム中)</div>
-    ${compareGrid([
-      compareItem("デュースゲーム勝率", m.nameA, (st.deuceGameWinPctA??"―")+"%", m.nameB, (st.deuceGameWinPctB??"―")+"%"),
-    ])}
+    ${buildStatsBlocksHtml(m.nameA, m.nameB, st, pair, actor)}
 
     <button id="detailClose">閉じる</button>
   `;
