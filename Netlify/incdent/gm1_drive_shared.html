@@ -671,6 +671,81 @@
             margin-bottom: 5px;
         }
 
+
+
+
+        /* ===== 設定・フィルターをじゃまにしない (v32) ===== */
+        .sp-head-btns { display:flex; align-items:center; gap:4px; }
+        .sp-fold-btn { display:none; border:none; background:none; color:#667eea; cursor:pointer; font-size:1em; padding:4px 8px; border-radius:6px; }
+        .sp-fold-btn:hover { background:#eef0fb; }
+        .sp-float-chip { display:none; }
+        @media (min-width: 769px) {
+            /* 追従(sticky)をやめ、通常はページと一緒にスクロールする */
+            .settings-modal { position: relative !important; top: auto !important; }
+            .sp-fold-btn { display:inline-block; }
+            .settings-modal.folded .settings-body { display:none; }
+            .settings-modal.folded .settings-header { border-bottom:none; }
+            .settings-modal.folded .sp-fold-btn i { transform: rotate(180deg); }
+            /* スクロールして見えなくなったら右上に小さなボタンだけ出す */
+            .sp-float-chip { position:fixed; top:12px; right:16px; z-index:950; border:none; border-radius:20px; padding:8px 14px;
+                background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; font-weight:bold; font-size:0.85em;
+                box-shadow:0 4px 12px rgba(102,126,234,0.45); cursor:pointer; }
+            .sp-float-chip.visible { display:inline-flex; align-items:center; gap:6px; }
+            /* チップから呼び出した時だけ一時的に浮かせて表示 */
+            .settings-modal.floating { position: fixed !important; top: 10px !important; left: 50%; transform: translateX(-50%);
+                width: min(1100px, 96vw); max-height: 85vh; overflow-y: auto !important; z-index: 9000; box-shadow: 0 12px 40px rgba(0,0,0,0.25); background:#fff; }
+            .settings-modal.floating .close-settings { display:inline-block; border:none; background:none; font-size:1.5em; cursor:pointer; color:#888; }
+            .settings-modal.floating .sp-fold-btn { display:none; }
+            .settings-modal.floating .settings-body { display:flex !important; }
+            .sp-float-backdrop { display:none; position:fixed; inset:0; z-index:8999; background:rgba(0,0,0,0.15); }
+            .sp-float-backdrop.show { display:block; }
+        }
+        /* ===== 詳細ポップアップのリサイズ (v31) ===== */
+        .dv-box { position:relative; display:flex; flex-direction:column; width:500px; max-width:96vw; max-height:96vh; min-width:300px; min-height:240px; overflow:hidden; box-sizing:border-box; }
+        .dv-box .dv-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
+        .dv-box:not(.sized):not(.maxed) .dv-body { max-height:60vh; }
+        .dv-box.maxed { width:96vw !important; height:96vh !important; }
+        .dv-box .modal-header, .dv-box .modal-footer { flex:0 0 auto; }
+        .dv-grip { position:absolute; right:3px; bottom:3px; width:20px; height:20px; cursor:nwse-resize; touch-action:none; z-index:2;
+            background: linear-gradient(135deg, transparent 0 45%, #b0b7dd 45% 52%, transparent 52% 64%, #b0b7dd 64% 71%, transparent 71% 83%, #b0b7dd 83% 90%, transparent 90%); border-bottom-right-radius:10px; }
+        .dv-box.maxed .dv-grip { display:none; }
+        .dv-max-btn { border:none; background:none; color:#667eea; font-size:1.05em; cursor:pointer; padding:4px 6px; border-radius:6px; }
+        .dv-max-btn:hover { background:#eef0fb; }
+        body.dv-resizing { user-select:none; cursor:nwse-resize; }
+        /* ===== 経過タイムライン (v30) ===== */
+        .tl-wrap { margin-top:10px; padding:10px; background:#f8f9fa; border-radius:6px; }
+        .tl-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .tl-head .tl-title { font-weight:bold; color:#667eea; }
+        .tl-order-btn { font-size:0.75em; padding:2px 8px; border:1px solid #c7cdf0; background:#fff; color:#667eea; border-radius:10px; cursor:pointer; }
+        .tl-strip { position:relative; height:34px; margin:6px 8px 14px; }
+        .tl-strip-line { position:absolute; left:0; right:0; top:14px; height:6px; border-radius:3px; background:#dfe3f5; }
+        .tl-strip-action { position:absolute; top:14px; height:6px; border-radius:0 3px 3px 0; background:#b9c2f0; }
+        .tl-strip-dot { position:absolute; top:10px; width:14px; height:14px; margin-left:-7px; border-radius:50%; background:#667eea; border:2px solid #fff; box-shadow:0 0 0 1px #667eea; cursor:pointer; }
+        .tl-strip-dot:hover { transform:scale(1.3); }
+        .tl-strip-mark { position:absolute; top:6px; width:2px; height:22px; margin-left:-1px; background:#888; }
+        .tl-strip-label { position:absolute; top:28px; font-size:0.7em; color:#888; white-space:nowrap; transform:translateX(-50%); }
+        .tl-list { display:flex; flex-direction:column; }
+        .tl-list.desc { flex-direction:column-reverse; }
+        .tl-node { display:flex; gap:10px; align-items:flex-start; }
+        .tl-rail { position:relative; width:16px; flex:0 0 16px; align-self:stretch; }
+        .tl-rail::before { content:''; position:absolute; left:7px; top:0; bottom:0; width:2px; background:#d5daf3; }
+        .tl-bullet { position:relative; display:block; width:12px; height:12px; margin:6px 0 0 2px; border-radius:50%; background:#667eea; border:2px solid #fff; box-shadow:0 0 0 1px #667eea; }
+        .tl-node.milestone .tl-bullet { border-radius:2px; background:#fff; box-shadow:0 0 0 2px #888; }
+        .tl-node.milestone.start .tl-bullet { box-shadow:0 0 0 2px #e67e22; }
+        .tl-node.milestone.action .tl-bullet { box-shadow:0 0 0 2px #3498db; }
+        .tl-node.milestone.end .tl-bullet { box-shadow:0 0 0 2px #27ae60; background:#27ae60; }
+        .tl-node.milestone.today .tl-bullet { box-shadow:0 0 0 2px #e74c3c; }
+        .tl-body { flex:1; min-width:0; padding:3px 0; }
+        .tl-meta { font-size:0.78em; color:#888; display:flex; gap:8px; flex-wrap:wrap; }
+        .tl-day { color:#667eea; font-weight:bold; }
+        .tl-node.milestone .tl-label { font-size:0.85em; font-weight:bold; color:#555; }
+        .tl-card { margin-top:2px; padding:6px 8px; background:#fff; border-radius:4px; border-left:3px solid #667eea; font-size:0.9em; white-space:pre-wrap; word-break:break-word; }
+        .tl-node.flash .tl-card { animation: tlFlash 1.2s ease; }
+        @keyframes tlFlash { 0%{background:#fff3b0;} 100%{background:#fff;} }
+        .tl-gap { display:flex; gap:10px; align-items:center; }
+        .tl-gap .tl-rail::before { border-left:2px dashed #d5daf3; background:none; width:0; }
+        .tl-gap-label { font-size:0.72em; color:#aaa; }
+
         .date-view-comments {
             margin-top: 8px;
             background: #f9f9f9;
@@ -998,7 +1073,7 @@
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-chart-line"></i> 故障履歴ダッシュボード</h1>
-            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v29</span>
+            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v32</span>
                 <span id="headerSyncState" style="font-size:0.8em; margin-left:8px;"></span></p>
 
             <!-- データセット選択 -->
@@ -1043,11 +1118,16 @@
             <i class="fas fa-sliders-h"></i>
         </button>
 
+        <button type="button" class="sp-float-chip" id="settingsFloatChip" title="設定・フィルターをここに表示"><i class="fas fa-sliders-h"></i> 設定・フィルター</button>
+
         <div id="settingsModal" class="settings-modal">
             <div class="settings-content">
                 <div class="settings-header">
                     <h3><i class="fas fa-sliders-h"></i> 設定・フィルター</h3>
-                    <button class="close-settings" id="closeSettingsBtn">&times;</button>
+                    <div class="sp-head-btns">
+                        <button type="button" class="sp-fold-btn" id="foldSettingsBtn" title="たたむ / ひらく"><i class="fas fa-chevron-up"></i></button>
+                        <button class="close-settings" id="closeSettingsBtn">&times;</button>
+                    </div>
                 </div>
 
                 <div class="settings-body">
@@ -1382,14 +1462,17 @@
     </div>
 
     <div id="dateViewModal" class="modal-overlay">
-        <div class="modal" style="max-width: 500px;">
+        <div class="modal dv-box" id="dateViewBox">
             <div class="modal-header"
-                style="display:flex; justify-content:space-between; margin-bottom:15px; border-bottom:2px solid #667eea; padding-bottom:10px;">
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #667eea; padding-bottom:10px;">
                 <h3 id="dateViewTitle">詳細</h3>
-                <button class="close-modal" onclick="dashboardApp.closeDateViewModal()"
-                    style="border:none; background:none; font-size:1.5em; cursor:pointer;">&times;</button>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button type="button" class="dv-max-btn" id="dateViewMaxBtn" onclick="dashboardApp.toggleDateViewMax()" title="最大化 / 元に戻す"><i class="fas fa-expand"></i></button>
+                    <button class="close-modal" onclick="dashboardApp.closeDateViewModal()"
+                        style="border:none; background:none; font-size:1.5em; cursor:pointer;">&times;</button>
+                </div>
             </div>
-            <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+            <div class="modal-body dv-body">
                 <div id="dateViewContent"></div>
             </div>
             <div class="modal-footer" style="display:flex; justify-content:space-between; gap: 10px;">
@@ -1398,6 +1481,7 @@
                 </button>
                 <button class="btn btn-secondary" onclick="dashboardApp.closeDateViewModal()">閉じる</button>
             </div>
+            <div class="dv-grip" id="dateViewGrip" title="ドラッグでサイズ変更（ダブルクリックで元のサイズ）"></div>
         </div>
     </div>
 
@@ -1784,6 +1868,52 @@
 
                         if (openSettingsBtn) openSettingsBtn.addEventListener('click', () => settingsModal.classList.add('show'));
                         if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('show'));
+
+                        // ===== PC: 設定パネルをじゃまにしない (v32) =====
+                        (() => {
+                            const isPC = () => window.matchMedia('(min-width: 769px)').matches;
+                            const chip = document.getElementById('settingsFloatChip');
+                            const foldBtn = document.getElementById('foldSettingsBtn');
+                            const backdrop = document.createElement('div');
+                            backdrop.className = 'sp-float-backdrop';
+                            document.body.appendChild(backdrop);
+                            // 位置の目印（浮かせている間もパネルの元位置を監視するため）
+                            const marker = document.createElement('div');
+                            marker.style.height = '1px';
+                            settingsModal.parentNode.insertBefore(marker, settingsModal.nextSibling);
+                            const placeholder = document.createElement('div');
+                            settingsModal.parentNode.insertBefore(placeholder, settingsModal);
+
+                            try { if (localStorage.getItem('settingsFolded') === '1') settingsModal.classList.add('folded'); } catch (e) {}
+                            if (foldBtn) foldBtn.addEventListener('click', () => {
+                                const f = settingsModal.classList.toggle('folded');
+                                try { localStorage.setItem('settingsFolded', f ? '1' : '0'); } catch (e) {}
+                            });
+
+                            const closeFloat = () => {
+                                if (!settingsModal.classList.contains('floating')) return;
+                                settingsModal.classList.remove('floating');
+                                placeholder.style.height = '';
+                                backdrop.classList.remove('show');
+                            };
+                            const openFloat = () => {
+                                // 元の場所が詰まらないよう高さを確保
+                                placeholder.style.height = settingsModal.offsetHeight + 'px';
+                                settingsModal.classList.add('floating');
+                                backdrop.classList.add('show');
+                            };
+                            chip.addEventListener('click', () => settingsModal.classList.contains('floating') ? closeFloat() : openFloat());
+                            backdrop.addEventListener('click', closeFloat);
+                            if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeFloat);
+                            document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFloat(); });
+
+                            const io = new IntersectionObserver(entries => {
+                                const visible = entries[0].isIntersecting;
+                                chip.classList.toggle('visible', !visible && isPC());
+                                if (visible) closeFloat();
+                            });
+                            io.observe(marker);
+                        })();
 
                         // トップに戻るボタン
                         const scrollToTopBtn = document.getElementById('scrollToTopBtn');
@@ -3351,6 +3481,7 @@
                     closeCommentModal() { this.elements.commentModal.classList.remove('show'); },
 
                     openDateViewModal(dateString, incidents) {
+                        this.initDateViewResize();
                         this.elements.dateViewTitle.textContent = `${dateString} のアクティビティ`;
                         const container = this.elements.dateViewContent;
                         container.innerHTML = '';
@@ -3359,12 +3490,174 @@
                         this.elements.dateViewModal.classList.add('show');
                     },
                     openIncidentViewModal(incident) {
+                        this.initDateViewResize();
+                        if (this.timelineDesc === undefined) { try { this.timelineDesc = localStorage.getItem('timelineDesc') === '1'; } catch (e) { this.timelineDesc = false; } }
                         this.currentViewingIncident = incident; // 現在表示中のインシデントを記憶
                         this.elements.dateViewTitle.textContent = `詳細情報`;
                         const container = this.elements.dateViewContent;
                         container.innerHTML = '';
                         container.appendChild(this.createIncidentDetailElement(incident));
                         this.elements.dateViewModal.classList.add('show');
+                    },
+
+
+                    // ===== 詳細ポップアップのリサイズ (v31) =====
+                    initDateViewResize() {
+                        if (this._dvInit) return; this._dvInit = true;
+                        const box = document.getElementById('dateViewBox');
+                        const grip = document.getElementById('dateViewGrip');
+                        if (!box || !grip) return;
+                        const clampW = w => Math.max(300, Math.min(window.innerWidth * 0.96, w));
+                        const clampH = h => Math.max(240, Math.min(window.innerHeight * 0.96, h));
+                        try {
+                            const sv = JSON.parse(localStorage.getItem('dateViewSize') || 'null');
+                            if (sv && sv.w && sv.h) { box.style.width = sv.w + 'px'; box.style.height = sv.h + 'px'; box.classList.add('sized'); }
+                            if (localStorage.getItem('dateViewMax') === '1') this.setDateViewMax(true);
+                        } catch (e) {}
+                        let st = null;
+                        grip.addEventListener('pointerdown', ev => {
+                            if (box.classList.contains('maxed')) return;
+                            ev.preventDefault();
+                            const r = box.getBoundingClientRect();
+                            st = { x: ev.clientX, y: ev.clientY, w: r.width, h: r.height };
+                            grip.setPointerCapture(ev.pointerId);
+                            document.body.classList.add('dv-resizing');
+                        });
+                        grip.addEventListener('pointermove', ev => {
+                            if (!st) return;
+                            // 中央寄せなので、つまみが指に追従するよう差分を2倍する
+                            const w = clampW(st.w + (ev.clientX - st.x) * 2);
+                            const h = clampH(st.h + (ev.clientY - st.y) * 2);
+                            box.style.width = w + 'px'; box.style.height = h + 'px';
+                            box.classList.add('sized');
+                        });
+                        const end = () => {
+                            if (!st) return; st = null;
+                            document.body.classList.remove('dv-resizing');
+                            const r = box.getBoundingClientRect();
+                            try { localStorage.setItem('dateViewSize', JSON.stringify({ w: Math.round(r.width), h: Math.round(r.height) })); } catch (e) {}
+                        };
+                        grip.addEventListener('pointerup', end);
+                        grip.addEventListener('pointercancel', end);
+                        grip.addEventListener('dblclick', () => {
+                            box.style.width = ''; box.style.height = ''; box.classList.remove('sized');
+                            try { localStorage.removeItem('dateViewSize'); } catch (e) {}
+                        });
+                    },
+                    setDateViewMax(on) {
+                        const box = document.getElementById('dateViewBox');
+                        const btn = document.getElementById('dateViewMaxBtn');
+                        if (!box) return;
+                        box.classList.toggle('maxed', on);
+                        if (btn) btn.innerHTML = on ? '<i class="fas fa-compress"></i>' : '<i class="fas fa-expand"></i>';
+                        try { localStorage.setItem('dateViewMax', on ? '1' : '0'); } catch (e) {}
+                    },
+                    toggleDateViewMax() {
+                        const box = document.getElementById('dateViewBox');
+                        this.setDateViewMax(!(box && box.classList.contains('maxed')));
+                    },
+                    // ===== 経過タイムライン (v30) =====
+                    buildIncidentTimelineHtml(inc) {
+                        const coms = (this.comments[inc.id] || []).filter(c => c && c.date);
+                        const pad = n => String(n).padStart(2, '0');
+                        const fmtD = d => `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+                        const fmtDT = d => `${fmtD(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                        const dayStart = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+                        const start = this.parseLocalDate(inc.startDate);
+                        if (!start) return '';
+                        const dayNo = d => Math.round((dayStart(d) - start) / 86400000) + 1; // 開始日=1日目
+                        const wd = ['日', '月', '火', '水', '木', '金', '土'];
+
+                        const ev = [];
+                        ev.push({ kind: 'start', date: start, label: '発生（開始）' });
+                        if (inc.actionStartDate) {
+                            const a = this.parseLocalDate(inc.actionStartDate);
+                            if (a) ev.push({ kind: 'action', date: a, label: '処置開始' });
+                        }
+                        coms.forEach(c => ev.push({ kind: 'comment', date: new Date(c.date), c }));
+                        const endD = inc.endDate ? this.parseLocalDate(inc.endDate) : null;
+                        if (endD) {
+                            const e = new Date(endD); e.setHours(23, 59, 59, 0);
+                            ev.push({ kind: 'end', date: e, label: '終了' });
+                        } else {
+                            ev.push({ kind: 'today', date: new Date(), label: '今日（進行中）' });
+                        }
+                        // 同時刻なら マイルストーン→コメント の順
+                        const rank = { start: 0, action: 1, comment: 2, end: 3, today: 3 };
+                        ev.sort((x, y) => (x.date - y.date) || (rank[x.kind] - rank[y.kind]));
+
+                        // --- 横ストリップ（全期間に対する位置）---
+                        const t0 = Math.min(start.getTime(), ...ev.map(e => e.date.getTime()));
+                        const t1 = Math.max(...ev.map(e => e.date.getTime()));
+                        const span = Math.max(1, t1 - t0);
+                        const pct = d => ((d.getTime() - t0) / span * 100).toFixed(2);
+                        let strip = '<div class="tl-strip"><div class="tl-strip-line"></div>';
+                        const act = ev.find(e => e.kind === 'action');
+                        const last = ev[ev.length - 1];
+                        if (act) strip += `<div class="tl-strip-action" style="left:${pct(act.date)}%; width:${(pct(last.date) - pct(act.date)).toFixed(2)}%;"></div>`;
+                        ev.forEach(e => {
+                            if (e.kind === 'comment') {
+                                const tip = `${fmtDT(e.date)}（${dayNo(e.date)}日目）\n${e.c.text}`;
+                                strip += `<div class="tl-strip-dot" style="left:${pct(e.date)}%;" title="${this.esc(tip)}" onclick="dashboardApp.focusTimelineNode('${inc.id}','${e.c.id}')"></div>`;
+                            } else {
+                                strip += `<div class="tl-strip-mark" style="left:${pct(e.date)}%;"></div>`;
+                            }
+                        });
+                        strip += `<div class="tl-strip-label" style="left:0; transform:none;">${fmtD(start)}</div>`;
+                        strip += `<div class="tl-strip-label" style="left:auto; right:0; transform:none;">${fmtD(last.date)}</div>`;
+                        strip += '</div>';
+
+                        // --- 縦タイムライン ---
+                        let list = '';
+                        ev.forEach((e, i) => {
+                            if (i > 0) {
+                                const prev = ev[i - 1];
+                                const gapDays = Math.round((dayStart(e.date) - dayStart(prev.date)) / 86400000);
+                                const h = gapDays <= 0 ? 4 : Math.min(64, 8 + Math.round(12 * Math.log2(gapDays + 1)));
+                                list += `<div class="tl-gap" style="height:${h}px;"><div class="tl-rail"></div>${gapDays > 0 ? `<span class="tl-gap-label">↕ ${gapDays}日</span>` : ''}</div>`;
+                            }
+                            const dn = dayNo(e.date);
+                            const dayTxt = dn >= 1 ? `${dn}日目` : `開始${1 - dn}日前`;
+                            if (e.kind === 'comment') {
+                                list += `<div class="tl-node comment" data-tl="${inc.id}-${e.c.id}">
+                                    <div class="tl-rail"><span class="tl-bullet"></span></div>
+                                    <div class="tl-body">
+                                        <div class="tl-meta"><span class="tl-day">${dayTxt}</span><span>${fmtDT(e.date)}（${wd[e.date.getDay()]}）</span></div>
+                                        <div class="tl-card">${this.esc(e.c.text)}</div>
+                                    </div>
+                                </div>`;
+                            } else {
+                                const dTxt = e.kind === 'today' ? fmtD(e.date) : `${fmtD(e.date)}（${wd[e.date.getDay()]}）`;
+                                list += `<div class="tl-node milestone ${e.kind}">
+                                    <div class="tl-rail"><span class="tl-bullet"></span></div>
+                                    <div class="tl-body">
+                                        <div class="tl-meta"><span class="tl-label">${e.label}</span><span class="tl-day">${dayTxt}</span><span>${dTxt}</span></div>
+                                    </div>
+                                </div>`;
+                            }
+                        });
+
+                        const desc = !!this.timelineDesc;
+                        return `<div class="tl-wrap">
+                            <div class="tl-head">
+                                <span class="tl-title"><i class="fas fa-stream"></i> 経過タイムライン（コメント ${coms.length}件）</span>
+                                <button type="button" class="tl-order-btn" onclick="dashboardApp.toggleTimelineOrder(this)">${desc ? '▲ 新しい順' : '▼ 古い順'}</button>
+                            </div>
+                            ${coms.length ? strip : '<div style="color:#999; font-size:0.85em; margin-bottom:6px;">コメントはありません</div>'}
+                            <div class="tl-list${desc ? ' desc' : ''}">${list}</div>
+                        </div>`;
+                    },
+                    toggleTimelineOrder(btn) {
+                        this.timelineDesc = !this.timelineDesc;
+                        try { localStorage.setItem('timelineDesc', this.timelineDesc ? '1' : '0'); } catch (e) {}
+                        document.querySelectorAll('.tl-list').forEach(l => l.classList.toggle('desc', this.timelineDesc));
+                        document.querySelectorAll('.tl-order-btn').forEach(b => b.textContent = this.timelineDesc ? '▲ 新しい順' : '▼ 古い順');
+                    },
+                    focusTimelineNode(incId, comId) {
+                        const n = document.querySelector(`.tl-node[data-tl="${incId}-${comId}"]`);
+                        if (!n) return;
+                        n.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        n.classList.remove('flash'); void n.offsetWidth; n.classList.add('flash');
                     },
                     createIncidentDetailElement(inc) {
                         const color = this.getColorForType(inc.category);
@@ -3386,25 +3679,8 @@
                         // 処置開始日の表示
                         const actionStartDisp = inc.actionStartDate ? `<br>処置開始: ${inc.actionStartDate}` : '';
 
-                        // コメントHTML
-                        let commentHtml = '';
-                        const coms = this.comments[inc.id];
-                        if (coms && coms.length > 0) {
-                            const sortedComs = [...coms].sort((a, b) => new Date(b.date) - new Date(a.date)); // 新しい順
-                            commentHtml = '<div class="date-view-comments" style="margin-top:10px; padding:10px; background:#f8f9fa; border-radius:5px;">';
-                            commentHtml += `<div style="font-weight:bold; margin-bottom:8px; color:#667eea;"><i class="fas fa-comments"></i> コメント (${sortedComs.length}件)</div>`;
-                            sortedComs.forEach(c => {
-                                const d = new Date(c.date);
-                                const dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-                                commentHtml += `<div style="margin-bottom:8px; padding:6px; background:white; border-radius:3px; border-left:3px solid #667eea;">
-                                    <div style="color:#666; font-size:0.85em; margin-bottom:2px;">${dateStr}</div>
-                                    <div style="font-size:0.9em;">${this.esc(c.text)}</div>
-                                </div>`;
-                            });
-                            commentHtml += '</div>';
-                        } else {
-                            commentHtml = '<div style="margin-top:10px; padding:10px; background:#f8f9fa; border-radius:5px; color:#999; text-align:center;">コメントはありません</div>';
-                        }
+                        // 経過タイムライン
+                        const commentHtml = this.buildIncidentTimelineHtml(inc);
 
                         div.innerHTML = `
                             <div style="margin-bottom:15px;">
