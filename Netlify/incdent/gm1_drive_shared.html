@@ -674,6 +674,18 @@
 
 
 
+
+        /* ===== v33 ===== */
+        .inc-name-link { cursor:pointer; color:inherit; border-bottom:1px dashed transparent; }
+        .inc-name-link i { font-size:0.75em; color:#667eea; opacity:0.45; margin-left:4px; }
+        .inc-name-link:hover { color:#667eea; border-bottom-color:#667eea; }
+        .inc-name-link:hover i { opacity:1; }
+        .tl-edit-btn { margin-left:auto; border:none; background:none; color:#667eea; cursor:pointer; font-size:1em; padding:0 4px; border-radius:4px; opacity:0.55; }
+        .tl-node:hover .tl-edit-btn { opacity:1; }
+        .tl-edit-btn:hover { background:#eef0fb; }
+        .tl-del-btn { margin-left:0; color:#dc3545; }
+        .tl-del-btn:hover { background:#fdecee; }
+        #commentModal { z-index: 10050; } /* 詳細ポップアップの上に出す */
         /* ===== 設定・フィルターをじゃまにしない (v32) ===== */
         .sp-head-btns { display:flex; align-items:center; gap:4px; }
         .sp-fold-btn { display:none; border:none; background:none; color:#667eea; cursor:pointer; font-size:1em; padding:4px 8px; border-radius:6px; }
@@ -1073,7 +1085,7 @@
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-chart-line"></i> 故障履歴ダッシュボード</h1>
-            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v32</span>
+            <p>インシデントの記録・分析・可視化 <span style="font-size:0.8em; color:#999; margin-left:6px;">v33</span>
                 <span id="headerSyncState" style="font-size:0.8em; margin-left:8px;"></span></p>
 
             <!-- データセット選択 -->
@@ -3443,15 +3455,33 @@
                         const removed = list[idx];
                         const ds = this.currentDataset;
                         this.comments[incId] = list.filter(c => c.id !== comId);
-                        this.saveData(); this.renderAll();
+                        this.saveData(); this.renderAll(); this.refreshDateViewIfOpen();
                         this.showUndo('コメントを削除しました', () => {
                             const target = ds === this.currentDataset ? this.comments : (this.datasets[ds] && this.datasets[ds].comments);
                             if (!target) return;
                             if (!target[incId]) target[incId] = [];
                             target[incId].splice(Math.min(idx, target[incId].length), 0, removed);
-                            this.saveData(); this.renderAll();
+                            this.saveData(); this.renderAll(); this.refreshDateViewIfOpen();
                             this.showStatus('削除を取り消しました');
                         });
+                    },
+                    openIncidentViewById(id) {
+                        const inc = this.incidents.find(i => String(i.id) === String(id));
+                        if (inc) this.openIncidentViewModal(inc);
+                    },
+                    // 詳細ポップアップが開いていれば、スクロール位置を保ったまま描き直す
+                    refreshDateViewIfOpen() {
+                        if (!this.elements.dateViewModal.classList.contains('show') || !this._dvLast) return;
+                        const body = this.elements.dateViewContent.closest('.dv-body') || this.elements.dateViewContent.parentNode;
+                        const top = body.scrollTop;
+                        const L = this._dvLast;
+                        const find = id => this.incidents.find(i => String(i.id) === String(id));
+                        if (L.type === 'incident') {
+                            const inc = find(L.id); if (inc) this.openIncidentViewModal(inc);
+                        } else {
+                            this.openDateViewModal(L.dateString, L.ids.map(find).filter(Boolean));
+                        }
+                        body.scrollTop = top;
                     },
                     openEditCommentModal(incId, comId) {
                         const c = this.comments[incId].find(x => x.id === comId);
@@ -3474,6 +3504,7 @@
                                 if (dVal) list[idx].date = new Date(dVal).toISOString();
                                 list[idx].text = this.elements.commentEditText.value;
                                 this.saveData(); this.renderAll();
+                                this.refreshDateViewIfOpen();
                             }
                         }
                         this.closeCommentModal();
@@ -3482,6 +3513,7 @@
 
                     openDateViewModal(dateString, incidents) {
                         this.initDateViewResize();
+                        this._dvLast = { type: 'date', dateString, ids: incidents.map(i => i.id) };
                         this.elements.dateViewTitle.textContent = `${dateString} のアクティビティ`;
                         const container = this.elements.dateViewContent;
                         container.innerHTML = '';
@@ -3491,6 +3523,7 @@
                     },
                     openIncidentViewModal(incident) {
                         this.initDateViewResize();
+                        this._dvLast = { type: 'incident', id: incident.id };
                         if (this.timelineDesc === undefined) { try { this.timelineDesc = localStorage.getItem('timelineDesc') === '1'; } catch (e) { this.timelineDesc = false; } }
                         this.currentViewingIncident = incident; // 現在表示中のインシデントを記憶
                         this.elements.dateViewTitle.textContent = `詳細情報`;
@@ -3622,7 +3655,7 @@
                                 list += `<div class="tl-node comment" data-tl="${inc.id}-${e.c.id}">
                                     <div class="tl-rail"><span class="tl-bullet"></span></div>
                                     <div class="tl-body">
-                                        <div class="tl-meta"><span class="tl-day">${dayTxt}</span><span>${fmtDT(e.date)}（${wd[e.date.getDay()]}）</span></div>
+                                        <div class="tl-meta"><span class="tl-day">${dayTxt}</span><span>${fmtDT(e.date)}（${wd[e.date.getDay()]}）</span><button type="button" class="tl-edit-btn" title="このコメントを編集" onclick="dashboardApp.openEditCommentModal('${inc.id}','${e.c.id}')"><i class="fas fa-pen"></i> 編集</button><button type="button" class="tl-edit-btn tl-del-btn" title="このコメントを削除（取り消し可）" onclick="dashboardApp.deleteComment('${inc.id}','${e.c.id}')"><i class="fas fa-trash"></i></button></div>
                                         <div class="tl-card">${this.esc(e.c.text)}</div>
                                     </div>
                                 </div>`;
@@ -4300,7 +4333,7 @@
                                 const actionStartDisp = inc.actionStartDate ? `<br>処置開始: ${inc.actionStartDate}` : '';
 
                                 tr.innerHTML = `
-                                    <td>${this.esc(inc.name)}</td>
+                                    <td><span class="inc-name-link" onclick="dashboardApp.openIncidentViewById('${inc.id}')" title="詳細・経過タイムラインを表示">${this.esc(inc.name)} <i class="fas fa-stream"></i></span></td>
                                     <td><span style="background:${color}; color:#fff; padding:2px 8px; border-radius:10px; font-size:0.8em;">${this.esc(inc.category)}</span></td>
                                     <td>${this.esc(inc.action)}</td>
                                     <td style="font-size:0.9em;">${inc.startDate}${actionStartDisp}<br>~ ${endDisp}<br>${commentDisplay}</td>
