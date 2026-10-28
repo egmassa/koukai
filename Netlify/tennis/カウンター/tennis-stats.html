@@ -708,7 +708,7 @@ function computePairPointTags(match){
 </script>
 <script>
 /* ====================== Google Drive 連携(既存アプリと同じ設定) ====================== */
-const APP_VERSION = "2026-10-11.3"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
+const APP_VERSION = "2026-10-28.1"; // 更新のたびに日付+連番で上げる(画面隅に小さく表示、動作には影響なし)
 // 読み込みはGoogleログインでDriveを直接読む(速い)。保存はwatchと同じApps Script経由(合言葉)。
 // (読み込みもApps Script経由にしてみたが、1回数十秒〜かかることがあり遅すぎたため戻した)
 const GOOGLE_CLIENT_ID = "685349056175-l3toka6dkj38pj86gskai3jue2hd5nli.apps.googleusercontent.com";
@@ -742,6 +742,9 @@ function saveGoogleToken(token, expiresInSec){
 function clearGoogleToken(){ try{ localStorage.removeItem(GTOKEN_KEY); }catch(e){} }
 
 let tokenClient = null, pendingTokenCb = null;
+// 前回「見つかりません」だった時はtrue。次の取得ではアカウント選択画面を必ず出す
+// (PCで複数のGoogleアカウントにログインしていると、別アカウントの許可が保存されてしまうことがあるため)
+let forceAccountSelect = false;
 // 覚えている許可が有効ならそれを返し、無ければGoogleの画面で取り直す。
 // prompt:""なので、一度許可していれば同意画面は出ず、アカウント選択だけ(または一瞬で閉じる)になる。
 // ※画面を出す必要がある時は、ボタンを押した操作の中から呼ばないとポップアップがブロックされる
@@ -763,7 +766,8 @@ function getAccessToken(cb){
         error_callback: ()=>{ const done = pendingTokenCb; pendingTokenCb = null; done && done(null); }
       });
     }
-    tokenClient.requestAccessToken({prompt: ""});
+    tokenClient.requestAccessToken({prompt: forceAccountSelect ? "select_account" : ""});
+    forceAccountSelect = false;
   });
 }
 async function driveFindFile(name, token){
@@ -776,6 +780,16 @@ async function driveFindFile(name, token){
   if(!res.ok) throw new Error(`Drive検索エラー ${res.status}`);
   const data = await res.json();
   return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+// 今の許可がどのGoogleアカウントのものかを調べる(エラー表示用。失敗しても空文字)
+async function driveAccountEmail(token){
+  try{
+    const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)",
+      { headers:{ Authorization:`Bearer ${token}` } });
+    if(!res.ok) return "";
+    const d = await res.json();
+    return (d.user && d.user.emailAddress) || "";
+  }catch(e){ return ""; }
 }
 async function driveGetContent(fileId, token){
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -954,7 +968,14 @@ function loadFromDrive(interactive){
     if(!token){ toast2("⚠️ Googleへの接続に失敗しました", true); return; }
     try{
       const fileId = await driveFindFile(DATA_FILENAME, token);
-      if(!fileId){ toast2("⚠️ Drive上にデータファイルが見つかりません", true); return; }
+      if(!fileId){
+        // 別アカウントの許可を覚えている可能性が高いので、許可を捨てて次回はアカウントを選び直させる
+        const email = await driveAccountEmail(token);
+        clearGoogleToken();
+        forceAccountSelect = true;
+        toast2(`⚠️ ${email ? email + " の" : ""}Drive上にデータファイルが見つかりません。もう一度「Driveから読み込む」を押すと、別のアカウントを選べます`, true);
+        return;
+      }
       const data = await driveGetContent(fileId, token);
       const matches = (data && data.matches) || [];
       loadedFromDriveFileId = fileId; // Driveから読み込んだ印。以後の編集はApps Script経由で書き戻せる
