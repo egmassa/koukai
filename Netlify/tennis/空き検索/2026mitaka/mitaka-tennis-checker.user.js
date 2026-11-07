@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.0.4
+// @version      5.1.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -10,6 +10,8 @@
 // @grant        GM_setValue
 // @connect      yoyaku-mitaka.jp
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/egmassa/koukai/main/Netlify/tennis/%E7%A9%BA%E3%81%8D%E6%A4%9C%E7%B4%A2/2026mitaka/mitaka-tennis-checker.user.js
+// @downloadURL  https://raw.githubusercontent.com/egmassa/koukai/main/Netlify/tennis/%E7%A9%BA%E3%81%8D%E6%A4%9C%E7%B4%A2/2026mitaka/mitaka-tennis-checker.user.js
 // ==/UserScript==
 
 (function () {
@@ -128,8 +130,10 @@
   // 選択した日付を、サイト本体の「日付選択→予約へ進む」と同じAPIに直接渡し、
   // 時間帯選択画面（予約の一歩手前）へ新しいタブで飛ばす。
   // ※facilityDetail()のgoBookingTime()と同じエンドポイント・パラメータ形式を利用。
-  async function jumpToBooking(ti, dateStr) {
-    const t = TARGETS[ti];
+  // opts.sameTab: 新しいタブではなく今のタブで開く(空き監視ページからの自動ジャンプ用。
+  // ボタンを押していない自動処理から window.open するとポップアップブロックされるため)
+  async function jumpToBooking(ti, dateStr, opts = {}) {
+    const t = typeof ti === 'object' ? ti : TARGETS[ti];
     if (!t) return;
     const csrfMeta = document.querySelector('meta[name="csrf-token"]');
     if (!csrfMeta) {
@@ -169,7 +173,8 @@
         // 前回別施設の中身が出てしまわないよう、キャッシュ避けのパラメータを付ける
         const sep = data.redirect_url.includes('?') ? '&' : '?';
         const bustedUrl = `${data.redirect_url}${sep}_ts=${Date.now()}`;
-        window.open(bustedUrl, '_blank');
+        if (opts.sameTab) location.href = bustedUrl;
+        else window.open(bustedUrl, '_blank');
       } else {
         alert((data && data.message) || '時間帯選択画面への遷移に失敗しました（すでに埋まった可能性があります）。');
       }
@@ -1690,9 +1695,38 @@
     });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
+  // ============================================================
+  // 空き監視ページ(m-court-watch)からのジャンプ
+  //   https://yoyaku-mitaka.jp/reservation#cw-jump=134_2026-11-11
+  // で開かれたら、その施設・その日の時間帯選択画面へ自動で進む
+  // ============================================================
+  function handleWatchJump() {
+    const m = location.hash.match(/cw-jump=(\d+)_(\d{4}-\d{2}-\d{2})/);
+    if (!m) return;
+    const roomId = Number(m[1]), dateStr = m[2];
+    // 戻る・再読み込みで何度も飛ばないよう、先にアドレスから消す
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* 無視 */ }
+    const t = TARGETS.find((x) => x.roomId === roomId) || DEFAULT_TARGETS.find((x) => x.roomId === roomId);
+    if (!t) {
+      alert(`コートチェッカーに登録されていない施設です(room_id: ${roomId})。⚙設定で追加してください。`);
+      return;
+    }
+    const note = document.createElement('div');
+    note.textContent = `${t.name} ${dateStr.slice(5).replace('-', '/')} の予約画面へ移動中…`;
+    note.style.cssText = 'position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:2147483647;' +
+      'background:#1565c0;color:#fff;padding:10px 16px;border-radius:10px;font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+    document.body.appendChild(note);
+    jumpToBooking(t, dateStr, { sameTab: true }).finally(() => setTimeout(() => note.remove(), 4000));
+  }
+
+  function start() {
     init();
+    handleWatchJump();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
   }
 })();
