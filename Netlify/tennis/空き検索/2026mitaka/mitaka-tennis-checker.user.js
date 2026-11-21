@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.2.0
+// @version      5.3.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -30,6 +30,10 @@
     { facilityId: 42, roomId: 146, name: '第七中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
   ];
   const STORAGE_KEY = 'mtc_targets_v1';
+  // 既定の施設のうち、もう一覧に出した(または自分で消した)ものの roomId。
+  // 新しく既定に加わった施設だけを、一度だけ自動で足すために使う(消した施設は戻さない)
+  const DEFAULTS_SEEN_KEY = 'mtc_defaults_seen_v1';
+  const BASELINE_SEEN = [37, 24, 134, 144]; // 5.2.0 より前の既定の施設
 
   function gmGet(key, defVal) {
     if (typeof GM_getValue === 'function') return GM_getValue(key, defVal);
@@ -51,14 +55,27 @@
   function loadTargets() {
     const saved = gmGet(STORAGE_KEY, null);
     if (Array.isArray(saved) && saved.length > 0) {
-      return saved.map((t) => {
+      const list = saved.map((t) => {
         if (t.excludeCourts !== undefined) return { enabled: true, ...t };
         // 過去バージョンの保存データにはexcludeCourtsが無いため、
         // roomIdが一致する既定値があればそれを補完し、無ければ除外なしにする
         const match = DEFAULT_TARGETS.find((d) => d.roomId === t.roomId);
         return { enabled: true, excludeCourts: match ? match.excludeCourts.slice() : [], ...t };
       });
+      // 新しく既定に加わった施設を、一度だけ足す(自分で消した施設は戻さない)
+      const seen = gmGet(DEFAULTS_SEEN_KEY, null) || BASELINE_SEEN;
+      let added = false;
+      DEFAULT_TARGETS.forEach((d) => {
+        if (!seen.includes(d.roomId) && !list.some((t) => t.roomId === d.roomId)) {
+          list.push({ ...d, excludeCourts: d.excludeCourts.slice() });
+          added = true;
+        }
+      });
+      gmSet(DEFAULTS_SEEN_KEY, DEFAULT_TARGETS.map((d) => d.roomId));
+      if (added) gmSet(STORAGE_KEY, list);
+      return list;
     }
+    gmSet(DEFAULTS_SEEN_KEY, DEFAULT_TARGETS.map((d) => d.roomId));
     return DEFAULT_TARGETS.map((t) => ({ ...t, excludeCourts: t.excludeCourts.slice() }));
   }
   function saveTargets(targets) {
@@ -76,7 +93,7 @@
   };
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
-  const SCRIPT_VERSION = '5.2.0'; // ヘッダー表示用。@versionと必ず一致させること
+  const SCRIPT_VERSION = '5.3.0'; // ヘッダー表示用。@versionと必ず一致させること
   const MONTHS_AHEAD = 3;
   // サーバーが応答しないまま「読み込み中...」で止まらないよう、通信ごとに時間制限を設ける
   const FETCH_TIMEOUT_MS = 30000;
