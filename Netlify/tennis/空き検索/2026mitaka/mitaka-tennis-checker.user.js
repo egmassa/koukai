@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.1.1
+// @version      5.2.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -25,6 +25,9 @@
     { facilityId: 3,  roomId: 24,  name: '大沢総合グラウンド',     note: '人工芝6面', enabled: true, excludeCourts: [6] },
     { facilityId: 36, roomId: 134, name: '第一中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
     { facilityId: 41, roomId: 144, name: '第六中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 4,  roomId: 34,  name: '大沢野川グラウンド',     note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 39, roomId: 141, name: '第四中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 42, roomId: 146, name: '第七中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
   ];
   const STORAGE_KEY = 'mtc_targets_v1';
 
@@ -73,7 +76,7 @@
   };
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
-  const SCRIPT_VERSION = '5.1.1'; // ヘッダー表示用。@versionと必ず一致させること
+  const SCRIPT_VERSION = '5.2.0'; // ヘッダー表示用。@versionと必ず一致させること
   const MONTHS_AHEAD = 3;
   // サーバーが応答しないまま「読み込み中...」で止まらないよう、通信ごとに時間制限を設ける
   const FETCH_TIMEOUT_MS = 30000;
