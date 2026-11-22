@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         三鷹市テニスコート空き状況チェッカー
 // @namespace    https://yoyaku-mitaka.jp/
-// @version      5.3.0
+// @version      5.4.0
 // @description  三鷹市生涯学習施設等予約システムのテニスコート空き状況をカレンダー表示（複数施設選択・時間帯/曜日フィルタ・タップ対応・LINE共有・予約直前画面へのジャンプ）
 // @author       you
 // @match        https://yoyaku-mitaka.jp/*
@@ -21,13 +21,13 @@
   // 監視対象施設・コート設定（⚙設定画面から追加・編集・取得ON/OFF可、保存される）
   // ============================================================
   const DEFAULT_TARGETS = [
-    { facilityId: 5,  roomId: 37,  name: '新川テニスコート',       note: 'クレー4面', enabled: true, excludeCourts: [4] },
-    { facilityId: 3,  roomId: 24,  name: '大沢総合グラウンド',     note: '人工芝6面', enabled: true, excludeCourts: [6] },
     { facilityId: 36, roomId: 134, name: '第一中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
-    { facilityId: 41, roomId: 144, name: '第六中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
-    { facilityId: 4,  roomId: 34,  name: '大沢野川グラウンド',     note: 'テニスコート', enabled: true, excludeCourts: [] },
     { facilityId: 39, roomId: 141, name: '第四中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 41, roomId: 144, name: '第六中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
     { facilityId: 42, roomId: 146, name: '第七中学校',             note: 'テニスコート', enabled: true, excludeCourts: [] },
+    { facilityId: 3,  roomId: 24,  name: '大沢総合グラウンド',     note: '人工芝6面', enabled: true, excludeCourts: [6] },
+    { facilityId: 5,  roomId: 37,  name: '新川テニスコート',       note: 'クレー4面', enabled: true, excludeCourts: [4] },
+    { facilityId: 4,  roomId: 34,  name: '大沢野川グラウンド',     note: 'テニスコート', enabled: true, excludeCourts: [] },
   ];
   const STORAGE_KEY = 'mtc_targets_v1';
   // 既定の施設のうち、もう一覧に出した(または自分で消した)ものの roomId。
@@ -73,13 +73,31 @@
       });
       gmSet(DEFAULTS_SEEN_KEY, DEFAULT_TARGETS.map((d) => d.roomId));
       if (added) gmSet(STORAGE_KEY, list);
-      return list;
+      return reorderTargets(list);
     }
     gmSet(DEFAULTS_SEEN_KEY, DEFAULT_TARGETS.map((d) => d.roomId));
     return DEFAULT_TARGETS.map((t) => ({ ...t, excludeCourts: t.excludeCourts.slice() }));
   }
   function saveTargets(targets) {
     gmSet(STORAGE_KEY, targets);
+  }
+
+  // 表示の順(第一・第四・第六・第七中学校、大沢総合、新川、大沢野川。それ以外は後ろ)
+  const ORDER_IDS = [134, 141, 144, 146, 24, 37, 34];
+  function reorderTargets(list) {
+    const rank = (t) => { const i = ORDER_IDS.indexOf(t.roomId); return i < 0 ? ORDER_IDS.length : i; };
+    const sorted = list.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i);
+    if (sorted.every((x, k) => x.i === k)) return list;
+    // 選択中の施設は番号(並び順)で保存しているので、並べ替えに合わせて付け替える
+    const fs = gmGet('mtc_filter_state_v1', null);
+    if (fs && Array.isArray(fs.selectedTi)) {
+      const newIndex = new Map(sorted.map((x, k) => [x.i, k]));
+      fs.selectedTi = fs.selectedTi.map((i) => (newIndex.has(i) ? newIndex.get(i) : i)).sort((a, b) => a - b);
+      gmSet('mtc_filter_state_v1', fs);
+    }
+    const out = sorted.map((x) => x.t);
+    gmSet(STORAGE_KEY, out);
+    return out;
   }
 
   let TARGETS = loadTargets();
@@ -93,7 +111,7 @@
   };
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
-  const SCRIPT_VERSION = '5.3.0'; // ヘッダー表示用。@versionと必ず一致させること
+  const SCRIPT_VERSION = '5.4.0'; // ヘッダー表示用。@versionと必ず一致させること
   const MONTHS_AHEAD = 3;
   // サーバーが応答しないまま「読み込み中...」で止まらないよう、通信ごとに時間制限を設ける
   const FETCH_TIMEOUT_MS = 30000;
